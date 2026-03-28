@@ -1,0 +1,28 @@
+.cache
+node_modules/
+dist/
+
+# Ignore everything inside the "generated" folder
+packager/generated/
+
+# Ignore packager/resources.json
+packager/resources.json
+packager/.venv
+
+# Python (running the packager without the venv activated)
+__pycache__/
+*.py[cod]
+
+# Logs & secrets
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.local
+.env.*.local
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*~
