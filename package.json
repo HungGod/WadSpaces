@@ -10,8 +10,8 @@
     "build": "ELECTRON_RUN_AS_NODE= electron-builder"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.wadbrowser.app",

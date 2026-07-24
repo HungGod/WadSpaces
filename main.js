@@ -16,6 +16,7 @@ const {
 } = require("electron");
 
 const { loadConfig, slugify, formatWindowTitle } = require("./shared/config");
+const { isAuthFlowUrl, screenUrl } = require("./shared/login-screening");
 
 let isQuitting = false;
 
@@ -29,7 +30,7 @@ let lastDocked = null;
 let resizeState = null;
 
 function parseArgv(argv) {
-  const out = { configPath: "", url: "" };
+  const out = { configPath: "", url: "", iconPath: "" };
   /** Electron passes the app directory as the first arg after the binary (same as process.argv[1]); never treat it as a URL. */
   let skipPositionalAsUrl = "";
   try {
@@ -56,6 +57,15 @@ function parseArgv(argv) {
       out.url = a.slice("--url=".length);
       continue;
     }
+    if (a === "--icon" || a === "-I") {
+      out.iconPath = argv[i + 1] || "";
+      i++;
+      continue;
+    }
+    if (a.startsWith("--icon=")) {
+      out.iconPath = a.slice("--icon=".length);
+      continue;
+    }
     if (!a.startsWith("-") && !out.url && a !== ".") {
       try {
         const resolved = path.resolve(a);
@@ -72,6 +82,26 @@ function normalizeUrl(url) {
   if (!url) return "about:blank";
   if (/^(https?:|file:|about:)/i.test(url)) return url;
   return `https://${url}`;
+}
+
+const GATE_PAGE = path.join(__dirname, "renderer", "gate.html");
+
+/** Load renderer/gate.html in one of its states ("blocked" | "complete"). */
+function loadGatePage(webContents, state, extra = {}) {
+  const query = { state };
+  for (const [k, v] of Object.entries(extra)) {
+    if (v) query[k] = String(v);
+  }
+  return webContents.loadFile(GATE_PAGE, { query }).catch(() => {});
+}
+
+/**
+ * True when a window.open features string asks for an explicitly sized popup (the classic OAuth /
+ * picker window). Chromium only reports `new-window` disposition when features are present, so this
+ * distinguishes real popups from plain "open in a new tab" targets.
+ */
+function hasSizedFeatures(features) {
+  return typeof features === "string" && /\b(width|height|innerwidth|innerheight|popup)\b/i.test(features);
 }
 
 function ensureDir(p) {
@@ -114,6 +144,60 @@ class TabManager {
     this.activeId = null;
     this.nextId = 1;
     this.activeView = null;
+    this.lastLinkStatus = "";
+    /**
+     * Set to { authHosts: Set<string> } for windows opened by the url-redirect handler. Such a
+     * window exists to finish one sign-in, so navigation is held inside that flow — otherwise
+     * approving any site's /login page would hand back an unrestricted browser.
+     */
+    this.authFlow = null;
+  }
+
+  /** Redirect-mode windows are single-purpose: no new tabs, no detaching, no docking. */
+  get isConfined() {
+    return !!this.authFlow;
+  }
+
+  /** Stop confining and show the end-of-flow screen in place of the page. */
+  _endAuthFlow(tab) {
+    if (!tab || tab.view.webContents.isDestroyed()) return;
+    loadGatePage(tab.view.webContents, "complete");
+  }
+
+  /** Keep a popup opened mid-flow (e.g. "Sign in with Google") inside the same flow. */
+  _confinePopup(childWin) {
+    if (!childWin || childWin.isDestroyed()) return;
+    const cwc = childWin.webContents;
+    const guard = (event, targetUrl) => {
+      if (isAuthFlowUrl(targetUrl, this.authFlow)) return;
+      event.preventDefault();
+      if (!childWin.isDestroyed()) childWin.close();
+    };
+    cwc.on("will-navigate", guard);
+    cwc.on("will-redirect", guard);
+    cwc.setWindowOpenHandler(() => ({ action: "deny" }));
+  }
+
+  /**
+   * Show the hovered-link URL bottom-left, Chrome-style. The overlay is injected into the page
+   * because the BrowserView covers the whole window below the chrome, so an element in the chrome
+   * renderer would be occluded by it. Deduped and event-driven: nothing runs unless the target
+   * URL actually changes.
+   */
+  _sendLinkStatus(url) {
+    if (this.win.isDestroyed()) return;
+    const next = String(url || "");
+    if (next === this.lastLinkStatus) return;
+    this.lastLinkStatus = next;
+    this.win.webContents.send("app:linkStatus", { url: next });
+    const wc = this.activeWebContents();
+    if (!wc || wc.isDestroyed()) return;
+    const safe = JSON.stringify(next);
+    wc
+      .executeJavaScript(
+        `(function(){if(!document.body)return;var u=${safe};var el=window.__wadLinkStatusEl;if(!el||!el.isConnected){el=document.createElement('div');el.id='wad-link-status';document.body.appendChild(el);window.__wadLinkStatusEl=el;}el.textContent=u;el.style.cssText=u?'position:fixed;left:8px;bottom:8px;z-index:2147483647;background:rgba(0,0,0,0.82);color:#bdc1c6;padding:4px 8px;border-radius:4px;font:11px system-ui,sans-serif;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;':'display:none;';})();`
+      )
+      .catch(() => {});
   }
 
   _sendState() {
@@ -170,6 +254,31 @@ class TabManager {
   _wireWebContents(tab) {
     const wc = tab.view.webContents;
     wc.setMaxListeners(64);
+
+    if (this.authFlow) {
+      const guardNav = (event, targetUrl) => {
+        if (isAuthFlowUrl(targetUrl, this.authFlow)) return;
+        event.preventDefault();
+        this._endAuthFlow(tab);
+      };
+      wc.on("will-navigate", guardNav);
+      wc.on("will-redirect", guardNav);
+      wc.setWindowOpenHandler(({ url }) => {
+        if (!isAuthFlowUrl(url, this.authFlow)) return { action: "deny" };
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            width: 520,
+            height: 660,
+            autoHideMenuBar: true,
+            webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+          },
+        };
+      });
+      wc.on("did-create-window", (childWin) => this._confinePopup(childWin));
+    } else {
+      wc.setWindowOpenHandler((details) => this._handleWindowOpen(tab, details));
+    }
     wc.on("page-title-updated", (_evt, title) => {
       tab.title = title || tab.title;
       this._sendState();
@@ -180,12 +289,10 @@ class TabManager {
     wc.on("did-start-loading", navChanged);
     wc.on("did-stop-loading", navChanged);
 
-    wc.on("did-finish-load", () => {
-      wc
-        .executeJavaScript(
-          `(function(){window.__wadLinkHref=null;document.addEventListener("mouseover",function(e){var a=e.target.closest("a");window.__wadLinkHref=(a&&a.href)?a.href:null;},true);document.addEventListener("mouseout",function(e){if(!e.relatedTarget||!document.contains(e.relatedTarget))window.__wadLinkHref=null;else{var a=e.target.closest("a");var toA=e.relatedTarget?e.relatedTarget.closest("a"):null;if(!a||a!==toA)window.__wadLinkHref=null;}},true);})();`
-        )
-        .catch(() => {});
+    /** Chromium already tracks the hovered link target; use its event instead of polling the page. */
+    wc.on("update-target-url", (_evt, url) => {
+      if (tab.id !== this.activeId) return;
+      this._sendLinkStatus(url);
     });
 
     wc.on("context-menu", (_event, params) => {
@@ -198,10 +305,12 @@ class TabManager {
         template.push({ type: "separator" });
       }
       if (params.linkURL) {
-        template.push({
-          label: "Open link in new tab",
-          click: () => this.newTab(params.linkURL, true),
-        });
+        if (!this.isConfined) {
+          template.push({
+            label: "Open link in new tab",
+            click: () => this.newTab(params.linkURL, true),
+          });
+        }
         template.push({
           label: "Copy link",
           click: () => clipboard.writeText(params.linkURL),
@@ -231,7 +340,7 @@ class TabManager {
       }
       if ((input.control || input.meta) && (input.key === "t" || input.key === "T")) {
         event.preventDefault();
-        this.newTab(this.homeUrl, true);
+        if (!this.isConfined) this.newTab(this.homeUrl, true);
         return;
       }
       if ((input.control || input.meta) && (input.key === "w" || input.key === "W")) {
@@ -241,7 +350,32 @@ class TabManager {
     });
   }
 
+  /**
+   * Route window.open()/target="_blank" into the current tab instead of native popup windows. Sites
+   * like the Google Admin console open themselves in a new "window"; without a handler Electron
+   * spawns a bare BrowserWindow (a popup) for it. Genuine sized popups — OAuth/pickers that talk back
+   * through window.opener — keep being real windows so those flows still work.
+   */
+  _handleWindowOpen(tab, { url, disposition, features }) {
+    if (this.isConfined) return { action: "deny" };
+    if (disposition === "save-to-disk") return { action: "allow" };
+    if (disposition === "new-window" && hasSizedFeatures(features)) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          autoHideMenuBar: true,
+          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+        },
+      };
+    }
+    if (!url || url === "about:blank") return { action: "deny" };
+    const wc = tab.view.webContents;
+    if (!wc.isDestroyed()) wc.loadURL(normalizeUrl(url));
+    return { action: "deny" };
+  }
+
   newTab(url, makeActive) {
+    if (this.isConfined && this.tabs.length > 0) return null;
     const id = String(this.nextId++);
     const view = new BrowserView({
       webPreferences: {
@@ -263,6 +397,8 @@ class TabManager {
     const next = this.tabs.find((t) => t.id === id);
     if (!next) return;
     if (this.activeId === id) return;
+    // Clear while the outgoing tab is still active, so its overlay does not stay stuck on screen.
+    this._sendLinkStatus("");
     this.activeId = id;
     this._attachView(next.view);
     this._sendState();
@@ -344,7 +480,7 @@ class TabManager {
   }
 }
 
-function setupDownloads(win, appName, getPanelWebContents) {
+function setupDownloads(win, appName, getPanelWebContents, onIpc, onSession) {
   const downloadDir = makeDownloadDir(appName);
   const downloads = []; // [{id, filename, receivedBytes, totalBytes, state, path}]
   const activeItems = new Map(); // id -> item
@@ -357,7 +493,7 @@ function setupDownloads(win, appName, getPanelWebContents) {
     if (pw && !pw.isDestroyed()) pw.send("downloads:state", { downloads });
   };
 
-  session.defaultSession.on("will-download", (_event, item) => {
+  onSession("will-download", (_event, item) => {
     const id = String(nextId++);
     const filename = item.getFilename();
     const savePath = path.join(downloadDir, filename);
@@ -389,17 +525,17 @@ function setupDownloads(win, appName, getPanelWebContents) {
     });
   });
 
-  ipcMain.on("downloads:openFolder", (_evt, payload) => {
+  onIpc("downloads:openFolder", (_evt, payload) => {
     const p = payload && payload.path ? payload.path : "";
     if (p) shell.showItemInFolder(p);
   });
-  ipcMain.on("downloads:remove", (_evt, payload) => {
+  onIpc("downloads:remove", (_evt, payload) => {
     const id = payload && payload.id ? payload.id : "";
     const idx = downloads.findIndex((d) => d.id === id);
     if (idx >= 0) downloads.splice(idx, 1);
     send();
   });
-  ipcMain.on("downloads:cancel", (_evt, payload) => {
+  onIpc("downloads:cancel", (_evt, payload) => {
     const id = payload && payload.id ? payload.id : "";
     const item = activeItems.get(id);
     if (item) item.cancel();
@@ -408,8 +544,25 @@ function setupDownloads(win, appName, getPanelWebContents) {
   return { downloadDir, send };
 }
 
-function createWindowInternal(appName, homeUrl, iconPath) {
+function createWindowInternal(appName, homeUrl, iconPath, options = {}) {
   const iconDataUrl = getIconDataUrl(iconPath);
+  /** Present only for url-redirect launches; see TabManager#authFlow. */
+  const authFlow = options.authFlow || null;
+
+  /**
+   * Listeners owned by this window. Every one is torn down in win.on("closed") — without this,
+   * each opened window permanently adds another full set, so every IPC message from any renderer
+   * gets dispatched to N dead handlers and the closed window's tabs are never garbage collected.
+   */
+  const ownedListeners = [];
+  const onIpc = (channel, handler) => {
+    ownedListeners.push({ emitter: ipcMain, channel, handler });
+    ipcMain.on(channel, handler);
+  };
+  const onSession = (channel, handler) => {
+    ownedListeners.push({ emitter: session.defaultSession, channel, handler });
+    session.defaultSession.on(channel, handler);
+  };
 
   let chromeHeight = 44;
   const getChromeHeight = () => chromeHeight;
@@ -445,7 +598,7 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     query: { title: windowTitle },
   });
 
-  const downloadsCtl = setupDownloads(win, appName, getPanelWebContents);
+  const downloadsCtl = setupDownloads(win, appName, getPanelWebContents, onIpc, onSession);
   const positionDownloadsOverlay = () => {
     if (!downloadsOverlayView) return;
     const [w] = win.getContentSize();
@@ -465,8 +618,17 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     }
   };
   const tabs = new TabManager(win, homeUrl, downloadsCtl.downloadDir, getChromeHeight, ensureOverlayOnTop);
+  // Must be set before the first tab is created so its webContents are wired with the guards.
+  tabs.authFlow = authFlow;
 
-  win.on("resize", () => {
+  /**
+   * "resize" fires per pixel of drag. Coalesce to one layout pass per frame — setTopBrowserView in
+   * particular restacks the view tree and is far too expensive to run on every event.
+   */
+  let resizeFlushScheduled = false;
+  const flushResizeLayout = () => {
+    resizeFlushScheduled = false;
+    if (win.isDestroyed()) return;
     const tab = tabs.tabs.find((t) => t.id === tabs.activeId);
     if (!tab) return;
     const [w, h] = win.getContentSize();
@@ -474,6 +636,11 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     tab.view.setBounds({ x: 0, y: ch, width: w, height: Math.max(0, h - ch) });
     positionDownloadsOverlay();
     ensureOverlayOnTop();
+  };
+  win.on("resize", () => {
+    if (resizeFlushScheduled) return;
+    resizeFlushScheduled = true;
+    setTimeout(flushResizeLayout, 16);
   });
 
   win.on("maximize", () => win.webContents.send("win:state", { maximized: true, fullscreen: win.isFullScreen() }));
@@ -501,7 +668,19 @@ function createWindowInternal(appName, homeUrl, iconPath) {
   });
 
   win.on("closed", () => {
-    clearInterval(linkStatusInterval);
+    for (const { emitter, channel, handler } of ownedListeners) {
+      try {
+        emitter.removeListener(channel, handler);
+      } catch (_e) {}
+    }
+    ownedListeners.length = 0;
+    for (const tab of tabs.tabs) {
+      try {
+        tab.view.webContents.destroy();
+      } catch (_e) {}
+    }
+    tabs.tabs = [];
+    tabs.activeView = null;
     if (downloadsOverlayView && !downloadsOverlayView.webContents.isDestroyed()) {
       try {
         win.removeBrowserView(downloadsOverlayView);
@@ -514,60 +693,61 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     windowRegistry.delete(win.id);
   });
 
-  windowRegistry.set(win.id, { win, tabs, homeUrl, appName, iconPath });
+  windowRegistry.set(win.id, { win, tabs, homeUrl, appName, iconPath, authFlow });
 
   const guard = () => win.isDestroyed();
 
-  ipcMain.on("tabs:new", (event, payload) => {
+  onIpc("tabs:new", (event, payload) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
+    if (authFlow) return;
     const url = payload && payload.url ? payload.url : "";
     tabs.newTab(url || homeUrl, true);
   });
-  ipcMain.on("tabs:select", (event, payload) => {
+  onIpc("tabs:select", (event, payload) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     tabs.selectTab(payload && payload.id);
   });
-  ipcMain.on("tabs:close", (event, payload) => {
+  onIpc("tabs:close", (event, payload) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     tabs.closeTab(payload && payload.id);
   });
-  ipcMain.on("tabs:reorder", (event, payload) => {
+  onIpc("tabs:reorder", (event, payload) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     tabs.reorderTabs((payload && payload.ids) || []);
   });
 
-  ipcMain.on("nav:back", (event) => {
+  onIpc("nav:back", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     tabs.goBack();
   });
-  ipcMain.on("nav:forward", (event) => {
+  onIpc("nav:forward", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     tabs.goForward();
   });
-  ipcMain.on("nav:reload", (event) => {
+  onIpc("nav:reload", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     tabs.reload();
   });
-  ipcMain.on("nav:home", (event) => {
+  onIpc("nav:home", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     tabs.home();
   });
 
-  ipcMain.on("ui:downloads", (event) => {
+  onIpc("ui:downloads", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     downloadsCtl.send();
   });
 
-  ipcMain.on("ui:downloadsPanelOpen", (event) => {
+  onIpc("ui:downloadsPanelOpen", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     if (downloadsOverlayView && !downloadsOverlayView.webContents.isDestroyed()) {
@@ -591,7 +771,7 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     downloadsOverlayView.webContents.loadFile(path.join(__dirname, "renderer", "downloads-panel.html"));
     downloadsOverlayView.webContents.once("did-finish-load", () => downloadsCtl.send());
   });
-  ipcMain.on("ui:downloadsPanelClose", (event) => {
+  onIpc("ui:downloadsPanelClose", (event) => {
     if (guard()) return;
     const fromMain = event.sender === win.webContents;
     const fromOverlay = downloadsOverlayView && downloadsOverlayView.webContents === event.sender;
@@ -607,7 +787,7 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     if (fromOverlay) win.webContents.send("ui:downloadsPanelClosed");
   });
 
-  ipcMain.on("ui:chromeHeight", (event, payload) => {
+  onIpc("ui:chromeHeight", (event, payload) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     const h = payload && typeof payload.height === "number" ? payload.height : 0;
@@ -623,12 +803,12 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     }
   });
 
-  ipcMain.on("win:minimize", (event) => {
+  onIpc("win:minimize", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     win.minimize();
   });
-  ipcMain.on("win:maximizeToggle", (event) => {
+  onIpc("win:maximizeToggle", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     if (win.isFullScreen()) {
@@ -643,7 +823,7 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     }
     win.webContents.send("win:state", { maximized: win.isMaximized(), fullscreen: win.isFullScreen() });
   });
-  ipcMain.on("win:resizeStart", (event) => {
+  onIpc("win:resizeStart", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     const point = screen.getCursorScreenPoint();
@@ -654,7 +834,7 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     };
   });
 
-  ipcMain.on("win:close", (event) => {
+  onIpc("win:close", (event) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
     const windows = BrowserWindow.getAllWindows();
@@ -666,9 +846,10 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     }
   });
 
-  ipcMain.on("tabs:detach", (event, payload) => {
+  onIpc("tabs:detach", (event, payload) => {
     if (guard()) return;
     if (event.sender !== win.webContents) return;
+    if (authFlow) return;
     const id = payload && payload.id ? payload.id : "";
     if (!id) return;
     if (lastDocked && win.id === lastDocked.sourceWinId && id === lastDocked.sourceTabId) {
@@ -686,32 +867,53 @@ function createWindowInternal(appName, homeUrl, iconPath) {
     }
   });
 
-  const linkStatusInterval = setInterval(() => {
-    if (win.isDestroyed()) return;
-    const tab = tabs.tabs.find((t) => t.id === tabs.activeId);
-    if (!tab) return;
-    const wc = tab.view.webContents;
-    wc
-      .executeJavaScript("window.__wadLinkHref || null")
-      .then((href) => {
-        const safe = JSON.stringify(String(href || ""));
-        wc
-          .executeJavaScript(
-            `(function(){if(!document.body)return;var u=${safe};var el=window.__wadLinkStatusEl;if(!el){el=document.createElement('div');el.id='wad-link-status';document.body.appendChild(el);window.__wadLinkStatusEl=el;}el.textContent=u;el.style.cssText=u?'position:fixed;left:8px;bottom:8px;z-index:2147483647;background:rgba(0,0,0,0.82);color:#bdc1c6;padding:4px 8px;border-radius:4px;font:11px system-ui,sans-serif;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;':'display:none;';})();`
-          )
-          .catch(() => {});
-      })
-      .catch(() => {});
-  }, 200);
-
   win.webContents.on("did-finish-load", () => {
     win.setTitle(windowTitle);
-    win.webContents.send("app:config", { appName, homeUrl, appIconDataUrl: iconDataUrl });
+    win.webContents.send("app:config", {
+      appName,
+      homeUrl,
+      appIconDataUrl: iconDataUrl,
+      redirectMode: !!authFlow,
+    });
     win.webContents.send("win:state", { maximized: win.isMaximized(), fullscreen: win.isFullScreen() });
     tabs.newTab(homeUrl, true);
     downloadsCtl.send();
   });
 
+  return win;
+}
+
+/**
+ * A url-redirect launch is `--url` with no `--config`: the link came from outside (the generated
+ * url-redirect .desktop registers WadBrowser as the system http/https handler), so its destination
+ * is arbitrary and must be screened. A `--config` launch is a packaged mini-app whose URL was
+ * chosen deliberately at package time, and is trusted as-is.
+ */
+function isRedirectLaunch(argv) {
+  return !!argv.url && !argv.configPath;
+}
+
+/**
+ * Small framed window explaining why a redirected link was rejected. Deliberately has no preload
+ * and no browsing chrome — it can never navigate anywhere.
+ */
+function createBlockedWindow(url, reason, iconPath) {
+  const win = new BrowserWindow({
+    width: 620,
+    height: 460,
+    resizable: false,
+    title: formatWindowTitle("WadBrowser"),
+    icon: iconPath || undefined,
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+    },
+  });
+  win.setMenu(null);
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  loadGatePage(win.webContents, "blocked", { url, reason });
   return win;
 }
 
@@ -721,8 +923,26 @@ function createWindow(initialUrl) {
   const appName = cfg.app_name || "WadBrowser";
   const baseHomeUrl = normalizeUrl(argv.url || cfg.app_url || "about:blank");
   const homeUrl = normalizeUrl(initialUrl || baseHomeUrl);
-  const iconPath = cfg.icon_path && fs.existsSync(cfg.icon_path) ? cfg.icon_path : null;
-  return createWindowInternal(appName, homeUrl, iconPath);
+  // Packaged apps carry their icon in config.json; the url-redirect launcher (no config)
+  // passes it via --icon so its window/taskbar image matches the generated icon.
+  const iconPath =
+    cfg.icon_path && fs.existsSync(cfg.icon_path)
+      ? cfg.icon_path
+      : argv.iconPath && fs.existsSync(argv.iconPath)
+        ? argv.iconPath
+        : null;
+
+  // initialUrl means this is a detached tab from an existing window, not a fresh launch.
+  if (initialUrl || !isRedirectLaunch(argv)) {
+    return createWindowInternal(appName, homeUrl, iconPath);
+  }
+
+  const verdict = screenUrl(homeUrl);
+  if (!verdict.allowed) return createBlockedWindow(homeUrl, verdict.reason, iconPath);
+
+  return createWindowInternal(appName, homeUrl, iconPath, {
+    authFlow: { authHosts: new Set(verdict.authHosts.filter(Boolean)) },
+  });
 }
 
 /** When launched with --config (packaged mini-apps), give each app a distinct WM_CLASS and userData so the taskbar/dock shows separate entries (Linux/Wayland). */
@@ -808,6 +1028,8 @@ app.whenReady().then(() => {
     if (globalTabDrag.sourceWin.isDestroyed()) return;
     const sourceState = windowRegistry.get(globalTabDrag.sourceWin.id);
     if (!sourceState) return;
+    // Never let a docking drag move a page into or out of a screened sign-in window.
+    if (dropState.authFlow || sourceState.authFlow) return;
     const tab = sourceState.tabs.tabs.find((t) => t.id === globalTabDrag.sourceTabId);
     if (!tab) return;
     let url;

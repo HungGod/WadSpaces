@@ -254,70 +254,228 @@ def round_corners(img: Image.Image, radius: int) -> Image.Image:
     rounded.paste(img, (0, 0), mask)
     return rounded
 
+def _otsu_threshold(hist: list[int]) -> tuple[int, float, float]:
+    """
+    Otsu's method: find the 0-255 cutoff that maximally separates a luminance
+    histogram into two classes. Returns (threshold, mean_below, mean_above).
+    Adapts per-icon instead of using a fixed cutoff, so mid-gray logos and
+    low-contrast icons split correctly.
+    """
+    total = sum(hist)
+    if total == 0:
+        return (128, 0.0, 255.0)
+
+    sum_all = sum(i * hist[i] for i in range(256))
+    w_b = 0.0          # weight (pixel count) of the "below" class
+    sum_b = 0.0        # weighted luminance sum of the "below" class
+    max_var = -1.0
+    threshold = 128
+    m_below = 0.0
+    m_above = 255.0
+
+    for t in range(256):
+        w_b += hist[t]
+        if w_b == 0:
+            continue
+        w_f = total - w_b
+        if w_f == 0:
+            break
+        sum_b += t * hist[t]
+        mean_b = sum_b / w_b
+        mean_f = (sum_all - sum_b) / w_f
+        var_between = w_b * w_f * (mean_b - mean_f) ** 2
+        if var_between > max_var:
+            max_var = var_between
+            threshold = t
+            m_below, m_above = mean_b, mean_f
+
+    return (threshold, m_below, m_above)
+
+
+def _border_ring_mask(size: tuple[int, int], bbox: tuple[int, int, int, int],
+                      frac: float = 0.14) -> Image.Image:
+    """Mask ('L') selecting a ring just inside the content bounding box.
+    The logo is (almost always) centered, so this ring samples the background."""
+    w, h = size
+    x0, y0, x1, y1 = bbox
+    inset_x = max(1, int((x1 - x0) * frac))
+    inset_y = max(1, int((y1 - y0) * frac))
+    mask = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(mask)
+    d.rectangle([x0, y0, x1 - 1, y1 - 1], fill=255)
+    d.rectangle([x0 + inset_x, y0 + inset_y, x1 - 1 - inset_x, y1 - 1 - inset_y], fill=0)
+    return mask
+
+
+def _erode(mask: Image.Image, px: int) -> Image.Image:
+    """Morphological erosion by `px` pixels (iterated 3×3 MinFilter — cheap and
+    kernel-size safe compared to one huge MinFilter window)."""
+    out = mask
+    for _ in range(max(0, px)):
+        out = out.filter(ImageFilter.MinFilter(3))
+    return out
+
+
+def _plate_band(alpha: Image.Image, inset_px: int) -> Image.Image:
+    """'L' mask of a ring `inset_px` wide following the *actual* opaque shape's
+    perimeter. Unlike a rectangular bbox ring this hugs a disc/rounded-rect plate,
+    so it samples the real background color instead of the transparent corners."""
+    opaque = alpha.point(lambda a: 255 if a > 128 else 0)
+    core = _erode(opaque, inset_px)
+    return ImageChops.subtract(opaque, core)
+
+
+def _plate_mark_alpha(icon_rgba: Image.Image, alpha: Image.Image,
+                      bg_rgb: tuple[int, int, int]) -> Image.Image:
+    """Extract the mark sitting on a solid plate by keying on *color distance* from
+    the plate background, not luminance. Luminance thresholding under-captures a
+    colored-but-light region — e.g. the yellow arm of Google's 'G' (luma ~186) sits
+    close to a white plate (255) and comes out fuzzy — whereas its max per-channel
+    distance from white is large, so it's kept as solidly as the blue/red/green arms."""
+    rgb = icon_rgba.convert("RGB")
+    solid = Image.new("RGB", rgb.size, tuple(int(round(c)) for c in bg_rgb))
+    r, g, b = ImageChops.difference(rgb, solid).split()   # abs per-channel diff
+    dist = ImageChops.lighter(ImageChops.lighter(r, g), b)  # max-channel distance
+
+    # Soft ramp on distance so anti-aliased edges stay smooth without fuzzing fills.
+    thr, width = 44.0, 26.0
+    lut = []
+    for p in range(256):
+        t = min(1.0, max(0.0, (p - thr) / width + 0.5))
+        lut.append(int(round((t * t * (3.0 - 2.0 * t)) * 255)))
+    strength = dist.point(lut)
+    # Respect transparency: nothing outside the opaque content becomes ink.
+    return ImageChops.multiply(strength, alpha)
+
+
+def _smoothstep_lut(threshold: float, width: float, dark_fg: bool) -> list[int]:
+    """
+    Build a 256-entry lookup table mapping luminance -> foreground alpha (0-255).
+    A soft ramp centered on `threshold` (rather than a hard cut) keeps anti-aliased
+    edges instead of jagged ones. `dark_fg` picks the polarity: foreground is the
+    side of the threshold opposite the background.
+    """
+    width = max(1.0, width)
+    lut = []
+    for p in range(256):
+        if dark_fg:
+            t = (threshold - p) / width + 0.5   # darker than threshold -> foreground
+        else:
+            t = (p - threshold) / width + 0.5   # lighter than threshold -> foreground
+        t = min(1.0, max(0.0, t))
+        s = t * t * (3.0 - 2.0 * t)             # smoothstep
+        lut.append(int(round(s * 255)))
+    return lut
+
+
+def _otsu_silhouette(icon_rgba: Image.Image, alpha: Image.Image,
+                     bg_luma: float) -> Image.Image:
+    """Threshold the opaque content into a foreground mark. Otsu picks the cutoff;
+    `bg_luma` (the sampled background luminance) sets polarity so the foreground is
+    always the class the background is NOT in. Alpha gates the result."""
+    gray = icon_rgba.convert("RGB").convert("L")
+    content_mask = alpha.point(lambda a: 255 if a > 128 else 0)
+
+    threshold, mean_below, mean_above = _otsu_threshold(gray.histogram(content_mask))
+    dark_fg = bg_luma > threshold
+    separation = mean_above - mean_below
+    width = min(40.0, max(8.0, separation * 0.20))
+
+    lut = _smoothstep_lut(threshold, width, dark_fg)
+    strength = gray.point(lut)
+    # Respect transparency: nothing outside the opaque content becomes ink.
+    return ImageChops.multiply(strength, alpha)
+
+
+def _build_silhouette_alpha(icon_rgba: Image.Image) -> Image.Image:
+    """
+    Produce an 'L' alpha mask (255 = paint black, 0 = leave transparent) that is
+    the icon's silhouette, robust to light-on-dark vs dark-on-light sources.
+
+    Strategy (first match wins):
+      * Light plate: a logo centered on an opaque light disc/rounded-rect with
+        transparent corners (e.g. Google's "G" on a white circle). The alpha
+        channel is the *whole plate*, so using it directly would silhouette the
+        plate too. Instead threshold out the plate to keep only the mark, and
+        trace a thin border around the plate so the container reads as a border.
+      * Solid raster (full opaque bitmap): find the background color from the
+        border ring, threshold with Otsu, keep the foreground side.
+      * Transparent-background logo: the alpha channel already *is* the
+        silhouette — use it directly (most reliable, anti-aliased for free).
+    """
+    alpha = icon_rgba.getchannel("A")
+    bbox = icon_rgba.getbbox()            # tight box of non-transparent content
+    if bbox is None:
+        return Image.new("L", icon_rgba.size, 0)
+
+    # Opaque coverage inside the content box tells us solid-raster vs transparent-logo.
+    box_w = max(1, bbox[2] - bbox[0])
+    box_h = max(1, bbox[3] - bbox[1])
+    box_area = box_w * box_h
+    opaque_mask = alpha.point(lambda a: 255 if a > 250 else 0)
+    opaque_count = sum(opaque_mask.crop(bbox).getdata()) / 255.0
+    opaque_fraction = opaque_count / box_area
+
+    ring = _border_ring_mask(icon_rgba.size, bbox)
+    mean_border_alpha = ImageStat.Stat(alpha, ring).mean[0]
+
+    gray = icon_rgba.convert("RGB").convert("L")
+
+    # --- Light plate? Sample the true opaque perimeter (not the bbox ring, which a
+    #     circular plate contaminates with transparent corners). A plate is a
+    #     uniformly LIGHT ring that does NOT fill its bounding box (transparent
+    #     corners → opaque_fraction < 0.90; a full raster is handled below). ---
+    min_dim = min(box_w, box_h)
+    band = _plate_band(alpha, inset_px=max(6, int(min_dim * 0.03)))
+    band_hist = gray.histogram(band)
+    band_total = sum(band_hist) or 1
+    band_mean = sum(i * band_hist[i] for i in range(256)) / band_total
+    frac_light = sum(band_hist[210:]) / band_total
+    light_plate = frac_light > 0.90 and band_mean > 210 and opaque_fraction < 0.90
+
+    if light_plate:
+        # Drop the plate and keep only the mark, keyed on color distance from the
+        # sampled plate color so every arm of the logo (incl. light ones) stays solid.
+        bg_rgb = ImageStat.Stat(icon_rgba.convert("RGB"), band).mean
+        return _plate_mark_alpha(icon_rgba, alpha, bg_rgb)
+
+    if opaque_fraction > 0.90 and mean_border_alpha > 200:
+        # Solid raster: polarity from the border-ring background luminance.
+        bg_luma = ImageStat.Stat(gray, ring).mean[0]
+        return _otsu_silhouette(icon_rgba, alpha, bg_luma)
+
+    # Transparent-background logo: the shape itself is the silhouette.
+    return alpha
+
+
 def process_icon_to_card(png_bytes: bytes) -> Image.Image:
     """
     1) Decode favicon
-    2) Grayscale + threshold pop
-    3) Add crisp double stroke (black inner, white outer)
-    4) Composite on rounded white card
+    2) Reduce to a robust black silhouette (alpha- or Otsu-based, auto polarity)
+    3) Composite the black shape onto the rounded white card
     Returns final 512×512 RGBA.
     """
-    # Decode original favicon
+    # Decode original favicon and letterbox into a square (keeps transparency).
     raw = Image.open(BytesIO(png_bytes)).convert("RGBA")
-    icon_rgba_96 = _resize_to_square(raw, ICON_SIZE)
+    icon_rgba = _resize_to_square(raw, ICON_SIZE)
 
-    # Flatten favicon transparency to white and round edges
-    white_bg = Image.new("RGBA", icon_rgba_96.size, (255, 255, 255, 255))
+    # Silhouette alpha: 255 where the shape is, 0 elsewhere.
+    silhouette_alpha = _build_silhouette_alpha(icon_rgba)
 
-    # Create a rounded mask
-    mask = Image.new("L", icon_rgba_96.size, 0)
-    draw = ImageDraw.Draw(mask)
-    radius = 16  # Adjust for how round you want the corners
-    w, h = icon_rgba_96.size
-    draw.rounded_rectangle([0, 0, w, h], radius, fill=255)
+    # Paint that shape in solid black on a transparent layer, so the white card
+    # (and its border/corners) show through everywhere else — no white-on-white seam.
+    ink = Image.new("RGBA", icon_rgba.size, (0, 0, 0, 0))
+    ink.paste((0, 0, 0, 255), (0, 0), silhouette_alpha)
 
-    # Composite the favicon with the rounded mask
-    icon_rgba_rounded = Image.new("RGBA", icon_rgba_96.size, (0, 0, 0, 0))
-    icon_rgba_rounded.paste(icon_rgba_96, (0, 0), mask)
-
-    # Now flatten to white background
-    icon_flat = Image.alpha_composite(white_bg, icon_rgba_rounded)
-
-    # --- Grayscale & threshold pass ---
-    gray = ImageOps.grayscale(icon_flat)  # now "L" mode
-    # Apply threshold to pop darker regions
-    # --- Decide if favicon is mostly dark or light ---
-    stat = ImageStat.Stat(gray)
-    mean_luma = stat.mean[0]  # 0 = black, 255 = white
-
-    # Tune these as needed
-    bg_threshold = 128   # what counts as "dark overall"
-    cutoff = 200         # what counts as "light pixel"
-
-    if mean_luma < bg_threshold:
-        # Mostly dark -> likely dark background with light icon.
-        # We want: light -> white, dark -> black
-        gray_thresh = gray.point(lambda p: 255 if p > cutoff else 0)
-    else:
-        # Mostly light -> likely light background with dark icon.
-        # We want your original behavior: light -> black, dark -> white
-        gray_thresh = gray.point(lambda p: 0 if p > cutoff else 255)
-
-    # Convert to RGBA and fill alpha channel fully
-    icon_gray = Image.merge("LA", (gray_thresh, Image.new("L", gray.size, 255))).convert("RGBA")
-
-    # blur to make the edges softer
-    icon_gray = icon_gray.filter(ImageFilter.GaussianBlur(radius=1))
-
-    icon_gray = round_corners(icon_gray, radius=int(CARD_RADIUS * (ICON_SIZE / CANVAS_SIZE)))
+    ink = round_corners(ink, radius=int(CARD_RADIUS * (ICON_SIZE / CANVAS_SIZE)))
 
     # --- Card background ---
     card = make_card_canvas()
 
     # Center icon
     cw, ch = card.size
-    iw, ih = icon_gray.size
-    card.alpha_composite(icon_gray, dest=((cw - iw)//2, (ch - ih)//2))
+    iw, ih = ink.size
+    card.alpha_composite(ink, dest=((cw - iw)//2, (ch - ih)//2))
 
     return card
 
@@ -364,6 +522,73 @@ def process_text_icon_on_card(text: str) -> Image.Image:
 
     return card
 
+# Heaviest widely-installed sans faces, in preference order — used for the wordmark
+# icon so the letters read as solid and thick. Falls back to PIL's default bitmap font.
+_BOLD_FONT_CANDIDATES = (
+    "NotoSans-Black.ttf",
+    "NotoSans-ExtraBold.ttf",
+    "DejaVuSans-Bold.ttf",
+    "LiberationSans-Bold.ttf",
+    "Arial Bold.ttf",
+)
+
+
+def _load_heavy_font(size: int) -> ImageFont.FreeTypeFont:
+    """Load a heavy sans TrueType font at `size`, resolving by fontconfig name or by
+    scanning common font dirs. Falls back to the default font if none is found."""
+    import glob
+    search_dirs = ["/usr/share/fonts", "/usr/local/share/fonts",
+                   os.path.expanduser("~/.local/share/fonts"), os.path.expanduser("~/.fonts")]
+    for name in _BOLD_FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(name, size)          # fontconfig may resolve by name
+        except Exception:
+            pass
+        for base in search_dirs:
+            hits = glob.glob(os.path.join(base, "**", name), recursive=True)
+            if hits:
+                try:
+                    return ImageFont.truetype(hits[0], size)
+                except Exception:
+                    continue
+    return ImageFont.load_default(size=size)
+
+
+def _fit_font(text: str, target_w: int, start_px: int) -> ImageFont.FreeTypeFont:
+    """Shrink a heavy font until `text` fits within `target_w` pixels."""
+    px = start_px
+    while px > 8:
+        font = _load_heavy_font(px)
+        tb = ImageDraw.Draw(Image.new("L", (1, 1))).textbbox((0, 0), text, font=font)
+        if (tb[2] - tb[0]) <= target_w:
+            return font
+        px -= 8
+    return _load_heavy_font(px)
+
+
+def process_url_redirect_icon() -> Image.Image:
+    """URL-redirect launcher icon, in the same style as the favicon silhouettes:
+    the browser wordmark "WAD" in solid thick black caps, centered on the white card.
+    Returns a final 512×512 RGBA image.
+    """
+    card = make_card_canvas()
+    cx = cy = CANVAS_SIZE // 2
+
+    text = "WAD"
+    # Fit within the card's usable width (leave a comfortable margin inside the border).
+    font = _fit_font(text, target_w=int(CANVAS_SIZE * 0.78), start_px=int(CANVAS_SIZE * 0.42))
+
+    # Extra stroke fattens the glyphs so they stay solid even if only a Bold (not
+    # Black) weight was available.
+    stroke = max(2, int(CANVAS_SIZE * 0.012))
+    layer = Image.new("RGBA", (CANVAS_SIZE, CANVAS_SIZE), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    d.text((cx, cy), text, fill=(0, 0, 0, 255), font=font, anchor="mm",
+           stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
+    card.alpha_composite(layer)
+
+    return card
+
 # ---------------------------- Generators ---------------------------- #
 
 def generate_config(out_dir: str, app_name: str, app_url: str, icon_path: str):
@@ -386,12 +611,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="{project_dir}"
 URL="${{1:-}}"
+# The generated icon lives next to this script; pass it so the running window/taskbar
+# uses the url-redirect image (there is no config.json to carry icon_path).
+ICON="$SCRIPT_DIR/url-redirect.png"
 
 cd "$PROJECT_DIR"
 if [ -n "$URL" ]; then
-    exec npx electron . --url "$URL"
+    exec npx electron . --url "$URL" --icon "$ICON"
 else
-    exec npx electron .
+    exec npx electron . --icon "$ICON"
 fi"""
     write_executable(os.path.join(out_dir, "launch.sh"), script)
     
@@ -558,7 +786,7 @@ def main():
 
     # Generate icon
     icon_path = os.path.join(url_redirect_dir, f"{url_redirect_slug}.png")
-    final_img = process_text_icon_on_card("URL")
+    final_img = process_url_redirect_icon()
     final_img.save(icon_path, "PNG")
     print(f"  ✓ Wrote: {icon_path}")
 

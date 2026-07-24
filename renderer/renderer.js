@@ -28,6 +28,8 @@ const defaultAppConfig = {
   appName: "WadBrowser",
   homeUrl: "about:blank",
   appIconDataUrl: "",
+  /** Screened sign-in window: single tab, no new tabs (see TabManager#authFlow in main.js). */
+  redirectMode: false,
 };
 let appConfig = { ...defaultAppConfig };
 let draggingTabId = null;
@@ -169,13 +171,30 @@ if (resizeHandle) {
     api.send("win:resizeStart");
   });
 }
+// Coalesce to one IPC + one native setBounds per frame; raw mousemove fires far faster than we can repaint.
+let pendingResizePoint = null;
+let resizeFrame = 0;
 document.addEventListener("mousemove", (e) => {
   if (!isResizing) return;
-  api.send("win:resizeMove", { screenX: e.screenX, screenY: e.screenY });
+  pendingResizePoint = { screenX: e.screenX, screenY: e.screenY };
+  if (resizeFrame) return;
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = 0;
+    if (!isResizing || !pendingResizePoint) return;
+    api.send("win:resizeMove", pendingResizePoint);
+  });
 });
 document.addEventListener("mouseup", () => {
   if (!isResizing) return;
   isResizing = false;
+  if (resizeFrame) {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = 0;
+  }
+  if (pendingResizePoint) {
+    api.send("win:resizeMove", pendingResizePoint);
+    pendingResizePoint = null;
+  }
   api.send("win:resizeEnd");
 });
 
@@ -190,6 +209,7 @@ api.on("app:config", (data) => {
   const defined = Object.fromEntries(Object.entries(incoming).filter(([, v]) => v !== undefined));
   appConfig = { ...defaultAppConfig, ...appConfig, ...defined };
   document.title = api.formatWindowTitle(appConfig.appName);
+  if (appConfig.redirectMode) btnPlus.hidden = true;
   const src = appConfig.appIconDataUrl || "";
   if (src) {
     homeIcon.src = src;
