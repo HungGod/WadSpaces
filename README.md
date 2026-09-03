@@ -1,4 +1,4 @@
-# WadBrowser
+# KaleBrowser
 
 Chromium-based minimal browser (Electron) with no URL bar, WebRTC, drag-and-drop tabs, download manager, and packager integration for turning web addresses into desktop apps.
 
@@ -24,14 +24,14 @@ npm run start -- --config /path/to/config.json
 
 ```bash
 npm run build
-# Output: dist/WadBrowser.AppImage
+# Output: dist/KaleBrowser.AppImage
 ```
 
-Run the AppImage with an optional URL: `./dist/WadBrowser.AppImage "https://example.com"` or `./dist/WadBrowser.AppImage --url "https://example.com"`.
+Run the AppImage with an optional URL: `./dist/kaleBrowser.AppImage "https://example.com"` or `./dist/kaleBrowser.AppImage --url "https://example.com"`.
 
 ## Packager
 
-The packager generates `config.json`, launcher scripts, and `.desktop` files so you can create desktop apps that open a specific site in WadBrowser.
+The packager generates `config.json`, launcher scripts, and `.desktop` files so you can create desktop apps that open a specific site in kaleBrowser.
 
 **Prerequisites:** Python 3.9+ and the packager dependencies.
 
@@ -53,11 +53,11 @@ cd packager
 python3 packager.py
 ```
 
-Use `--project-dir` to point at the WadBrowser project root (so generated launchers run the Electron app). See `python3 packager/packager.py --help` for options. Input apps are listed in `packager/resources.json`.
+Use `--project-dir` to point at the kaleBrowser project root (so generated launchers run the Electron app). See `python3 packager/packager.py --help` for options. Input apps are listed in `packager/resources.json`.
 
 ## Login screening (url-redirect mode)
 
-The generated **url-redirect** app registers WadBrowser as the system `http`/`https` handler, so any link opened by another application lands here. Because that destination is arbitrary, redirect launches are screened and only sign-in pages open.
+The generated **url-redirect** app registers kaleBrowser as the system `http`/`https` handler, so any link opened by another application lands here. Because that destination is arbitrary, redirect launches are screened and only sign-in pages open.
 
 This applies **only** to redirect launches (`--url` with no `--config`). Packaged mini-apps (`--config`) have a URL chosen at package time and are opened as-is.
 
