@@ -79,8 +79,10 @@ def ensure_dir(path: str):
 def write_executable(path: str, content: str):
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
-    st = os.stat(path)
-    os.chmod(path, st.st_mode | stat.S_IEXEC)
+    # Like `chmod +x`: executable for everyone who can read it. With --system the
+    # files are root-owned, so owner-only exec would leave them unusable.
+    mode = os.stat(path).st_mode
+    os.chmod(path, mode | stat.S_IXUSR | ((mode & 0o044) >> 2))
 
 def try_int(x, default=0):
     try:
