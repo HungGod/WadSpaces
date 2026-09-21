@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WadSpaces</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div>
+        <div class="clock" id="clock">--:--</div>
+        <div class="date" id="date"></div>
+      </div>
+      <div class="machine" id="machine"></div>
+    </header>
+
+    <section class="grid" id="grid" aria-label="Workspaces"></section>
+
+    <footer class="bottom">
+      <div class="hints">
+        <span><span class="key">Super</span>+<span class="key">1</span>…<span class="key">9</span> switch</span>
+        <span><span class="key">Super</span>+<span class="key">0</span> back here</span>
+        <span id="notice"></span>
+      </div>
+      <button class="link" id="enroll-open" hidden>Link this machine to Wad Creator</button>
+    </footer>
+  </main>
+
+  <dialog id="enroll">
+    <form method="dialog" id="enroll-form">
+      <h2>Link to Wad Creator</h2>
+      <p>Open Machines in Wad Creator, choose “Add machine”, and enter the code it shows.</p>
+      <input type="text" id="enroll-code" autocomplete="off" spellcheck="false" maxlength="12" placeholder="ABCD1234" aria-label="Enrollment code">
+      <div class="msg" id="enroll-msg"></div>
+      <div class="row">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" id="enroll-go" value="default">Link</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

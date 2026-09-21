@@ -1,0 +1,51 @@
+# Dev config: drives the containers made by podman-compose in ../containers/*
+# (container_name wad-<id>) over the user podman socket. Run dev/run-dev.sh.
+version: 1
+machine:
+  name: dev
+daemon:
+  backend: podman
+  hotkeys:
+    enabled: true
+launcher:
+  wadcreator_url: http://localhost:8081/
+wadcreator:
+  enabled: true
+  dist: ../WadCreator/dist
+workspaces:
+  - id: writing
+    name: Writing
+    image: localhost/wadspaces-cosmic-bodybuilding:latest
+    port: 3100
+    hotkey: 1
+    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/cosmic-bodybuilding/root/usr/share/backgrounds/wallpaper.png
+  - id: iq-dev
+    name: IntelligenceQuest Dev
+    image: localhost/wadspaces-iq-dev:latest
+    port: 3110
+    hotkey: 2
+    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/iq-dev/root/usr/share/backgrounds/wallpaper.png
+  - id: wad-c
+    name: Wad Creator Dev
+    image: localhost/wadspaces-wad-c:latest
+    port: 3120
+    hotkey: 3
+    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/wad-c/root/usr/share/backgrounds/wallpaper.png
+  - id: kale-b
+    name: Kale Browser
+    image: localhost/wadspaces-kale-b:latest
+    port: 3130
+    hotkey: 4
+    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/kale-b/root/usr/share/backgrounds/wallpaper.png
+  - id: vanua-academy
+    name: Vanua Academy
+    image: localhost/wadspaces-vanua-academy:latest
+    port: 3140
+    hotkey: 5
+    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/vanua-academy/root/usr/share/backgrounds/wallpaper.jpg
+  - id: kale-p
+    name: Kale Phone
+    image: localhost/wadspaces-kale-p:latest
+    port: 3150
+    hotkey: 6
+    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/kale-p/root/usr/share/backgrounds/wallpaper.png

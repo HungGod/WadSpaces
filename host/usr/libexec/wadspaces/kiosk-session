@@ -1,0 +1,13 @@
+#!/bin/bash
+# greetd session for the kiosk user: wait for wadd, then run Chromium under cage.
+export XDG_SESSION_TYPE=wayland
+export XCURSOR_THEME=Adwaita
+export XCURSOR_SIZE=24
+
+for _ in $(seq 1 60); do
+    curl -fs -o /dev/null http://127.0.0.1:8080/api/health && break
+    sleep 1
+done
+
+# -s: allow VT switching (Ctrl+Alt+F2 for a text console when debugging)
+exec dbus-run-session -- cage -s -- /usr/libexec/wadspaces/chromium-kiosk

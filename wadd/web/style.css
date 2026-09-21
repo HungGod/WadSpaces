@@ -1,0 +1,150 @@
+:root {
+  --bg: #0b0b14;
+  --bg-raise: #141422;
+  --bg-hover: #1b1b2d;
+  --line: #26263a;
+  --text: #ecebf5;
+  --muted: #9a98b3;
+  --faint: #626079;
+  --accent: #8fd18a;
+  --ready: #8fd18a;
+  --busy: #e8c36a;
+  --error: #ef7b73;
+  --idle: #4a4862;
+  --radius: 14px;
+  --font: ui-sans-serif, "Noto Sans", "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+button { font: inherit; color: inherit; }
+a { color: inherit; }
+
+/* ---------------------------------------------------------------- launcher */
+.shell {
+  min-height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: clamp(20px, 4vw, 56px) clamp(16px, 5vw, 72px);
+  gap: clamp(20px, 4vh, 40px);
+}
+.top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+}
+.clock { font-size: clamp(34px, 5vw, 56px); font-weight: 300; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.date { color: var(--muted); margin-top: 2px; }
+.machine { color: var(--faint); font-size: 13px; text-align: right; }
+.machine b { color: var(--muted); font-weight: 500; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: clamp(12px, 2vw, 22px);
+  align-content: start;
+}
+.tile {
+  position: relative;
+  display: flex; flex-direction: column;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease, background .15s ease;
+  outline: none;
+}
+.tile:hover, .tile:focus-visible { background: var(--bg-hover); border-color: #3a3a58; transform: translateY(-2px); }
+.tile:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.art {
+  aspect-ratio: 16 / 9;
+  background: #07070d center / contain no-repeat;
+  border-bottom: 1px solid var(--line);
+  display: grid; place-items: center;
+  font-size: 44px; font-weight: 600; color: var(--faint);
+}
+.meta { display: flex; align-items: center; gap: 10px; padding: 14px 16px 16px; }
+.name { font-weight: 600; font-size: 16px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.key {
+  font: 12px var(--mono); color: var(--muted);
+  border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px;
+  padding: 1px 7px; white-space: nowrap;
+}
+.status { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; padding: 0 16px 14px; margin-top: -8px; min-height: 20px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); flex: none; }
+.dot.ready { background: var(--ready); box-shadow: 0 0 8px var(--ready); }
+.dot.busy { background: var(--busy); animation: pulse 1.2s ease-in-out infinite; }
+.dot.error { background: var(--error); }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.tile.creator .art { background: linear-gradient(135deg, #1a2a1c, #0f1a16); color: var(--accent); font-size: 30px; letter-spacing: .06em; }
+
+.bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; color: var(--faint); font-size: 13px; }
+.hints { display: flex; flex-wrap: wrap; gap: 16px; }
+.hints span { display: inline-flex; align-items: center; gap: 6px; }
+.link { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.link:hover { color: var(--text); }
+.warn { color: var(--busy); }
+
+/* ---------------------------------------------------------------- dialogs */
+dialog {
+  background: var(--bg-raise); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 24px; width: min(420px, calc(100vw - 32px));
+}
+dialog::backdrop { background: rgba(5, 5, 10, .7); }
+dialog h2 { margin: 0 0 6px; font-size: 18px; }
+dialog p { margin: 0 0 16px; color: var(--muted); }
+input[type=text] {
+  width: 100%; padding: 12px 14px; border-radius: 10px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  font: 20px var(--mono); letter-spacing: .2em; text-transform: uppercase;
+}
+input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+.btn {
+  border: 1px solid var(--line); background: var(--bg-hover);
+  padding: 9px 16px; border-radius: 10px; cursor: pointer;
+}
+.btn:hover { border-color: #3a3a58; }
+.btn.primary { background: var(--accent); color: #0b140b; border-color: transparent; font-weight: 600; }
+.msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.msg.error { color: var(--error); }
+
+/* ------------------------------------------------------------------ splash */
+.splash {
+  min-height: 100%;
+  display: grid; place-items: center;
+  padding: 24px 16px;
+  background: radial-gradient(ellipse at center, #151524 0%, var(--bg) 70%);
+}
+.splash-card { width: min(520px, 100%); text-align: center; }
+.splash .art {
+  width: min(360px, 80vw); margin: 0 auto 28px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.splash h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 600; margin: 0 0 8px; letter-spacing: -0.01em; }
+.phase { color: var(--muted); min-height: 22px; }
+.bar { height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 24px auto 0; width: min(320px, 80%); }
+.bar > i { display: block; height: 100%; width: 35%; background: var(--accent); border-radius: 4px; animation: slide 1.4s ease-in-out infinite; }
+.bar.done > i { width: 100%; animation: none; }
+.bar.error > i { background: var(--error); width: 100%; animation: none; }
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(290%); } }
+.detail { font: 12px var(--mono); color: var(--faint); margin-top: 14px; min-height: 18px; overflow-wrap: anywhere; }
+.error-box { margin-top: 18px; color: var(--error); overflow-wrap: anywhere; }
+.splash .row { justify-content: center; margin-top: 24px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile, .dot.busy, .bar > i { transition: none; animation: none; }
+}

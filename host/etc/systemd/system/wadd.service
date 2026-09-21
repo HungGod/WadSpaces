@@ -1,0 +1,21 @@
+[Unit]
+Description=WadSpaces workspace switcher (wadd) and local Wad Creator
+Wants=network-online.target podman.socket
+After=network-online.target podman.socket
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/wadd --config /etc/wadspaces/workspaces.yaml serve
+Restart=always
+RestartSec=2
+StateDirectory=wadspaces
+# Root: it needs the rootful podman socket, systemctl for the quadlet units,
+# and /dev/input for hotkeys. Everything else is locked down.
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/wadspaces /etc/wadspaces /etc/containers/systemd /run/podman
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

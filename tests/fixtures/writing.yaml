@@ -1,0 +1,13 @@
+id: writing
+name: Writing
+image: ghcr.io/hunggod/wadspaces-writing:latest
+port: 3100
+hotkey: 1
+env:
+  PUID: "1000"
+  PGID: "1000"
+  TZ: Pacific/Fiji
+secrets: [github_token]
+volumes: ["wad-writing-obsidian:/config/.config/obsidian:z"]
+devices: [/dev/dri]
+shm_size: 1g

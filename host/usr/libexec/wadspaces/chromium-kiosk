@@ -1,0 +1,19 @@
+#!/bin/bash
+# The kiosk browser. --remote-debugging-port lets wadd move it between
+# workspaces over CDP; it binds 127.0.0.1 only. Never add
+# --remote-allow-origins: the Origin check keeps pages away from that socket.
+exec /usr/bin/chromium-browser \
+    --kiosk \
+    --ozone-platform=wayland \
+    --remote-debugging-port=9222 \
+    --user-data-dir="${HOME}/.config/wadspaces-kiosk" \
+    --no-first-run \
+    --noerrdialogs \
+    --disable-infobars \
+    --disable-session-crashed-bubble \
+    --disable-features=TranslateUI \
+    --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiVideoDecoder \
+    --password-store=basic \
+    --autoplay-policy=no-user-gesture-required \
+    --check-for-update-interval=31536000 \
+    http://127.0.0.1:8080/

@@ -1,0 +1,13 @@
+# bootc-image-builder settings (host/build.sh qcow2|iso).
+# The admin user is for SSH/console debugging only; the kiosk runs as `wad`.
+# Put your own public key here before building.
+
+[[customizations.user]]
+name = "admin"
+groups = ["wheel"]
+key = "ssh-ed25519 REPLACE-WITH-YOUR-PUBLIC-KEY"
+
+# Workspace images are large (3-8 GB each), the default 10 GiB root is not enough.
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "60 GiB"

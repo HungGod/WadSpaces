@@ -1,0 +1,124 @@
+# WadSpaces host configuration, read by wadd.
+# Workspaces here become quadlet units (wad-<id>.container) and launcher tiles.
+# Wad Creator (served locally on :8081) edits this file through wadd's API.
+version: 1
+machine:
+  name: wadspaces
+daemon:
+  bind: 127.0.0.1
+  port: 8080
+  backend: systemd
+  podman_socket: /run/podman/podman.sock
+  cdp_url: http://127.0.0.1:9222
+  quadlet_dir: /etc/containers/systemd
+  hotkeys:
+    enabled: true
+    launcher: [KEY_0, KEY_SPACE]
+  ready_timeout_s: 900
+launcher:
+  wadcreator_url: http://localhost:8081/
+  allow_navigate: []
+# Temporary: Wad Creator is served from this machine. When it moves to
+# wadcreator.com, disable this and add a `cloud:` section (see README).
+wadcreator:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8081
+  dist: /usr/share/wadspaces/wadcreator
+workspaces:
+  - id: writing
+    name: Writing
+    image: ghcr.io/hunggod/wadspaces-cosmic-bodybuilding:latest
+    port: 3100
+    hotkey: 1
+    icon: /usr/share/wadspaces/icons/writing.png
+    env:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Pacific/Fiji
+      GIT_USER_NAME: HungGod
+      GIT_USER_EMAIL: throwupcow@gmail.com
+    secrets: [github_token]
+    volumes: [wad-writing-obsidian:/config/.config/obsidian:z]
+    devices: [/dev/dri]
+    shm_size: 1g
+  - id: iq-dev
+    name: IntelligenceQuest Dev
+    image: ghcr.io/hunggod/wadspaces-iq-dev:latest
+    port: 3110
+    hotkey: 2
+    icon: /usr/share/wadspaces/icons/iq-dev.png
+    env:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Pacific/Fiji
+      GIT_USER_NAME: HungGod
+      GIT_USER_EMAIL: throwupcow@gmail.com
+    secrets: [github_token]
+    volumes: [wad-iq-dev-config:/config:z]
+    devices: [/dev/dri]
+    shm_size: 1g
+  - id: wad-c
+    name: Wad Creator Dev
+    image: ghcr.io/hunggod/wadspaces-wad-c:latest
+    port: 3120
+    hotkey: 3
+    icon: /usr/share/wadspaces/icons/wad-c.png
+    env:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Pacific/Fiji
+      GIT_USER_NAME: HungGod
+      GIT_USER_EMAIL: throwupcow@gmail.com
+    secrets: [github_token]
+    volumes: [wad-wad-c-config:/config:z]
+    devices: [/dev/dri]
+    shm_size: 1g
+  - id: kale-b
+    name: Kale Browser
+    image: ghcr.io/hunggod/wadspaces-kale-b:latest
+    port: 3130
+    hotkey: 4
+    icon: /usr/share/wadspaces/icons/kale-b.png
+    env:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Pacific/Fiji
+      GIT_USER_NAME: HungGod
+      GIT_USER_EMAIL: throwupcow@gmail.com
+    secrets: [github_token]
+    volumes: [wad-kale-b-config:/config:z]
+    devices: [/dev/dri]
+    shm_size: 1g
+  - id: vanua-academy
+    name: Vanua Academy
+    image: ghcr.io/hunggod/wadspaces-vanua-academy:latest
+    port: 3140
+    hotkey: 5
+    icon: /usr/share/wadspaces/icons/vanua-academy.jpg
+    env:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Pacific/Fiji
+      GIT_USER_NAME: HungGod
+      GIT_USER_EMAIL: throwupcow@gmail.com
+    secrets: [github_token]
+    volumes: [wad-vanua-academy-config:/config:z]
+    devices: [/dev/dri]
+    shm_size: 1g
+  - id: kale-p
+    name: Kale Phone
+    image: ghcr.io/hunggod/wadspaces-kale-p:latest
+    port: 3150
+    hotkey: 6
+    icon: /usr/share/wadspaces/icons/kale-p.png
+    env:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Pacific/Fiji
+      GIT_USER_NAME: HungGod
+      GIT_USER_EMAIL: throwupcow@gmail.com
+    secrets: [github_token]
+    volumes: [wad-kale-p-config:/config:z]
+    devices: [/dev/dri, /dev/kvm]
+    shm_size: 1g
