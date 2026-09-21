@@ -10,6 +10,8 @@ import json
 import stat
 import argparse
 import re
+import shlex
+import shutil
 from io import BytesIO
 from urllib.parse import urlparse, urljoin
 
@@ -41,6 +43,14 @@ _PACKAGER_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PROJECT_DIR = os.path.dirname(_PACKAGER_DIR)
 DEFAULT_DESKTOP_DIR = os.path.expanduser("~/Desktop")
 DEFAULT_APPS_DIR = os.path.expanduser("~/.local/share/applications")
+
+# --system: install for every user (e.g. baked into a container image). Launchers
+# go on PATH, icons into the hicolor theme, .desktop files into the system dir,
+# and nothing is written to anybody's ~/Desktop — the image's init copies the
+# entries listed in --entries-list there at boot.
+SYSTEM_APPS_DIR = "/usr/share/applications"
+SYSTEM_ICONS_DIR = "/usr/share/icons/hicolor/512x512/apps"
+SYSTEM_BIN_DIR = "/usr/local/bin"
 
 # Icon canvas
 CANVAS_SIZE = 512
@@ -604,9 +614,42 @@ def generate_config(out_dir: str, app_name: str, app_url: str, icon_path: str):
     with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
 
-def generate_url_redirect_launch_sh(out_dir: str, project_dir: str):
+def _launcher_options_block(wayland_auto: bool) -> str:
+    """Shell lines that build EXTRA_ARGS at launch time (only used when options are set)."""
+    lines = ["EXTRA_ARGS=()"]
+    if wayland_auto:
+        # Same detection as the workspace images' obsidian wrapper: go native
+        # Wayland only when there is a GPU node and labwc is the compositor,
+        # otherwise fall back to X11 via Xwayland.
+        lines += [
+            "if ls /dev/dri/* > /dev/null 2>&1 && pgrep labwc > /dev/null 2>&1; then",
+            "    EXTRA_ARGS+=(--ozone-platform=wayland)",
+            "fi",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def _electron_cmd(electron_bin: str | None) -> str:
+    """The command that starts Electron. None keeps the historical `npx electron`."""
+    if not electron_bin:
+        return "npx electron"
+    return shlex.quote(electron_bin)
+
+
+def _uses_launcher_options(electron_bin, electron_args, wayland_auto) -> bool:
+    return bool(electron_bin or electron_args or wayland_auto)
+
+
+def generate_url_redirect_launch_sh(out_dir: str, project_dir: str, *,
+                                    electron_bin: str | None = None,
+                                    electron_args: str = "",
+                                    wayland_auto: bool = False,
+                                    launcher_path: str | None = None,
+                                    icon_path: str | None = None) -> str:
     # Launch the Electron app; URL from first argument (e.g. xdg-open %u)
-    script = f"""#!/usr/bin/env bash
+    target = launcher_path or os.path.join(out_dir, "launch.sh")
+    if not _uses_launcher_options(electron_bin, electron_args, wayland_auto) and not launcher_path:
+        script = f"""#!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="{project_dir}"
@@ -621,11 +664,41 @@ if [ -n "$URL" ]; then
 else
     exec npx electron . --icon "$ICON"
 fi"""
-    write_executable(os.path.join(out_dir, "launch.sh"), script)
-    
-def generate_launch_sh(out_dir: str, project_dir: str, config_path: str):
-    # Launch the Electron app with generated config (app_name, app_url, icon_path in config.json)
+        write_executable(target, script)
+        return os.path.abspath(target)
+
+    # A launcher installed elsewhere (e.g. /usr/local/bin) cannot find the icon
+    # relative to itself, so it is baked in as an absolute path.
+    icon_abs = os.path.abspath(icon_path or os.path.join(out_dir, "url-redirect.png"))
+    electron = _electron_cmd(electron_bin)
+    extra = f" {electron_args}" if electron_args else ""
     script = f"""#!/usr/bin/env bash
+set -euo pipefail
+PROJECT_DIR={shlex.quote(os.path.abspath(project_dir))}
+URL="${{1:-}}"
+ICON={shlex.quote(icon_abs)}
+{_launcher_options_block(wayland_auto)}
+cd "$PROJECT_DIR"
+if [ -n "$URL" ]; then
+    exec {electron} . --url "$URL" --icon "$ICON"{extra} "${{EXTRA_ARGS[@]}}"
+else
+    exec {electron} . --icon "$ICON"{extra} "${{EXTRA_ARGS[@]}}"
+fi
+"""
+    ensure_dir(os.path.dirname(os.path.abspath(target)))
+    write_executable(target, script)
+    return os.path.abspath(target)
+
+
+def generate_launch_sh(out_dir: str, project_dir: str, config_path: str, *,
+                       electron_bin: str | None = None,
+                       electron_args: str = "",
+                       wayland_auto: bool = False,
+                       launcher_path: str | None = None) -> str:
+    # Launch the Electron app with generated config (app_name, app_url, icon_path in config.json)
+    target = launcher_path or os.path.join(out_dir, "launch.sh")
+    if not _uses_launcher_options(electron_bin, electron_args, wayland_auto) and not launcher_path:
+        script = f"""#!/usr/bin/env bash
 set -euo pipefail
 # Directory containing this script (and config.json); use absolute path so it works when run from .desktop or any cwd
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -635,11 +708,51 @@ PROJECT_DIR="{os.path.abspath(project_dir)}"
 cd "$PROJECT_DIR"
 exec npx electron . --config "$CONFIG_PATH"
 """
-    write_executable(os.path.join(out_dir, "launch.sh"), script)
+        write_executable(target, script)
+        return os.path.abspath(target)
+
+    electron = _electron_cmd(electron_bin)
+    extra = f" {electron_args}" if electron_args else ""
+    script = f"""#!/usr/bin/env bash
+set -euo pipefail
+# Generated by KaleBrowser packager. config.json holds app_name, app_url and icon_path.
+CONFIG_PATH={shlex.quote(os.path.abspath(config_path))}
+PROJECT_DIR={shlex.quote(os.path.abspath(project_dir))}
+{_launcher_options_block(wayland_auto)}
+cd "$PROJECT_DIR"
+exec {electron} . --config "$CONFIG_PATH"{extra} "${{EXTRA_ARGS[@]}}"
+"""
+    ensure_dir(os.path.dirname(os.path.abspath(target)))
+    write_executable(target, script)
+    return os.path.abspath(target)
+
+
+def install_icon(icon_path: str, icons_dir: str, icon_name: str) -> str:
+    """Copy a generated PNG into an icon theme dir; returns the theme icon name."""
+    ensure_dir(icons_dir)
+    shutil.copyfile(icon_path, os.path.join(icons_dir, f"{icon_name}.png"))
+    return icon_name
+
+
+def append_entries_list(list_path: str | None, desktop_basename: str):
+    """Record a generated .desktop basename (one per line, no duplicates)."""
+    if not list_path:
+        return
+    ensure_dir(os.path.dirname(os.path.abspath(list_path)))
+    existing = set()
+    if os.path.exists(list_path):
+        with open(list_path, "r", encoding="utf-8") as f:
+            existing = {line.strip() for line in f if line.strip()}
+    if desktop_basename in existing:
+        return
+    with open(list_path, "a", encoding="utf-8") as f:
+        f.write(desktop_basename + "\n")
+
 
 def generate_desktop_file(app_name: str, exec_path: str, icon_path: str,
                           desktop_out_dir: str | None = None, apps_dir: str | None = None,
                           wm_class: str | None = None, url_redirect: bool | None=False):
+    # icon_path is either an absolute file path or a bare icon-theme name.
     slug = "WADspaces-"+slugify(app_name)
     desktop_content = f"""[Desktop Entry]
 Type=Application
@@ -669,27 +782,68 @@ StartupNotify=true
     # Optionally also install to user applications
     if apps_dir:
         ensure_dir(apps_dir)
-        write_executable(os.path.join(apps_dir, f"{slug}.desktop"), desktop_content)
+        apps_path = os.path.join(apps_dir, f"{slug}.desktop")
+        write_executable(apps_path, desktop_content)
+        if desktop_path == "None":
+            desktop_path = apps_path
 
     return desktop_path
 
 
 # ---------------------------- Runner ---------------------------- #
 
-def main():
+def parse_args(argv=None):
     ap = argparse.ArgumentParser(description="Packager: generate mini-apps from resources.json")
     ap.add_argument("--input", "-i", default=DEFAULT_INPUT, help="Path to resources.json")
     ap.add_argument("--output", "-o", default=DEFAULT_OUTDIR, help="Output base directory (generated)")
-    ap.add_argument("--project-dir", default=DEFAULT_PROJECT_DIR, help="MiniBrowser project directory (contains main.py)")
-    ap.add_argument("--desktop-dir", default=DEFAULT_DESKTOP_DIR, help="Desktop directory to place .desktop files")
-    ap.add_argument("--apps-dir", default=DEFAULT_APPS_DIR, help="Optional: also install .desktop into this dir")
-    ap.add_argument("--no-apps-install", action="store_true", help="Do not copy .desktop into ~/.local/share/applications")
-    ap.add_argument("--refetch", action="store_true", help="Force re-fetch of favicon even if cached")  # <— NEW
-    args = ap.parse_args()
+    ap.add_argument("--project-dir", default=DEFAULT_PROJECT_DIR, help="KaleBrowser project directory (contains main.js)")
+    ap.add_argument("--desktop-dir", default=None, help="Desktop directory to place .desktop files (default ~/Desktop; none with --system)")
+    ap.add_argument("--apps-dir", default=None, help="Also install .desktop into this dir (default ~/.local/share/applications; /usr/share/applications with --system)")
+    ap.add_argument("--no-apps-install", action="store_true", help="Do not copy .desktop into the applications dir")
+    ap.add_argument("--refetch", action="store_true", help="Force re-fetch of favicon even if cached")
+    # System install mode (container images)
+    ap.add_argument("--system", action="store_true",
+                    help="System-wide install: launchers on PATH, icons in the hicolor theme, "
+                         ".desktop in /usr/share/applications, nothing in ~/Desktop")
+    ap.add_argument("--icons-dir", default=None, help=f"Install icons here and reference them by name (default with --system: {SYSTEM_ICONS_DIR})")
+    ap.add_argument("--bin-dir", default=None, help=f"Write launchers here as kale-<slug> (default with --system: {SYSTEM_BIN_DIR})")
+    ap.add_argument("--electron-bin", default=None,
+                    help="Electron executable for launchers (default: `npx electron`; with --system: <project-dir>/node_modules/.bin/electron)")
+    ap.add_argument("--electron-args", default="", help='Extra args appended to every launch. Use the = form because the value '
+                         'starts with a dash: --electron-args=--no-sandbox')
+    ap.add_argument("--wayland-auto", action="store_true",
+                    help="Add --ozone-platform=wayland at launch when /dev/dri exists and labwc is running")
+    ap.add_argument("--entries-list", default=None,
+                    help="Append each generated .desktop basename to this file (one per line)")
+    args = ap.parse_args(argv)
+
+    if args.system:
+        args.desktop_dir = args.desktop_dir  # stays None unless explicitly given
+        args.apps_dir = args.apps_dir or SYSTEM_APPS_DIR
+        args.icons_dir = args.icons_dir or SYSTEM_ICONS_DIR
+        args.bin_dir = args.bin_dir or SYSTEM_BIN_DIR
+        args.electron_bin = args.electron_bin or os.path.join(
+            os.path.abspath(args.project_dir), "node_modules", ".bin", "electron")
+    else:
+        args.desktop_dir = args.desktop_dir or DEFAULT_DESKTOP_DIR
+        args.apps_dir = args.apps_dir or DEFAULT_APPS_DIR
+    return args
+
+
+def main(argv=None):
+    args = parse_args(argv)
 
     # Validate paths
     ensure_dir(args.output)
-    ensure_dir(args.desktop_dir)
+    if args.desktop_dir:
+        ensure_dir(args.desktop_dir)
+
+    apps_dir = None if args.no_apps_install else args.apps_dir
+    launcher_kw = dict(
+        electron_bin=args.electron_bin,
+        electron_args=args.electron_args,
+        wayland_auto=args.wayland_auto,
+    )
 
     with open(args.input, "r", encoding="utf-8") as f:
         resources = json.load(f)
@@ -750,6 +904,8 @@ def main():
                 # absolute fallback
                 Image.new("RGBA", (CANVAS_SIZE, CANVAS_SIZE), (255, 255, 255, 255)).save(icon_path, "PNG")
 
+        desktop_slug = f"WADspaces-{slug}"
+
         # 3) config.json
         generate_config(
             out_dir=app_dir,
@@ -760,21 +916,31 @@ def main():
         config_path = os.path.abspath(os.path.join(app_dir, "config.json"))
         print(f"  ✓ Wrote: {config_path}")
 
-        # 4) launch.sh
-        generate_launch_sh(app_dir, os.path.abspath(args.project_dir), config_path)
-        launch_sh = os.path.abspath(os.path.join(app_dir, "launch.sh"))
+        # 4) launcher (launch.sh next to config.json, or kale-<slug> in --bin-dir)
+        launch_sh = generate_launch_sh(
+            app_dir, os.path.abspath(args.project_dir), config_path,
+            launcher_path=os.path.join(args.bin_dir, f"kale-{slug}") if args.bin_dir else None,
+            **launcher_kw,
+        )
         print(f"  ✓ Wrote: {launch_sh}")
 
-        # 5) .desktop files
+        # 5) icon reference: absolute file path, or a theme name when --icons-dir is set
+        icon_ref = os.path.abspath(icon_path)
+        if args.icons_dir:
+            icon_ref = install_icon(icon_path, args.icons_dir, desktop_slug)
+            print(f"  ✓ Icon: {os.path.join(args.icons_dir, desktop_slug + '.png')}")
+
+        # 6) .desktop files
         desktop_file = generate_desktop_file(
             app_name=app_name,
             exec_path=launch_sh,
-            icon_path=os.path.abspath(icon_path),
+            icon_path=icon_ref,
             desktop_out_dir=args.desktop_dir,
-            apps_dir=None if args.no_apps_install else args.apps_dir,
-            wm_class=f"WADspaces-{slugify(app_name)}",
+            apps_dir=apps_dir,
+            wm_class=desktop_slug,
             url_redirect=False,
         )
+        append_entries_list(args.entries_list, f"{desktop_slug}.desktop")
         print(f"  ✓ Desktop: {desktop_file}")
 
     print(f"▶ Packaging: URL Redirect")
@@ -791,17 +957,25 @@ def main():
     print(f"  ✓ Wrote: {icon_path}")
 
     # Generate launch script
-    generate_url_redirect_launch_sh(url_redirect_dir, os.path.abspath(args.project_dir))
-    launch_sh = os.path.abspath(os.path.join(url_redirect_dir, "launch.sh"))
+    launch_sh = generate_url_redirect_launch_sh(
+        url_redirect_dir, os.path.abspath(args.project_dir),
+        launcher_path=os.path.join(args.bin_dir, f"kale-{url_redirect_slug}") if args.bin_dir else None,
+        icon_path=icon_path,
+        **launcher_kw,
+    )
     print(f"  ✓ Wrote: {launch_sh}")
 
-    # Generate desktop file
+    icon_ref = os.path.abspath(icon_path)
+    if args.icons_dir:
+        icon_ref = install_icon(icon_path, args.icons_dir, f"WADspaces-{url_redirect_slug}")
+
+    # Generate desktop file (never on the Desktop: it is a URL handler, not an app)
     desktop_file = generate_desktop_file(
             app_name=url_redirect_slug,
             exec_path=launch_sh,
-            icon_path=os.path.abspath(icon_path),
+            icon_path=icon_ref,
             desktop_out_dir=None,
-            apps_dir=None if args.no_apps_install else args.apps_dir,
+            apps_dir=apps_dir,
             wm_class=None,
             url_redirect=True,
         )

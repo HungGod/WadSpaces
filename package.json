@@ -1,6 +1,6 @@
 {
-  "name": "wadbrowser",
-  "productName": "WadBrowser",
+  "name": "kalebrowser",
+  "productName": "KaleBrowser",
   "version": "0.1.0",
   "description": "Chromium-based minimal browser with packager integration",
   "main": "main.js",
@@ -14,8 +14,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.wadbrowser.app",
-    "productName": "WadBrowser",
+    "appId": "com.kalebrowser.app",
+    "productName": "KaleBrowser",
     "files": [
       "main.js",
       "preload.js",
@@ -31,7 +31,7 @@
         "AppImage"
       ],
       "category": "Network",
-      "artifactName": "WadBrowser.${ext}"
+      "artifactName": "KaleBrowser.${ext}"
     },
     "directories": {
       "output": "dist"

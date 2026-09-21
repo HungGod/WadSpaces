@@ -27,7 +27,7 @@ npm run build
 # Output: dist/KaleBrowser.AppImage
 ```
 
-Run the AppImage with an optional URL: `./dist/kaleBrowser.AppImage "https://example.com"` or `./dist/kaleBrowser.AppImage --url "https://example.com"`.
+Run the AppImage with an optional URL: `./dist/KaleBrowser.AppImage "https://example.com"` or `./dist/KaleBrowser.AppImage --url "https://example.com"`.
 
 ## Packager
 
@@ -54,6 +54,33 @@ python3 packager.py
 ```
 
 Use `--project-dir` to point at the kaleBrowser project root (so generated launchers run the Electron app). See `python3 packager/packager.py --help` for options. Input apps are listed in `packager/resources.json`.
+
+### System install (container images)
+
+`--system` installs the mini-apps for every user instead of the current one. It is what the WadSpaces workspace images use, where the checkout lives at `/opt/kalebrowser` and the desktop is drawn from `.desktop` files copied into `~/Desktop` at container start.
+
+```bash
+python3 packager/packager.py --system \
+    --project-dir /opt/kalebrowser \
+    --output /opt/kalebrowser/packager/generated \
+    --electron-args=--no-sandbox \
+    --wayland-auto \
+    --entries-list /etc/wadspaces/desktop-entries.list
+```
+
+| Output | Default location | Override |
+|---|---|---|
+| Launcher `kale-<slug>` | `/usr/local/bin` | `--bin-dir` |
+| Icon `WADspaces-<slug>.png`, referenced by name | `/usr/share/icons/hicolor/512x512/apps` | `--icons-dir` |
+| `WADspaces-<slug>.desktop` | `/usr/share/applications` | `--apps-dir` |
+| `~/Desktop` copy | none | `--desktop-dir` |
+
+- Launchers call `<project-dir>/node_modules/.bin/electron` directly rather than `npx electron`, so run `npm ci` first. `--electron-bin` overrides this.
+- `--electron-args` is appended to every launch. Use the `=` form, because the value starts with a dash. `--no-sandbox` is needed when running as a non-root user inside a container.
+- `--wayland-auto` adds `--ozone-platform=wayland` at launch time when `/dev/dri` exists and `labwc` is running, and uses X11 otherwise.
+- `--entries-list` appends each generated `.desktop` name to a file, one per line, so the image's init can seed `~/Desktop`. The url-redirect handler is not listed, since it is not an app.
+
+Without `--system` the packager behaves exactly as before.
 
 ## Login screening (url-redirect mode)
 
