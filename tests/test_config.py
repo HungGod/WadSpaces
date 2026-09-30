@@ -57,3 +57,33 @@ def test_shipped_configs_are_valid():
     root = FIXTURES.parents[1]
     for p in ["host/etc/wadspaces/workspaces.yaml", "dev/workspaces.dev.yaml"]:
         assert len(load_config(root / p).workspaces) == 6
+
+
+def test_autostart_is_optional_and_not_written_when_false():
+    cfg = parse_config({"workspaces": [ws(autostart=True), ws(id="b", port=3101)]})
+    a, b = (config_to_dict(cfg)["workspaces"])
+    assert a["autostart"] is True and "autostart" not in b
+
+
+def test_display_host_needs_no_port_and_stream_does():
+    cfg = parse_config({"workspaces": [
+        {"id": "a", "name": "A", "image": "i", "display": "host"},
+        {"id": "b", "name": "B", "image": "i", "port": 3100},
+    ]})
+    a, b = cfg.workspace("a"), cfg.workspace("b")
+    assert a.native and a.url is None
+    assert not b.native and b.url == "http://127.0.0.1:3100/"
+    with pytest.raises(ConfigError, match="missing port"):
+        parse_config({"workspaces": [{"id": "c", "name": "C", "image": "i"}]})
+    with pytest.raises(ConfigError, match="display must be"):
+        parse_config({"workspaces": [{"id": "c", "name": "C", "image": "i", "display": "vnc"}]})
+
+
+def test_display_round_trips_and_stream_is_implicit():
+    from wadd.config import workspace_to_dict
+    cfg = parse_config({"workspaces": [
+        {"id": "a", "name": "A", "image": "i", "display": "host"},
+        {"id": "b", "name": "B", "image": "i", "port": 3100},
+    ]})
+    assert workspace_to_dict(cfg.workspace("a"))["display"] == "host"
+    assert "display" not in workspace_to_dict(cfg.workspace("b"))

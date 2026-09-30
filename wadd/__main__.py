@@ -28,36 +28,68 @@ def cmd_serve(args) -> int:
 
     from .api import create_app
     from .backends import make_backend
-    from .hotkeys import HotkeyListener
+    from .display import SwayDisplay
+    from .keyproxy import Chord, GrabProxy, KeyRouter
     from .kiosk import CdpClient, NullKiosk
     from .manager import WorkspaceManager
+    from .network import NetworkManagerCli
 
     cfg = load_config(args.config)
     if args.dev:
         cfg.daemon.backend = "podman"
         cfg.daemon.podman_socket = f"/run/user/{os.getuid()}/podman/podman.sock"
+        cfg.daemon.prefetch = "none"  # podman-compose created the containers already
     if args.port:
         cfg.daemon.port = args.port
 
     backend = make_backend(cfg)
     kiosk = NullKiosk() if args.no_cdp else CdpClient(cfg.daemon.cdp_url)
     manager = WorkspaceManager(cfg, backend, kiosk)
-    background = [manager.refresh_loop]
+    net = NetworkManagerCli()
+    if not args.dev and any(ws.native for ws in cfg.enabled_workspaces):
+        # Native workspaces are windows on the kiosk session's sway.
+        manager.display = SwayDisplay()
 
-    if cfg.daemon.hotkeys.enabled and not args.no_hotkeys:
-        ok, why = HotkeyListener.supported()
+    async def boot():
+        # A session saved before a restart comes back first. It needs the
+        # event loop (its focus timer is a task), so it can't run earlier.
+        try:
+            manager.restore_session()
+        except Exception:  # noqa: BLE001 - a bad session file must not stop wadd
+            log.exception("restoring the saved session failed")
+        # Secrets next: autostart containers mount them.
+        try:
+            await manager.seed_secrets()
+        except Exception:  # noqa: BLE001 - the daemon still works without them
+            log.exception("seeding secrets failed")
+        if cfg.daemon.prefetch != "none":
+            await manager.prefetch_loop(net)
+
+    background = [manager.refresh_loop, boot, lambda: manager.network_loop(net),
+                  lambda: manager.display.run(manager.resolve_window, manager.on_native_window)]
+
+    keys = cfg.daemon.keys
+    if keys.enabled and not args.no_hotkeys:
+        ok, why = GrabProxy.supported()
         if ok:
-            listener = HotkeyListener(manager.hotkey_bindings(), manager.on_hotkey)
-
-            async def run_hotkeys():
-                task = asyncio.create_task(listener.run())
-                while not task.done():
-                    manager.hotkey_devices = listener.devices
-                    await asyncio.sleep(2)
-                await task
-            background.append(run_hotkeys)
+            async def run_keys():
+                router = KeyRouter(manager.hotkey_bindings(), [Chord.parse(c) for c in keys.block],
+                                   pass_super=keys.pass_super)
+                manager.key_router = router
+                # Grabbing a dev machine's keyboard would take it from the
+                # desktop session, so --dev only watches for chords.
+                proxy = GrabProxy(router, manager.on_hotkey, asyncio.get_running_loop(),
+                                  grab=keys.grab and not args.dev)
+                proxy.start()
+                try:
+                    while True:
+                        manager.hotkey_devices = proxy.device_names
+                        await asyncio.sleep(2)
+                finally:
+                    await asyncio.to_thread(proxy.stop)
+            background.append(run_keys)
         else:
-            log.warning("hotkeys disabled: %s", why)
+            log.warning("keyboard shortcuts disabled: %s", why)
 
     cloud = None
     if cfg.cloud:
@@ -65,9 +97,12 @@ def cmd_serve(args) -> int:
         cloud = CloudRelay(cfg.cloud, manager, cfg.machine_name)
         background.append(cloud.run)
 
-    app = create_app(manager, background, cloud)
+    app = create_app(manager, background, cloud, net)
+    # The kiosk's SSE connection never closes on its own; without a graceful
+    # timeout, stopping wadd (and so shutting down) waits for systemd's kill.
     servers = [uvicorn.Server(uvicorn.Config(app, host=cfg.daemon.bind, port=cfg.daemon.port,
-                                             log_level="info", access_log=args.access_log))]
+                                             log_level="info", access_log=args.access_log,
+                                             timeout_graceful_shutdown=3))]
     wc = cfg.wadcreator
     if wc.enabled:
         # Temporary: Wad Creator runs on this machine and calls the API above
@@ -76,7 +111,7 @@ def cmd_serve(args) -> int:
         dist = args.wadcreator_dist or wc.dist
         servers.append(uvicorn.Server(uvicorn.Config(
             create_wadcreator_app(dist), host=wc.bind, port=wc.port,
-            log_level="warning", access_log=False)))
+            log_level="warning", access_log=False, timeout_graceful_shutdown=3)))
         log.info("Wad Creator from %s on http://%s:%d", dist, wc.bind, wc.port)
     log.info("wadd %s on %s (%d workspaces, backend %s)", __version__, cfg.daemon.base_url,
              len(cfg.enabled_workspaces), cfg.daemon.backend)
@@ -207,6 +242,8 @@ def main(argv=None) -> int:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    from . import logbuffer
+    logbuffer.install()
     if not args.cmd:
         args = ap.parse_args([*(argv or sys.argv[1:]), "serve"])
     try:

@@ -1,0 +1,3 @@
+# Defaults for `bootc install to-disk` (host/build.sh install).
+[install.filesystem.root]
+type = "xfs"

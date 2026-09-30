@@ -1,0 +1,145 @@
+#!/usr/bin/python3
+"""The Wi-Fi / power / focus-timer buttons, floating above everything.
+
+The shell page draws them too, but a native workspace is its own window on
+top of the shell, so here they are a wlr-layer-shell "overlay" surface, which
+sway always stacks above normal and fullscreen windows. Anchored bottom-right,
+never takes the keyboard.
+
+It follows wadd's /api/status. A click asks wadd to bring the shell forward and
+open that menu there (POST /api/hud {"panel": ...}), since the menus live in
+the shell.
+
+gtk4-layer-shell has to be loaded before libwayland, so this re-executes itself
+with it in LD_PRELOAD (the documented way for Python).
+"""
+import json
+import os
+import sys
+import time
+import urllib.request
+
+LIB = "/usr/lib64/libgtk4-layer-shell.so.0"
+if os.path.exists(LIB) and LIB not in os.environ.get("LD_PRELOAD", ""):
+    os.environ["LD_PRELOAD"] = (LIB + " " + os.environ.get("LD_PRELOAD", "")).strip()
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gtk4LayerShell", "1.0")
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
+
+WADD = os.environ.get("WADD_URL", "http://127.0.0.1:8080")
+
+CSS = b"""
+window { background: transparent; }
+.hud { padding: 0; }
+.pill {
+  background: #141422; color: #ecebf5; border: 1px solid #26263a;
+  border-radius: 999px; padding: 4px 12px; min-height: 0;
+  font: 13px "Noto Sans", sans-serif; box-shadow: none;
+}
+.pill:hover { border-color: #3a3a58; }
+.pill.offline { color: #e8c36a; border-color: #5a4a26; }
+.pill.done { color: #8fd18a; border-color: #8fd18a; }
+.timer { background: #141422; }
+"""
+
+
+def fetch(path):
+    with urllib.request.urlopen(WADD + path, timeout=1.5) as r:
+        return json.loads(r.read())
+
+
+def post(path, body):
+    req = urllib.request.Request(WADD + path, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=3).close()
+    except OSError as e:
+        print(f"hud: {path}: {e}", file=sys.stderr)
+
+
+def minutes_text(m):
+    h, mm = divmod(int(m), 60)
+    return f"{h} h {mm} min" if h and mm else f"{h} h" if h else f"{mm} min"
+
+
+def timer_text(session):
+    if not session or session.get("mode") == "free":
+        return None
+    if session.get("expired"):
+        return "Time's up"
+    if session.get("ends_at") is None:
+        return f"Focus {minutes_text(session.get('minutes', 0))}"
+    left = max(0, int(session["ends_at"] - time.time()))
+    if left >= 3600:
+        return f"{left // 3600} h {left % 3600 // 60} min left"
+    if left >= 60:
+        return f"{-(-left // 60)} min left"
+    return f"{left} s left"
+
+
+class Hud(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="io.wadspaces.hud")
+        self.session = None
+
+    def do_activate(self):
+        css = Gtk.CssProvider()
+        css.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        win = Gtk.Window(application=self, title="wadspaces-hud")
+        LayerShell.init_for_window(win)
+        LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
+        LayerShell.set_namespace(win, "wadspaces-hud")
+        LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)
+        for edge in (LayerShell.Edge.BOTTOM, LayerShell.Edge.RIGHT):
+            LayerShell.set_anchor(win, edge, True)
+            LayerShell.set_margin(win, edge, 12)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.add_css_class("hud")
+        self.timer = Gtk.Label(label="")
+        self.timer.add_css_class("pill")
+        self.timer.add_css_class("timer")
+        self.net = Gtk.Button(label="Wi-Fi")
+        self.net.add_css_class("pill")
+        self.net.connect("clicked", lambda *_: post("/api/hud", {"panel": "wifi"}))
+        power = Gtk.Button(label="⏻")
+        power.add_css_class("pill")
+        power.set_tooltip_text("Power")
+        power.connect("clicked", lambda *_: post("/api/hud", {"panel": "power"}))
+        for w in (self.timer, self.net, power):
+            box.append(w)
+        win.set_child(box)
+        win.present()
+
+        self.refresh()
+        GLib.timeout_add_seconds(2, self.refresh)
+
+    def refresh(self):
+        try:
+            s = fetch("/api/status")
+        except (OSError, ValueError):
+            s = {}
+        self.session = s.get("session")
+        text = timer_text(self.session)
+        self.timer.set_visible(bool(text))
+        if text:
+            self.timer.set_label(text)
+            (self.timer.add_css_class if self.session.get("expired") else self.timer.remove_css_class)("done")
+        n = s.get("network") or {}
+        self.net.set_visible(bool(n.get("available")))
+        online = n.get("connectivity") == "full"
+        self.net.set_label(n.get("ssid") or ("Wired" if online else "Not connected"))
+        (self.net.remove_css_class if online else self.net.add_css_class)("offline")
+        return True
+
+
+if __name__ == "__main__":
+    sys.exit(Hud().run([]))

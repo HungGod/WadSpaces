@@ -14,6 +14,12 @@ def test_matches_fixture():
     assert render_container_unit(writing()) == (FIXTURES / "wad-writing.container").read_text()
 
 
+def test_host_display_matches_fixture():
+    # A native workspace: no port, the kiosk's sway runtime dir mounted, no SELinux label.
+    ws = WorkspaceSpec(**yaml.safe_load((FIXTURES / "writing-host.yaml").read_text()))
+    assert render_container_unit(ws) == (FIXTURES / "wad-writing-host.container").read_text()
+
+
 def test_gen_prunes_stale(tmp_path):
     (tmp_path / "wad-old.container").write_text("x")
     (tmp_path / "other.container").write_text("x")

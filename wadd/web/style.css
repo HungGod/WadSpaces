@@ -43,8 +43,43 @@ a { color: inherit; }
 }
 .clock { font-size: clamp(34px, 5vw, 56px); font-weight: 300; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .date { color: var(--muted); margin-top: 2px; }
+.top-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .machine { color: var(--faint); font-size: 13px; text-align: right; }
 .machine b { color: var(--muted); font-weight: 500; }
+
+/* ------------------------------------------------------------------- wifi */
+.net {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--bg-raise); border: 1px solid var(--line); border-radius: 999px;
+  padding: 5px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
+}
+.net:hover, .net:focus-visible { color: var(--text); border-color: #3a3a58; outline: none; }
+.net.offline { color: var(--busy); border-color: #5a4a26; }
+.bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.bars i { width: 3px; background: var(--idle); border-radius: 1px; }
+.bars i:nth-child(1) { height: 3px; } .bars i:nth-child(2) { height: 6px; }
+.bars i:nth-child(3) { height: 9px; } .bars i:nth-child(4) { height: 12px; }
+.bars[data-level="1"] i:nth-child(-n+1), .bars[data-level="2"] i:nth-child(-n+2),
+.bars[data-level="3"] i:nth-child(-n+3), .bars[data-level="4"] i { background: currentColor; }
+.wifi-head { display: flex; align-items: center; justify-content: space-between; }
+.wifi-list { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; overflow-y: auto; margin: 0 -6px; }
+.wifi-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: 1px solid transparent; border-radius: 10px;
+  padding: 9px 10px; text-align: left; cursor: pointer; color: var(--text);
+}
+.wifi-item:hover, .wifi-item:focus-visible { background: var(--bg-hover); outline: none; }
+.wifi-item[aria-selected="true"] { border-color: var(--accent); }
+.wifi-item .ssid { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wifi-item .tag { font-size: 12px; color: var(--muted); }
+.wifi-item.unsupported { opacity: .5; }
+.wifi-join { margin-top: 14px; }
+.wifi-join label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+input.field {
+  width: 100%; padding: 10px 12px; border-radius: 10px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line); font: 16px var(--font);
+}
+input.field:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .grid {
   display: grid;
@@ -90,7 +125,8 @@ a { color: inherit; }
 
 .tile.creator .art { background: linear-gradient(135deg, #1a2a1c, #0f1a16); color: var(--accent); font-size: 30px; letter-spacing: .06em; }
 
-.bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; color: var(--faint); font-size: 13px; }
+/* Left-aligned, with room on the right for the HUD. */
+.bottom { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding-right: 200px; color: var(--faint); font-size: 13px; }
 .hints { display: flex; flex-wrap: wrap; gap: 16px; }
 .hints span { display: inline-flex; align-items: center; gap: 6px; }
 .link { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
@@ -122,29 +158,186 @@ input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; 
 .msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--muted); }
 .msg.error { color: var(--error); }
 
-/* ------------------------------------------------------------------ splash */
-.splash {
-  min-height: 100%;
+/* ------------------------------------------------------------------ shell */
+/* Frames fill the screen; only the one on view is visible. visibility (not
+   display:none) keeps hidden streams at full size, so coming back to one
+   doesn't make its desktop resize. */
+#frames { position: fixed; inset: 0; z-index: 1; }
+.frame {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  border: 0; background: var(--bg);
+  visibility: hidden;
+}
+.frame.on { visibility: visible; z-index: 1; }
+#home { position: relative; z-index: 2; display: none; }
+#home.on { display: grid; }
+html, body { overflow: hidden; }
+#home.on { height: 100%; overflow-y: auto; }
+
+/* Wi-Fi + power: always above everything, dimmed so they don't distract
+   inside a workspace. Bottom right: top right is where desktops keep their
+   window buttons. */
+.hud {
+  position: fixed; bottom: 12px; right: 12px; z-index: 50;
+  display: flex; gap: 8px; align-items: center;
+  opacity: .45; transition: opacity .15s ease;
+}
+.hud:hover, .hud:focus-within, body.home .hud { opacity: 1; }
+.hud[hidden] { display: none; }
+#power-open { padding: 5px 10px; font-size: 15px; line-height: 1; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 12px;
+  max-width: min(640px, calc(100vw - 32px));
+  background: var(--bg-raise); border: 1px solid var(--line); border-radius: 999px;
+  padding: 10px 18px; box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
+  font-size: 14px;
+}
+.toast[hidden] { display: none; }
+.toast.error { border-color: #5a2a26; color: var(--error); }
+.toast.error .spinner { display: none; }
+#toast-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast .pbar { width: 120px; flex: none; }
+.spinner {
+  width: 14px; height: 14px; flex: none; border-radius: 50%;
+  border: 2px solid var(--line); border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Super+Tab switcher. Opaque: over a native workspace wadd brings the shell
+   forward to draw this, and whatever frame the shell last showed is stale. */
+.carousel {
+  position: fixed; inset: 0; z-index: 70;
   display: grid; place-items: center;
-  padding: 24px 16px;
-  background: radial-gradient(ellipse at center, #151524 0%, var(--bg) 70%);
+  background: var(--bg);
 }
-.splash-card { width: min(520px, 100%); text-align: center; }
-.splash .art {
-  width: min(360px, 80vw); margin: 0 auto 28px;
-  border: 1px solid var(--line); border-radius: var(--radius);
+.carousel[hidden] { display: none; }
+.cards {
+  display: flex; gap: 18px; padding: 24px;
+  max-width: 100vw; overflow-x: auto; scrollbar-width: none;
 }
-.splash h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 600; margin: 0 0 8px; letter-spacing: -0.01em; }
-.phase { color: var(--muted); min-height: 22px; }
-.bar { height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 24px auto 0; width: min(320px, 80%); }
-.bar > i { display: block; height: 100%; width: 35%; background: var(--accent); border-radius: 4px; animation: slide 1.4s ease-in-out infinite; }
-.bar.done > i { width: 100%; animation: none; }
-.bar.error > i { background: var(--error); width: 100%; animation: none; }
+.card {
+  flex: none; width: 220px;
+  background: var(--bg-raise); border: 2px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; transition: transform .12s ease, border-color .12s ease;
+}
+.card .art { border-bottom: 1px solid var(--line); }
+.card .name { padding: 10px 14px; font-size: 15px; }
+.card.sel { border-color: var(--accent); transform: scale(1.06); box-shadow: 0 0 0 4px rgba(143, 209, 138, .18); }
+.card.off { opacity: .45; }
+
+/* downloads */
+.link.dl { margin-left: auto; font-size: 13px; }
+.pbar { height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.pbar > i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .6s ease; }
+.pbar.indeterminate > i { width: 35%; animation: slide 1.4s ease-in-out infinite; }
 @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(290%); } }
-.detail { font: 12px var(--mono); color: var(--faint); margin-top: 14px; min-height: 18px; overflow-wrap: anywhere; }
-.error-box { margin-top: 18px; color: var(--error); overflow-wrap: anywhere; }
-.splash .row { justify-content: center; margin-top: 24px; }
+.tile .pbar { margin: -4px 16px 14px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile, .dot.busy, .bar > i { transition: none; animation: none; }
+  .tile, .dot.busy, .pbar > i, .card, .spinner { transition: none; animation: none; }
 }
+
+/* ------------------------------------------------------------- focus flow */
+.flow { display: grid; align-content: start; }
+.step { display: grid; gap: clamp(16px, 3vh, 28px); align-content: start; }
+.step[hidden] { display: none; }
+.q { margin: 0; font-size: clamp(22px, 3vw, 32px); font-weight: 500; letter-spacing: -0.01em; text-wrap: balance; }
+.actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.actions .hint { margin-right: auto; color: var(--muted); font-size: 14px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { padding: 11px 22px; }
+
+.tile.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.tile.picked:focus-visible { box-shadow: 0 0 0 3px var(--accent); }
+.pick-no {
+  position: absolute; top: 10px; right: 10px; z-index: 1;
+  width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent); color: #0b140b; font-weight: 700; font-size: 14px;
+}
+
+.dl-list { display: grid; gap: 14px; max-width: 640px; }
+.dl-row { display: grid; gap: 8px; background: var(--bg-raise); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.dl-head { display: flex; align-items: center; gap: 10px; }
+.dl-label { margin-left: auto; color: var(--muted); font-size: 13px; text-align: right; }
+.dl-label.err { color: var(--error); }
+
+.dial-wrap { position: relative; width: min(300px, 70vw); aspect-ratio: 1; justify-self: center; }
+.dial { width: 100%; height: 100%; touch-action: none; cursor: grab; outline: none; }
+.dial:focus-visible .dial-face { stroke: var(--accent); }
+.dial-face { fill: var(--bg-raise); stroke: var(--line); stroke-width: 2; }
+.dial-tick { stroke: var(--faint); stroke-width: 2; stroke-linecap: round; }
+.dial-hour { fill: none; stroke: rgba(143, 209, 138, .35); stroke-width: 3; }
+.dial-arc { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; }
+.dial-hand { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.dial-knob { fill: var(--accent); stroke: var(--bg); stroke-width: 3; }
+.dial-pin { fill: var(--accent); }
+.readout {
+  position: absolute; inset: 0; pointer-events: none;
+  display: grid; place-content: center; text-align: center; gap: 2px;
+}
+.readout b { font-size: clamp(22px, 3.2vw, 30px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.readout span { color: var(--muted); font-size: 13px; }
+.chips { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.chip {
+  background: var(--bg-raise); border: 1px solid var(--line); border-radius: 999px;
+  padding: 7px 14px; cursor: pointer; color: var(--muted);
+}
+.chip:hover, .chip:focus-visible { color: var(--text); border-color: #3a3a58; outline: none; }
+.chip.on { color: var(--text); border-color: var(--accent); }
+
+/* HUD: time left in the session */
+.timer[hidden] { display: none; }
+.timer { cursor: default; color: var(--text); font-variant-numeric: tabular-nums; }
+.timer.done { color: var(--accent); border-color: var(--accent); }
+.toast.info { border-color: var(--accent); }
+.toast.info .spinner { display: none; }
+
+/* Behind a native workspace's own window */
+.native {
+  position: fixed; inset: 0; z-index: 3;
+  display: grid; place-content: center; justify-items: center; gap: 18px;
+  background: var(--bg); color: var(--muted);
+}
+.native[hidden] { display: none; }
+.native .art { width: 220px; border: 1px solid var(--line); border-radius: var(--radius); }
+
+/* ------------------------------------------------------------ landing page */
+.mine { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.mine-label { color: var(--muted); font-size: 14px; margin-right: 4px; }
+.ws-chip { display: inline-flex; align-items: center; gap: 8px; color: var(--text); }
+.sub { margin: -8px 0 0; color: var(--muted); }
+.sample {
+  margin-left: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--faint); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px;
+}
+.streams { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.stream {
+  background: var(--bg-raise); border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden;
+}
+/* A stand-in "screen": a tinted desktop with two windows on it. */
+.stream-art {
+  position: relative; font-size: 0;
+  background:
+    radial-gradient(circle at 20% 15%, hsl(var(--h) 70% 55% / .55), transparent 55%),
+    linear-gradient(135deg, hsl(var(--h) 45% 18%), hsl(calc(var(--h) + 40) 40% 10%));
+}
+.stream-art .win {
+  position: absolute; left: 12%; top: 16%; width: 52%; height: 58%;
+  border-radius: 6px; background: hsl(var(--h) 20% 92% / .12);
+  border: 1px solid hsl(var(--h) 30% 80% / .25);
+}
+.stream-art .win.two { left: 44%; top: 34%; width: 44%; height: 50%; background: hsl(var(--h) 20% 8% / .7); }
+.live {
+  position: absolute; top: 10px; left: 10px; z-index: 1;
+  font: 700 11px var(--font); letter-spacing: .08em; color: #fff;
+  background: #d84b4b; border-radius: 5px; padding: 2px 7px;
+}
+.stream-body { padding: 12px 16px 16px; display: grid; gap: 2px; }
+.stream-body .name { flex: none; }
+.who { color: var(--accent); font-size: 13px; }
+.desc { margin: 6px 0 0; color: var(--muted); font-size: 14px; }

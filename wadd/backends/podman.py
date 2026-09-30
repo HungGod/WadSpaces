@@ -22,6 +22,20 @@ class PodmanError(BackendError):
     pass
 
 
+def demux_logs(data: bytes) -> str:
+    """Podman frames non-TTY logs as [stream, 0, 0, 0, size(4, big endian)]
+    + payload; TTY logs are raw. Returns the text either way."""
+    out, i = [], 0
+    while i + 8 <= len(data) and data[i] in (0, 1, 2) and data[i + 1:i + 4] == b"\0\0\0":
+        size = int.from_bytes(data[i + 4:i + 8], "big")
+        out.append(data[i + 8:i + 8 + size])
+        i += 8 + size
+    if i == 0:
+        return data.decode(errors="replace")
+    out.append(data[i:])
+    return b"".join(out).decode(errors="replace")
+
+
 class PodmanApi:
     def __init__(self, socket_path: str) -> None:
         self.socket_path = socket_path
@@ -48,6 +62,29 @@ class PodmanApi:
             return r.status_code == 200
         except (httpx.HTTPError, OSError):
             return False
+
+    async def info(self) -> dict:
+        r = await self.client.get("/info")
+        if r.status_code != 200:
+            raise self._err(r, "info")
+        return r.json()
+
+    async def graph_root(self) -> str | None:
+        """Where podman keeps images (for reading which layers it has)."""
+        try:
+            return ((await self.info()).get("store") or {}).get("graphRoot") or None
+        except PodmanError:
+            return None
+
+    async def container_logs(self, name: str, tail: int = 200) -> str:
+        """stdout+stderr of a container, last `tail` lines."""
+        r = await self.client.get(f"/containers/{quote(name, safe='')}/logs",
+                                  params={"stdout": "true", "stderr": "true", "tail": str(tail)})
+        if r.status_code == 404:
+            raise PodmanError(f"no container {name} (is the workspace running?)")
+        if r.status_code != 200:
+            raise self._err(r, f"logs {name}")
+        return demux_logs(r.content)
 
     async def inspect_container(self, name: str) -> dict | None:
         r = await self.client.get(f"/containers/{quote(name, safe='')}/json")

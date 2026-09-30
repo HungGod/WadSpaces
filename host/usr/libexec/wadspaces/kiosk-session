@@ -1,5 +1,6 @@
 #!/bin/bash
-# greetd session for the kiosk user: wait for wadd, then run Chromium under cage.
+# greetd session for the kiosk user: wait for wadd, then run sway, which starts
+# Chromium on the shell (etc/sway/wadspaces.conf).
 export XDG_SESSION_TYPE=wayland
 export XCURSOR_THEME=Adwaita
 export XCURSOR_SIZE=24
@@ -9,5 +10,12 @@ for _ in $(seq 1 60); do
     sleep 1
 done
 
-# -s: allow VT switching (Ctrl+Alt+F2 for a text console when debugging)
-exec dbus-run-session -- cage -s -- /usr/libexec/wadspaces/chromium-kiosk
+# Ctrl+Alt+F2 reaches a text console when debugging (wlroots handles VT
+# switching). Output goes to the journal (journalctl -b -t kiosk) instead of
+# tty1. Loop rather than exec: this is greetd's initial_session, which runs
+# once, so restarting sway here is what keeps the kiosk healing itself. The
+# pause stops a crash loop from spinning.
+while true; do
+    systemd-cat -t kiosk dbus-run-session -- sway -c /etc/sway/wadspaces.conf
+    sleep 5
+done

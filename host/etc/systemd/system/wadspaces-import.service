@@ -1,0 +1,16 @@
+[Unit]
+Description=Import WadSpaces images copied onto this drive
+ConditionPathExists=/var/lib/wadspaces/incoming/pending
+After=local-fs.target
+Before=greetd.service wadd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/wadspaces/import-updates
+# On screen while it runs: it holds up the kiosk for a minute or more.
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=1h
+
+[Install]
+WantedBy=multi-user.target

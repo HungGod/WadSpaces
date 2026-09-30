@@ -8,11 +8,16 @@ Type=exec
 ExecStart=/usr/bin/wadd --config /etc/wadspaces/workspaces.yaml serve
 Restart=always
 RestartSec=2
+TimeoutStopSec=10
 StateDirectory=wadspaces
 # Root: it needs the rootful podman socket, systemctl for the quadlet units,
 # and /dev/input for hotkeys. Everything else is locked down.
 ProtectSystem=strict
-ProtectHome=yes
+# read-only, not "yes": wadd connects to sway's IPC socket in the kiosk
+# session's /run/user/1000 (to put native workspaces on screen). That dir only
+# appears once greetd logs the kiosk in, after wadd has started; "yes" would
+# hide it for good. Connecting to a socket works on a read-only mount.
+ProtectHome=read-only
 ReadWritePaths=/var/lib/wadspaces /etc/wadspaces /etc/containers/systemd /run/podman
 PrivateTmp=yes
 NoNewPrivileges=yes

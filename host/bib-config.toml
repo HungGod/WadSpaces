@@ -4,8 +4,9 @@
 
 [[customizations.user]]
 name = "admin"
+password = "$6$JjyVKU8xYaMCKGsi$jSAH3PiNFt6GhTulxwFytPSXhUSjDnI.psiIpajfTsSbJA3h9RHYvW5yDm7ryKCQ7aYmjK5rHYq0maunvIaC7."
 groups = ["wheel"]
-key = "ssh-ed25519 REPLACE-WITH-YOUR-PUBLIC-KEY"
+key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICuWBkVungqlMgL4D6PM8fkP/aQnOLiJIVJrjyHtJP0w"
 
 # Workspace images are large (3-8 GB each), the default 10 GiB root is not enough.
 [[customizations.filesystem]]

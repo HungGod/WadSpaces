@@ -5,7 +5,7 @@ machine:
   name: dev
 daemon:
   backend: podman
-  hotkeys:
+  keys:
     enabled: true
 launcher:
   wadcreator_url: http://localhost:8081/

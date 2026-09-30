@@ -1,0 +1,34 @@
+#!/bin/bash
+# Imports what `host/build.sh update|install --images` copied onto this drive
+# (/var/lib/wadspaces/incoming, an OCI directory):
+#   ws-<id>  workspace images -> podman storage, under the name wadd runs
+#   host     a new system image -> `bootc switch`, then one restart into it
+# Runs once per copy (incoming/pending), before the kiosk and wadd start.
+# incoming/ is kept so the next copy only has to send what changed.
+set -uo pipefail
+IN=/var/lib/wadspaces/incoming
+APPLIED=/var/lib/wadspaces/host.applied
+say() { echo "[wadspaces-import] $*"; }
+
+[[ -f "${IN}/pending" ]] || exit 0
+
+while read -r tag target; do
+    [[ -n "${tag}" && -n "${target}" ]] || continue
+    say "importing ${target}"
+    skopeo copy -q "oci:${IN}:${tag}" "containers-storage:${target}" \
+        || say "could not import ${target}; it will be downloaded on first use instead"
+done < "${IN}/import.list"
+
+if [[ -f "${IN}/host.id" ]] && [[ "$(cat "${IN}/host.id")" != "$(cat "${APPLIED}" 2>/dev/null)" ]]; then
+    say "switching to the new system image; this takes a few minutes"
+    if bootc switch --transport oci "${IN}:host"; then
+        cp "${IN}/host.id" "${APPLIED}"
+        rm -f "${IN}/pending"
+        say "restarting into the new system image"
+        systemctl reboot
+        exit 0
+    fi
+    say "bootc switch failed; staying on the current system image"
+fi
+rm -f "${IN}/pending"
+say "done"

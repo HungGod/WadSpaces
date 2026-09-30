@@ -24,6 +24,10 @@ class WorkspaceState:
     progress: int | None = None
     message: str | None = None
     error: str | None = None
+    image_present: bool | None = None  # is the image downloaded? None: unknown
+    # while pulling: total_bytes, done_bytes, layers, rate_bps, eta_s
+    # (registry.PullProgress); total_bytes None when sizes are unknown
+    download: dict | None = None
     since: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:

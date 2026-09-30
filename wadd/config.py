@@ -15,6 +15,13 @@ import yaml
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 BACKENDS = ("systemd", "podman")
+PREFETCH = ("autostart", "all", "none")
+# stream: the desktop is streamed to a frame in the kiosk (an all-in-one
+#         Selkies image publishing a port).
+# host:   the desktop draws on this machine's own screen as its own window
+#         (a lean image from containers/_common); no port, no stream. The same
+#         image runs remotely next to the stream sidecar (containers/_stream).
+DISPLAYS = ("stream", "host")
 SYSTEMD_SCOPES = ("system", "user")
 
 
@@ -27,7 +34,7 @@ class WorkspaceSpec:
     id: str
     name: str
     image: str
-    port: int
+    port: int | None = None
     hotkey: int | None = None
     icon: str | None = None
     enabled: bool = True
@@ -38,14 +45,23 @@ class WorkspaceSpec:
     volumes: list[str] = field(default_factory=list)
     devices: list[str] = field(default_factory=list)
     shm_size: str | None = "1g"
+    # started by wadd once images are pulled after boot (not a quadlet
+    # [Install]: a boot-time pull of several GB would hit systemd timeouts)
+    autostart: bool = False
+    display: str = "stream"
 
     def __post_init__(self) -> None:
         if not self.container_name:
             self.container_name = f"wad-{self.id}"
 
     @property
-    def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/"
+    def native(self) -> bool:
+        return self.display == "host"
+
+    @property
+    def url(self) -> str | None:
+        """Where the stream answers; None for a native workspace."""
+        return None if self.native or self.port is None else f"http://127.0.0.1:{self.port}/"
 
     @property
     def unit(self) -> str:
@@ -54,9 +70,16 @@ class WorkspaceSpec:
 
 
 @dataclass
-class HotkeyConfig:
+class KeysConfig:
+    """Keyboard handling (wadd/keyproxy.py). wadd grabs the keyboards and keeps
+    Super for itself: Super+Tab switcher, Super+1..9 jump, `launcher` keys
+    (with Super) go home. `block` chords are dropped before they reach the
+    kiosk, e.g. "alt+f4"; modifiers match exactly."""
     enabled: bool = True
     launcher: list[str] = field(default_factory=lambda: ["KEY_0", "KEY_SPACE"])
+    block: list[str] = field(default_factory=lambda: ["alt+f4", "ctrl+shift+q", "ctrl+alt+backspace"])
+    pass_super: bool = False  # also send Super chords on to the workspace
+    grab: bool = True         # False: only watch for chords, filter nothing
 
 
 @dataclass
@@ -67,10 +90,22 @@ class DaemonConfig:
     systemd_scope: str = "system"
     podman_socket: str = "/run/podman/podman.sock"
     cdp_url: str = "http://127.0.0.1:9222"
-    hotkeys: HotkeyConfig = field(default_factory=HotkeyConfig)
+    keys: KeysConfig = field(default_factory=KeysConfig)
     ready_timeout_s: int = 600
     # where CRUD writes wad-<id>.container units (systemd backend only)
     quadlet_dir: str = "/etc/containers/systemd"
+    # baked into the image by host/build.sh; each file in podman/ becomes a
+    # podman secret of the same name (re-seeded when the file changes)
+    secrets_dir: str = "/usr/lib/wadspaces/secrets"
+    state_dir: str = "/var/lib/wadspaces"
+    # what to download once the network is up: "none" (download from the
+    # launcher or on first switch), "autostart" (just the workspaces that
+    # start at boot) or "all". "all" and "autostart" skip an image when less
+    # than prefetch_min_free_gb is left, so small disks don't fill up.
+    prefetch: str = "none"
+    prefetch_min_free_gb: int = 15
+    # images downloaded at once (Home starts every pick's download together)
+    max_parallel_pulls: int = 3
 
     @property
     def base_url(self) -> str:
@@ -80,8 +115,20 @@ class DaemonConfig:
 
 @dataclass
 class LauncherConfig:
+    # Wad Creator's desktop app, started in the kiosk session as a window of
+    # its own (a view "app:wadcreator"). Without sway (dev) Home falls back to
+    # showing wadcreator_url in the shell.
+    wadcreator_app: str = "/usr/lib/wadcreator/wadcreator"
     wadcreator_url: str = "http://localhost:8081/"
     allow_navigate: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ShellConfig:
+    """The kiosk page: it keeps each workspace in its own frame so switching
+    is instant. Only the most recently used live_frames stay loaded; the rest
+    are dropped and reconnect (about a second) when you come back."""
+    live_frames: int = 3
 
 
 @dataclass
@@ -97,7 +144,7 @@ class WadCreatorConfig:
 @dataclass
 class CloudConfig:
     project_id: str
-    functions_region: str = "us-central1"
+    functions_region: str = "australia-southeast2"  # where enrollMachine is deployed
     api_key: str = ""
     state_file: str = "/var/lib/wadspaces/enrollment.json"
     functions_base: str = ""  # override, e.g. the emulator
@@ -124,12 +171,19 @@ class Config:
     workspaces: list[WorkspaceSpec]
     path: Path | None = None
     wadcreator: WadCreatorConfig = field(default_factory=WadCreatorConfig)
+    shell: ShellConfig = field(default_factory=ShellConfig)
 
     def workspace(self, ws_id: str) -> WorkspaceSpec:
         for ws in self.workspaces:
             if ws.id == ws_id:
                 return ws
         raise KeyError(ws_id)
+
+    def workspace_or_none(self, ws_id: str) -> WorkspaceSpec | None:
+        try:
+            return self.workspace(ws_id)
+        except KeyError:
+            return None
 
     def by_hotkey(self, n: int) -> WorkspaceSpec | None:
         for ws in self.workspaces:
@@ -162,16 +216,34 @@ def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
     machine_name = str(machine.get("name") or "wadspaces")
 
     d = dict(data.get("daemon") or {})
-    hk = HotkeyConfig(**_pick(dict(d.pop("hotkeys", None) or {}), HotkeyConfig, "daemon.hotkeys"))
-    daemon = DaemonConfig(hotkeys=hk, **_pick(d, DaemonConfig, "daemon"))
+    # `hotkeys` is the old name for `keys` (enabled + launcher only).
+    raw_keys = {**dict(d.pop("hotkeys", None) or {}), **dict(d.pop("keys", None) or {})}
+    keys = KeysConfig(**_pick(raw_keys, KeysConfig, "daemon.keys"))
+    from .keyproxy import Chord, keycode  # noqa: PLC0415 - avoids a cycle at import
+    try:
+        for chord in keys.block:
+            Chord.parse(chord)
+        for name in keys.launcher:
+            keycode(name)
+    except ValueError as e:
+        raise ConfigError(f"daemon.keys: {e}") from e
+    daemon = DaemonConfig(keys=keys, **_pick(d, DaemonConfig, "daemon"))
     if daemon.backend not in BACKENDS:
         raise ConfigError(f"daemon.backend must be one of {BACKENDS}")
     if daemon.systemd_scope not in SYSTEMD_SCOPES:
         raise ConfigError(f"daemon.systemd_scope must be one of {SYSTEMD_SCOPES}")
+    if daemon.prefetch not in PREFETCH:
+        raise ConfigError(f"daemon.prefetch must be one of {PREFETCH}")
+    if daemon.max_parallel_pulls < 1:
+        raise ConfigError("daemon.max_parallel_pulls must be at least 1")
 
     launcher = LauncherConfig(**_pick(dict(data.get("launcher") or {}), LauncherConfig, "launcher"))
 
     wadcreator = WadCreatorConfig(**_pick(dict(data.get("wadcreator") or {}), WadCreatorConfig, "wadcreator"))
+
+    shell = ShellConfig(**_pick(dict(data.get("shell") or {}), ShellConfig, "shell"))
+    if shell.live_frames < 1:
+        raise ConfigError("shell.live_frames must be at least 1")
 
     cloud = None
     if data.get("cloud"):
@@ -185,9 +257,13 @@ def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
     for i, raw in enumerate(data.get("workspaces") or []):
         where = f"workspaces[{i}]"
         raw = dict(_pick(dict(raw), WorkspaceSpec, where))
-        for req in ("id", "name", "image", "port"):
+        for req in ("id", "name", "image"):
             if req not in raw:
                 raise ConfigError(f"{where}: missing {req}")
+        if raw.get("display", "stream") not in DISPLAYS:
+            raise ConfigError(f"{where}: display must be one of {DISPLAYS}")
+        if raw.get("display", "stream") == "stream" and raw.get("port") is None:
+            raise ConfigError(f"{where}: missing port (a streamed workspace needs one)")
         raw["env"] = {str(k): str(v) for k, v in (raw.get("env") or {}).items()}
         ws = WorkspaceSpec(**raw)
         where = f"workspace {ws.id!r}"
@@ -195,10 +271,12 @@ def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
             raise ConfigError(f"{where}: id must match {ID_RE.pattern}")
         if ws.id in seen_ids:
             raise ConfigError(f"{where}: duplicate id")
-        if not (1 <= int(ws.port) <= 65535):
-            raise ConfigError(f"{where}: port out of range")
-        if ws.port in seen_ports or ws.port == daemon.port or (wadcreator.enabled and ws.port == wadcreator.port):
-            raise ConfigError(f"{where}: port {ws.port} already used")
+        if ws.port is not None:
+            if not (1 <= int(ws.port) <= 65535):
+                raise ConfigError(f"{where}: port out of range")
+            if ws.port in seen_ports or ws.port == daemon.port or (wadcreator.enabled and ws.port == wadcreator.port):
+                raise ConfigError(f"{where}: port {ws.port} already used")
+            seen_ports.add(ws.port)
         if ws.container_name in seen_names:
             raise ConfigError(f"{where}: duplicate container_name")
         if ws.hotkey is not None:
@@ -209,12 +287,12 @@ def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
             if ws.enabled:
                 seen_hotkeys.add(ws.hotkey)
         seen_ids.add(ws.id)
-        seen_ports.add(ws.port)
         seen_names.add(ws.container_name)
         workspaces.append(ws)
 
     return Config(machine_name=machine_name, daemon=daemon, launcher=launcher,
-                  cloud=cloud, workspaces=workspaces, path=path, wadcreator=wadcreator)
+                  cloud=cloud, workspaces=workspaces, path=path, wadcreator=wadcreator,
+                  shell=shell)
 
 
 def workspace_to_dict(ws: WorkspaceSpec) -> dict:
@@ -223,6 +301,10 @@ def workspace_to_dict(ws: WorkspaceSpec) -> dict:
         del d["container_name"]
     if d["container_port"] == 3000:
         del d["container_port"]
+    if not d["autostart"]:
+        del d["autostart"]
+    if d["display"] == "stream":
+        del d["display"]
     return {k: v for k, v in d.items() if v not in (None, [], {})}
 
 
@@ -233,6 +315,7 @@ def config_to_dict(cfg: Config) -> dict:
         "daemon": asdict(cfg.daemon),
         "launcher": asdict(cfg.launcher),
         "wadcreator": asdict(cfg.wadcreator),
+        "shell": asdict(cfg.shell),
     }
     if cfg.cloud:
         out["cloud"] = asdict(cfg.cloud)

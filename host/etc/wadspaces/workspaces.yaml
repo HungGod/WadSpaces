@@ -11,25 +11,37 @@ daemon:
   podman_socket: /run/podman/podman.sock
   cdp_url: http://127.0.0.1:9222
   quadlet_dir: /etc/containers/systemd
-  hotkeys:
+  # wadd grabs the keyboards: Super+Tab switches, Super+1..9 jump, Super+0 or
+  # Super+Space go home, and the `block` chords never reach the kiosk.
+  keys:
     enabled: true
     launcher: [KEY_0, KEY_SPACE]
+    block: [alt+f4, ctrl+shift+q, ctrl+alt+backspace]
   ready_timeout_s: 900
+  # Images are downloaded from the launcher (Download on a tile) or on the
+  # first switch, never in the background at boot: on a small disk the six
+  # images (~20 GB, sharing a 2.8 GB base) do not all fit. "autostart" or
+  # "all" download after boot instead, keeping prefetch_min_free_gb free.
+  prefetch: none
+  prefetch_min_free_gb: 5
 launcher:
-  wadcreator_url: http://localhost:8081/
+  # Home's "Wad Creator" link opens the desktop app as a window of its own.
+  wadcreator_app: /usr/lib/wadcreator/wadcreator
   allow_navigate: []
-# Temporary: Wad Creator is served from this machine. When it moves to
-# wadcreator.com, disable this and add a `cloud:` section (see README).
+# The old in-kiosk web copy of Wad Creator (dev only now).
 wadcreator:
-  enabled: true
-  bind: 127.0.0.1
-  port: 8081
-  dist: /usr/share/wadspaces/wadcreator
+  enabled: false
+# The online Wad Creator reaches this machine through Firestore once it is
+# linked (Home -> Link this machine to Wad Creator). Idle until then.
+cloud:
+  project_id: wadcreator
+  functions_region: australia-southeast2
 workspaces:
   - id: writing
     name: Writing
     image: ghcr.io/hunggod/wadspaces-cosmic-bodybuilding:latest
-    port: 3100
+    # lean image: its desktop is a window on this screen, not a stream
+    display: host
     hotkey: 1
     icon: /usr/share/wadspaces/icons/writing.png
     env:
@@ -45,7 +57,8 @@ workspaces:
   - id: iq-dev
     name: IntelligenceQuest Dev
     image: ghcr.io/hunggod/wadspaces-iq-dev:latest
-    port: 3110
+    # lean image: its desktop is a window on this screen, not a stream
+    display: host
     hotkey: 2
     icon: /usr/share/wadspaces/icons/iq-dev.png
     env:
