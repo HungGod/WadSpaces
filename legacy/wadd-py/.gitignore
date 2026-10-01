@@ -2,7 +2,4 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
-.build/
-output/
-host/secrets/
 *.log

@@ -1,0 +1,13 @@
+# Build context for host/Containerfile (`podman build -f host/Containerfile .`).
+# Only what the Containerfile copies goes in: the repo also holds the UI's
+# node_modules, Rust target dirs and the host's secrets, none of which belong
+# in the context. Secrets reach the image only through .build/secrets/
+# (staged by host/build.sh), never straight from host/secrets/.
+*
+!host/etc
+!host/usr
+!legacy/wadd-py/wadd
+!.build/wadcreator-app
+!.build/secrets
+!.build/ssh
+**/__pycache__

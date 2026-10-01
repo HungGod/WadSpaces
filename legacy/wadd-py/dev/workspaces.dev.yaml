@@ -11,7 +11,7 @@ launcher:
   wadcreator_url: http://localhost:8081/
 wadcreator:
   enabled: true
-  dist: ../WadCreator/dist
+  dist: ../../apps/wadcreator/dist
 workspaces:
   - id: writing
     name: Writing

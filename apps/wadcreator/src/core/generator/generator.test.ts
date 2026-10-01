@@ -5,18 +5,20 @@ import { newSpec, toWaddSpec } from "../spec";
 import { bundleFiles, compose, dockerfile, kaleResourcesJson, quadlet, readme } from "./index";
 
 const here = (p: string) => resolve(__dirname, p);
-// The sibling checkouts next to this repo. They're optional (a fresh clone of
-// WadCreator alone still tests), but REQUIRE_SIBLINGS=1 turns a missing one
-// into a failure instead of a silent skip.
-const WADSPACES = here("../../../..");
-const containers = `${WADSPACES}/Wadspaces-David`;
-const toolsFixtures = `${WADSPACES}/Wadspaces-Tools/tests/fixtures`;
+// The monorepo root (apps/wadcreator/src/core/generator → five up). Unit-file
+// fixtures there are shared with wadd's tests, so the two renderers can't drift.
+const REPO = here("../../../../..");
+const fixture = (name: string) => readFileSync(`${REPO}/fixtures/quadlet/${name}`, "utf8");
+// The image recipes live in their own checkout next to the monorepo. It's
+// optional, but REQUIRE_SIBLINGS=1 turns a missing one into a failure instead
+// of a silent skip.
+const containers = `${REPO}/../Wadspaces-David`;
 const has = (p: string) => process.env.REQUIRE_SIBLINGS === "1" || existsSync(p);
 
 describe("quadlet", () => {
   it("matches wadd's renderer byte for byte", () => {
     // Same fixture as Wadspaces-Tools/tests/fixtures/wad-writing.container
-    const expected = readFileSync(here("__fixtures__/wad-writing.container"), "utf8");
+    const expected = fixture("wad-writing.container");
     const got = quadlet({
       id: "writing",
       name: "Writing",
@@ -33,7 +35,7 @@ describe("quadlet", () => {
   });
 
   it("matches wadd for a native (display: host) workspace", () => {
-    const expected = readFileSync(here("__fixtures__/wad-writing-host.container"), "utf8");
+    const expected = fixture("wad-writing-host.container");
     const got = quadlet({
       id: "writing",
       name: "Writing",
@@ -52,7 +54,7 @@ describe("quadlet", () => {
   it("matches wadd with projects mounted", () => {
     // Same inputs as Wadspaces-Tools/tests/test_quadlet.py test_projects_match_fixture:
     // writing-host.yaml plus two projects.
-    const expected = readFileSync(here("__fixtures__/wad-writing-projects.container"), "utf8");
+    const expected = fixture("wad-writing-projects.container");
     const got = quadlet({
       id: "writing",
       name: "Writing",
@@ -75,7 +77,7 @@ describe("quadlet", () => {
   it("matches wadd with a folder project: its own path, no relabel, SELinux separation off", () => {
     // Same inputs as Wadspaces-Tools/tests/fixtures/wad-writing-folder.container:
     // writing.yaml plus a GitHub project and a folder project.
-    const expected = readFileSync(here("__fixtures__/wad-writing-folder.container"), "utf8");
+    const expected = fixture("wad-writing-folder.container");
     const got = quadlet({
       id: "writing",
       name: "Writing",
@@ -110,15 +112,6 @@ describe("quadlet", () => {
     expect(quadlet({ id: "a", name: "A", image: "i", port: 3100, projects: [] })).not.toContain("wadspaces-extra");
   });
 
-  for (const name of ["wad-writing.container", "wad-writing-host.container", "wad-writing-projects.container"]) {
-    it.runIf(has(toolsFixtures))(`keeps ${name} in sync with wadd's copy`, () => {
-      expect(readFileSync(here(`__fixtures__/${name}`), "utf8")).toBe(readFileSync(`${toolsFixtures}/${name}`, "utf8"));
-    });
-  }
-  // Newer than the rest: skipped until wadd's checkout has it.
-  it.runIf(has(`${toolsFixtures}/wad-writing-folder.container`))("keeps wad-writing-folder.container in sync with wadd's copy", () => {
-    expect(readFileSync(here("__fixtures__/wad-writing-folder.container"), "utf8")).toBe(readFileSync(`${toolsFixtures}/wad-writing-folder.container`, "utf8"));
-  });
 });
 
 const kaleB = newSpec({

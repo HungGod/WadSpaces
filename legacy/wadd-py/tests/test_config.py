@@ -2,7 +2,7 @@ import pytest
 import yaml
 
 from wadd.config import ConfigError, config_to_dict, load_config, parse_config, save_config
-from conftest import FIXTURES
+from conftest import FIXTURES, REPO, WADD
 
 
 def ws(**kw):
@@ -54,9 +54,8 @@ def test_round_trip(tmp_path):
 
 
 def test_shipped_configs_are_valid():
-    root = FIXTURES.parents[1]
-    for p in ["host/etc/wadspaces/workspaces.yaml", "dev/workspaces.dev.yaml"]:
-        assert len(load_config(root / p).workspaces) == 6
+    for p in [REPO / "host/etc/wadspaces/workspaces.yaml", WADD / "dev/workspaces.dev.yaml"]:
+        assert len(load_config(p).workspaces) == 6
 
 
 def test_autostart_is_optional_and_not_written_when_false():
@@ -108,9 +107,8 @@ def test_the_image_decides_the_cloud_project(tmp_path):
 
 
 def test_the_shipped_host_config_links_to_wad_spaces():
-    root = FIXTURES.parents[1]
-    cfg = load_config(root / "host/etc/wadspaces/workspaces.yaml",
-                      vendor_cloud=root / "host/usr/lib/wadspaces/cloud.yaml")
+    cfg = load_config(REPO / "host/etc/wadspaces/workspaces.yaml",
+                      vendor_cloud=REPO / "host/usr/lib/wadspaces/cloud.yaml")
     assert cfg.cloud.project_id == "wad-spaces"
 
 

@@ -1,0 +1,14 @@
+# Rust
+/target/
+# Host image build: staging, disk images, and the host's own secrets
+/.build/
+/output/
+/host/secrets/
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# Logs and editor leftovers
+*.log
+.DS_Store

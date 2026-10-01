@@ -1,4 +1,4 @@
-// Client for wadd, the daemon on this machine (Wadspaces-Tools/wadd/api.py).
+// Client for wadd, the daemon on this machine (legacy/wadd-py/wadd/api.py).
 // The offline app talks to it directly on 127.0.0.1:8080 from the origin
 // app://wadcreator, which wadd trusts for changes. The online app never does:
 // it reaches machines through the cloud relay (relay.ts).

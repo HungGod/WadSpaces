@@ -19,7 +19,7 @@
 #   --stage-only DIR               with update: write what would go onto the
 #                                  drive into DIR instead (for testing)
 #
-# WADCREATOR_DIR (default ../WadCreator): its desktop app (npm run build:desktop,
+# WADCREATOR_DIR (default apps/wadcreator): its desktop app (npm run build:desktop,
 # Electron) goes into the image at /usr/lib/wadcreator. Without it, none.
 #
 # Baked-in secrets come from host/secrets/ (gitignored, never in the build
@@ -31,7 +31,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="${IMAGE:-localhost/wadspaces-host:latest}"
-WADCREATOR_DIR="${WADCREATOR_DIR:-${ROOT}/../WadCreator}"
+WADCREATOR_DIR="${WADCREATOR_DIR:-${ROOT}/apps/wadcreator}"
 SECRETS_DIR="${ROOT}/host/secrets"
 BIB_CONFIG="${ROOT}/host/bib-config.toml"
 TARGET="${1:-image}"

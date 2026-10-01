@@ -142,7 +142,7 @@ export function compose(spec: CreatorSpec): string {
 export const PROJECTS_DIR = "/var/lib/wadspaces-projects";
 export const STATE_DIR = "/var/lib/wadspaces";
 
-/** Byte-identical to Wadspaces-Tools/wadd/quadlet.py render_container_unit(). */
+/** Byte-identical to legacy/wadd-py/wadd/quadlet.py render_container_unit(). */
 export function quadlet(w: WaddSpec, projectsDir = PROJECTS_DIR, stateDir = STATE_DIR): string {
   const native = w.display === "host";
   const lines = [

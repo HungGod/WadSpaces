@@ -33,7 +33,7 @@ RUN curl -fsSLo /etc/yum.repos.d/tailscale.repo https://pkgs.tailscale.com/stabl
     && dnf -y install tailscale \
     && dnf clean all
 
-COPY wadd/ /usr/lib/wadspaces/wadd/
+COPY legacy/wadd-py/wadd/ /usr/lib/wadspaces/wadd/
 COPY host/etc/ /etc/
 COPY host/usr/ /usr/
 # Wad Creator's desktop app, built by host/build.sh from ../WadCreator/desktop.

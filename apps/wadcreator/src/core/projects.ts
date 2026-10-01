@@ -11,7 +11,7 @@
 //           it; it opens on whichever machine it's plugged into.
 //
 // The document is the same everywhere: wadd's project store on a machine
-// (Wadspaces-Tools/wadd/projects.py) and users/{uid}/projects/{id} in
+// (legacy/wadd-py/wadd/projects.py) and users/{uid}/projects/{id} in
 // Firestore, which wadd's cloud relay syncs both ways (last writer wins on
 // updatedAt). wadd's own `synced` and `legacy` flags never leave the machine.
 // Shared with the Cloud Functions: no import.meta.env here.

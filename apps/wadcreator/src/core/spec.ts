@@ -128,7 +128,7 @@ export interface CreatorSpec {
   updatedAt?: number;
 }
 
-// What wadd stores in workspaces.yaml (see Wadspaces-Tools/wadd/config.py).
+// What wadd stores in workspaces.yaml (see legacy/wadd-py/wadd/config.py).
 export interface WaddSpec {
   id: string;
   name: string;

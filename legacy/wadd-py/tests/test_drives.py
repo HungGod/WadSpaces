@@ -15,10 +15,10 @@ from wadd.drives import (DRIVES_DIR, LSBLK, DriveError, DriveMissing, Drives, Ou
                          browse_inside, clean_subpath, parse_lsblk, resolve_folder)
 from wadd.kiosk import NullKiosk
 from wadd.manager import WorkspaceManager
-from conftest import FIXTURES
+from conftest import PY_FIXTURES
 from test_manager import FakeBackend
 
-LSBLK_JSON = json.loads((FIXTURES / "lsblk.json").read_text())
+LSBLK_JSON = json.loads((PY_FIXTURES / "lsblk.json").read_text())
 STICK, DATA, VAULT = "5E3F-1A2B", "bbbbbbbb-0000-4000-8000-000000000001", "cccccccc-0000-4000-8000-000000000001"
 
 
@@ -157,7 +157,7 @@ def test_mountinfo_is_asked_when_lsblk_shows_no_mountpoint(tmp_path):
 
 def test_the_real_runner(tmp_path, monkeypatch):
     fake = tmp_path / "lsblk"
-    fake.write_text(f"#!{sys.executable}\nimport sys\nprint(open({str(FIXTURES / 'lsblk.json')!r}).read())\n")
+    fake.write_text(f"#!{sys.executable}\nimport sys\nprint(open({str(PY_FIXTURES / 'lsblk.json')!r}).read())\n")
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     assert [x["label"] for x in asyncio.run(Drives().list())] == ["Data", "Vault", "STICK"]
