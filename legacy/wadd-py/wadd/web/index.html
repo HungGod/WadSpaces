@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WadSpaces</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- One frame per live workspace: switching shows one and hides the rest,
+       so a warm workspace never reloads its stream. -->
+  <div id="frames"></div>
+
+  <main class="shell" id="home">
+    <header class="top">
+      <div>
+        <div class="clock" id="clock">--:--</div>
+        <div class="date" id="date"></div>
+      </div>
+      <div class="machine" id="machine"></div>
+    </header>
+
+    <!-- Home is a short flow: what to work on, for how long (or skip),
+         then the landing page. Picked workspaces download and start in the
+         background; Super+Tab reaches them. -->
+    <section class="flow" id="flow">
+      <div class="step" id="step-pick">
+        <h1 class="q">What workspace(s) do you want to work on right now?</h1>
+        <section class="grid" id="grid" aria-label="Workspaces"></section>
+        <div class="actions">
+          <span class="hint" id="pick-hint">Pick one or more.</span>
+          <button class="btn primary" type="button" id="pick-go" disabled>Continue</button>
+        </div>
+      </div>
+
+      <div class="step" id="step-time" hidden>
+        <h1 class="q">How long do you want to work for?</h1>
+        <div class="dl-list" id="dl-list" aria-label="Getting your workspaces ready"></div>
+        <div class="dial-wrap">
+          <svg class="dial" id="dial" viewBox="0 0 240 240" role="slider" tabindex="0"
+               aria-label="Work time" aria-valuemin="5" aria-valuemax="720"></svg>
+          <div class="readout" aria-hidden="true">
+            <b id="dial-value"></b>
+            <span id="dial-until"></span>
+          </div>
+        </div>
+        <div class="chips" id="chips">
+          <button class="chip" type="button" data-min="25">25 min</button>
+          <button class="chip" type="button" data-min="50">50 min</button>
+          <button class="chip" type="button" data-min="90">1 h 30</button>
+        </div>
+        <div class="actions">
+          <button class="btn" type="button" id="time-back">Back</button>
+          <button class="btn" type="button" id="time-skip">Skip focus mode</button>
+          <button class="btn primary" type="button" id="time-go">Start focus</button>
+        </div>
+      </div>
+
+      <!-- Home during a session. -->
+      <div class="step" id="step-landing" hidden>
+        <div class="mine" id="mine"></div>
+        <h1 class="q">What others are working on</h1>
+        <p class="sub">Streams people are sharing from their workspaces. <span class="sample">Sample data</span></p>
+        <section class="grid streams" id="streams" aria-label="Shared streams"></section>
+      </div>
+    </section>
+
+    <footer class="bottom">
+      <div class="hints">
+        <span><span class="key">Super</span>+<span class="key">Tab</span> switch between your workspaces</span>
+        <span id="notice"></span>
+      </div>
+      <button class="link" id="creator-open" type="button">Wad Creator</button>
+      <button class="link" id="enroll-open" hidden>Link this machine to Wad Creator</button>
+    </footer>
+  </main>
+
+  <!-- A native workspace draws on the screen itself, not in a frame: this
+       only shows while it starts (or if there is nowhere to show it). -->
+  <div class="native" id="native" hidden>
+    <div class="art" id="native-art"></div>
+    <p id="native-text"></p>
+  </div>
+
+  <!-- Above the frames, so they are reachable from inside a workspace too. -->
+  <div class="hud" id="hud">
+    <span class="net timer" id="timer" hidden></span>
+    <button class="net" id="net" type="button" hidden aria-haspopup="dialog">
+      <span class="bars" id="net-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span id="net-label">Wi-Fi</span>
+    </button>
+    <button class="net" id="power-open" type="button" aria-haspopup="dialog" aria-label="Power">⏻</button>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden>
+    <span class="spinner" aria-hidden="true"></span>
+    <span id="toast-text"></span>
+    <button class="link" id="toast-cancel">Cancel</button>
+  </div>
+
+  <div class="carousel" id="carousel" hidden>
+    <div class="cards" id="carousel-cards"></div>
+  </div>
+
+  <dialog id="enroll">
+    <form method="dialog" id="enroll-form">
+      <h2>Link to Wad Creator</h2>
+      <p>Open Machines in Wad Creator, choose “Add machine”, and enter the code it shows.</p>
+      <input type="text" id="enroll-code" autocomplete="off" spellcheck="false" maxlength="12" placeholder="ABCD1234" aria-label="Enrollment code">
+      <div class="msg" id="enroll-msg"></div>
+      <div class="row">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" id="enroll-go" value="default">Link</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="wifi" aria-labelledby="wifi-title">
+    <form method="dialog" id="wifi-form">
+      <div class="wifi-head">
+        <h2 id="wifi-title">Wi-Fi</h2>
+        <button class="btn" type="button" id="wifi-rescan">Scan</button>
+      </div>
+      <p id="wifi-status"></p>
+      <div class="wifi-list" id="wifi-list" role="listbox" aria-label="Networks"></div>
+      <div class="wifi-join" id="wifi-join" hidden>
+        <label for="wifi-pass" id="wifi-pass-label">Password</label>
+        <input type="password" id="wifi-pass" class="field" autocomplete="off">
+      </div>
+      <div class="msg" id="wifi-msg"></div>
+      <div class="row">
+        <button class="btn" type="button" id="wifi-forget" hidden>Forget</button>
+        <button class="btn" type="button" id="wifi-disconnect" hidden>Disconnect</button>
+        <button class="btn" value="cancel" formnovalidate>Close</button>
+        <button class="btn primary" type="button" id="wifi-connect" hidden>Connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="power" aria-labelledby="power-title">
+    <form method="dialog">
+      <h2 id="power-title">Power</h2>
+      <p>Workspaces keep their files; anything unsaved in an app is lost.</p>
+      <div class="msg" id="power-msg"></div>
+      <div class="row">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn" type="button" id="power-reboot">Restart</button>
+        <button class="btn primary" type="button" id="power-off">Shut down</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

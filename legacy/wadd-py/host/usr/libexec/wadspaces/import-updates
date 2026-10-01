@@ -1,0 +1,77 @@
+#!/bin/bash
+# Imports what `host/build.sh update|install --images|--bases` copied onto this
+# drive (/var/lib/wadspaces/incoming, an OCI directory), as import.list says:
+#   ws-<id>      workspace images -> podman storage, under the name wadd runs
+#   base-<name>  base images -> podman storage as localhost/wadspaces-<name>:trixie
+#   host     a new system image -> `bootc switch` (or `bootc upgrade` when this
+#            machine already follows incoming:host), checked, then one restart into it
+# Runs once per copy (incoming/pending), before the kiosk and wadd start.
+# incoming/ is kept so the next copy only has to send what changed.
+set -uo pipefail
+IN=/var/lib/wadspaces/incoming
+APPLIED=/var/lib/wadspaces/host.applied
+say() { echo "[wadspaces-import] $*"; }
+
+[[ -f "${IN}/pending" ]] || exit 0
+
+while read -r tag target; do
+    [[ -n "${tag}" && -n "${target}" ]] || continue
+    say "importing ${target}"
+    if ! skopeo copy -q "oci:${IN}:${tag}" "containers-storage:${target}"; then
+        case "${tag}" in
+            base-*) say "could not import ${target}; building on this machine needs it, so copy it again" ;;
+            *) say "could not import ${target}; it will be downloaded on first use instead" ;;
+        esac
+    fi
+done < "${IN}/import.list"
+
+# The digest the copy's system image has (its "host" tag in the OCI index).
+incoming_digest() {
+    python3 - "${IN}/index.json" <<'EOF'
+import json, sys
+for m in json.load(open(sys.argv[1])).get("manifests", []):
+    if m.get("annotations", {}).get("org.opencontainers.image.ref.name") == "host":
+        print(m["digest"])
+EOF
+}
+# "<transport> <image> <booted digest> <staged digest>" from bootc status.
+bootc_state() {
+    bootc status --json 2>/dev/null | python3 -c '
+import json, sys
+s = json.load(sys.stdin)
+img = (s.get("spec") or {}).get("image") or {}
+st = s.get("status") or {}
+def digest(d):
+    return (((d or {}).get("image") or {}).get("imageDigest")) or "-"
+print(img.get("transport") or "-", img.get("image") or "-", digest(st.get("booted")), digest(st.get("staged")))'
+}
+
+if [[ -f "${IN}/host.id" ]] && [[ "$(cat "${IN}/host.id")" != "$(cat "${APPLIED}" 2>/dev/null)" ]]; then
+    want="$(incoming_digest)"
+    read -r transport image booted _ <<< "$(bootc_state)"
+    if [[ -n "${want}" && "${booted}" == "${want}" ]]; then
+        say "already running this system image"
+        cp "${IN}/host.id" "${APPLIED}"
+    else
+        say "switching to the new system image; this takes a few minutes"
+        # A switch to the reference this machine already follows does nothing
+        # (bootc compares the reference, not the image behind it), so then it's
+        # an upgrade, which re-reads the image and stages it when it changed.
+        if [[ "${transport}" == "oci" && "${image}" == "${IN}:host" ]]; then
+            bootc upgrade
+        else
+            bootc switch --transport oci "${IN}:host"
+        fi
+        read -r _ _ _ staged <<< "$(bootc_state)"
+        if [[ -n "${want}" && "${staged}" == "${want}" ]]; then
+            cp "${IN}/host.id" "${APPLIED}"
+            rm -f "${IN}/pending"
+            say "restarting into the new system image"
+            systemctl reboot
+            exit 0
+        fi
+        say "the new system image was not staged (wanted ${want:-?}, staged ${staged}); staying on the current one"
+    fi
+fi
+rm -f "${IN}/pending"
+say "done"

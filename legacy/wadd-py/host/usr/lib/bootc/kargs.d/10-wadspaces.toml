@@ -1,0 +1,3 @@
+# The OS runs from a USB stick. Never let USB power management suspend or
+# drop it (a dropped root disk turns every read into EIO and hangs the boot).
+kargs = ["usbcore.autosuspend=-1"]

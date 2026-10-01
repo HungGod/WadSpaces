@@ -1,0 +1,16 @@
+# No greeter: boot straight into the kiosk as `wad`. initial_session is
+# greetd's autologin and goes through the full `greetd` PAM stack (SELinux
+# user context, loginuid, logind session). default_session is the greeter
+# slot, which only gets the minimal `greetd-greeter` stack, so the kiosk
+# must not run there. kiosk-session restarts sway itself, so greetd only
+# falls back to the agreety login prompt if the session script dies.
+[terminal]
+vt = 1
+
+[initial_session]
+command = "/usr/libexec/wadspaces/kiosk-session"
+user = "wad"
+
+[default_session]
+command = "agreety --cmd /bin/bash"
+user = "greetd"
