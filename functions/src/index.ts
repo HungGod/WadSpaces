@@ -1,20 +1,28 @@
-// Hosted mode (later): links a WadSpaces machine to a Wad Creator account.
-// While Wad Creator runs locally on each machine this function is unused.
+// Cloud Functions for Wad Creator (project and settings: .env.<project-id>).
 //
-// The owner creates enrollCodes/{code} from the Machines page; the machine
-// calls this with the code (wadd enroll CODE) and gets a Firebase custom token
-// scoped to itself. The Functions service account needs the "Service Account
-// Token Creator" role, or createCustomToken fails with iam.serviceAccounts.signBlob.
+// enrollMachine links a WadSpaces machine to an account. The owner creates
+// enrollCodes/{code} (Manager → Add machine); the machine calls this with the
+// code (Wad Creator on the machine, or `wadd enroll CODE`) and gets a Firebase
+// custom token scoped to itself: {role: "machine", owner, machineId}. The
+// runtime account (wad-functions) signs it (Service Account Token Creator on
+// itself, infra/setup.sh). The web API key the machine needs to sign in comes
+// from Secret Manager (WEB_API_KEY), so it isn't in the repo.
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
+import { setGlobalOptions } from "firebase-functions/v2";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { defineString } from "firebase-functions/params";
+import { defineSecret } from "firebase-functions/params";
 
 initializeApp();
-const WEB_API_KEY = defineString("WEB_API_KEY", { description: "Web API key handed to enrolled machines" });
+setGlobalOptions({
+  region: process.env.WAD_REGION || "australia-southeast2",
+  ...(process.env.WAD_FUNCTIONS_SA && { serviceAccount: process.env.WAD_FUNCTIONS_SA }),
+});
 
-export const enrollMachine = onCall({ region: "australia-southeast2" }, async (req) => {
+const WEB_API_KEY = defineSecret("WEB_API_KEY");
+
+export const enrollMachine = onCall({ secrets: [WEB_API_KEY] }, async (req) => {
   const code = String(req.data?.code ?? "").trim().toUpperCase();
   const hostname = String(req.data?.hostname ?? "").slice(0, 100);
   const machineName = String(req.data?.machineName ?? hostname).slice(0, 100);
@@ -47,5 +55,11 @@ export const enrollMachine = onCall({ region: "australia-southeast2" }, async (r
     owner: uid,
     machineId,
   });
-  return { machineId, ownerUid: uid, customToken, projectId: process.env.GCLOUD_PROJECT, apiKey: WEB_API_KEY.value() };
+  return {
+    machineId,
+    ownerUid: uid,
+    customToken,
+    projectId: process.env.GCLOUD_PROJECT,
+    apiKey: WEB_API_KEY.value(),
+  };
 });
