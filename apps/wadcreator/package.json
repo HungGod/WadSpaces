@@ -1,0 +1,42 @@
+{
+  "name": "wadcreator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:desktop": "VITE_TARGET=offline tsc --noEmit && VITE_TARGET=offline vite build --outDir desktop/renderer --emptyOutDir && cd desktop && npm ci --no-audit --no-fund && npm run build",
+    "desktop": "VITE_TARGET=offline vite build --outDir desktop/renderer --emptyOutDir && cd desktop && npm install --no-audit --no-fund && npm start",
+    "build:online": "VITE_TARGET=online npm run build",
+    "test:rules": "firebase emulators:exec --project demo-wadcreator --only firestore \"vitest run --config vitest.rules.config.ts\""
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.3.0",
+    "clsx": "^2.1.1",
+    "firebase": "^12.19.0",
+    "jszip": "^3.10.2",
+    "lucide-react": "^1.49.0",
+    "motion": "^13.4.6",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^8.4.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}

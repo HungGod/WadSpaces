@@ -1,0 +1,555 @@
+[
+  {
+    "id": "chrome",
+    "name": "Chrome",
+    "domain": "google.com/chrome",
+    "color": "#4285f4",
+    "iconUrl": "/catalog/chrome.png"
+  },
+  {
+    "id": "firefox",
+    "name": "Firefox",
+    "domain": "firefox.com",
+    "color": "#ff7139",
+    "iconUrl": "/catalog/firefox.png"
+  },
+  {
+    "id": "vscode",
+    "name": "VS Code",
+    "domain": "code.visualstudio.com",
+    "color": "#0e7fd6",
+    "iconUrl": "/catalog/vscode.png"
+  },
+  {
+    "id": "claude-code",
+    "name": "Claude Code",
+    "domain": "claude.com",
+    "color": "#d97757",
+    "iconUrl": "/icons/claude-code.svg"
+  },
+  {
+    "id": "claude",
+    "name": "Claude",
+    "domain": "claude.ai",
+    "color": "#c96442",
+    "iconUrl": "/catalog/claude.png"
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "domain": "github.com",
+    "color": "#24292f",
+    "iconUrl": "/catalog/github.png"
+  },
+  {
+    "id": "terminal",
+    "name": "Terminal",
+    "domain": "gnome.org",
+    "color": "#2b2b2b",
+    "iconUrl": "/catalog/terminal.png"
+  },
+  {
+    "id": "gimp",
+    "name": "GIMP",
+    "domain": "developer.gimp.org",
+    "color": "#8a7a5c",
+    "iconUrl": "/catalog/gimp.png"
+  },
+  {
+    "id": "krita",
+    "name": "Krita",
+    "domain": "krita.org",
+    "color": "#3daee9",
+    "iconUrl": "/catalog/krita.png"
+  },
+  {
+    "id": "inkscape",
+    "name": "Inkscape",
+    "domain": "wiki.inkscape.org",
+    "color": "#3b3b3b",
+    "iconUrl": "/catalog/inkscape.png"
+  },
+  {
+    "id": "blender",
+    "name": "Blender",
+    "domain": "blender.org",
+    "color": "#e87d0d",
+    "iconUrl": "/catalog/blender.png"
+  },
+  {
+    "id": "figma",
+    "name": "Figma",
+    "domain": "figma.com",
+    "color": "#a259ff",
+    "iconUrl": "/catalog/figma.png"
+  },
+  {
+    "id": "godot",
+    "name": "Godot",
+    "domain": "godotengine.org",
+    "color": "#478cbf",
+    "iconUrl": "/catalog/godot.png"
+  },
+  {
+    "id": "unity",
+    "name": "Unity",
+    "domain": "unity.com",
+    "color": "#222c37",
+    "iconUrl": "/catalog/unity.png"
+  },
+  {
+    "id": "android-studio",
+    "name": "Android Studio",
+    "domain": "developer.android.com",
+    "color": "#3ddc84",
+    "iconUrl": "/catalog/android-studio.png"
+  },
+  {
+    "id": "obsidian",
+    "name": "Obsidian",
+    "domain": "obsidian.md",
+    "color": "#7c3aed",
+    "iconUrl": "/catalog/obsidian.png"
+  },
+  {
+    "id": "notion",
+    "name": "Notion",
+    "domain": "notion.so",
+    "color": "#2f2f2f",
+    "iconUrl": "/catalog/notion.png"
+  },
+  {
+    "id": "libreoffice",
+    "name": "LibreOffice",
+    "domain": "libreoffice.org",
+    "color": "#18a303",
+    "iconUrl": "/catalog/libreoffice.png"
+  },
+  {
+    "id": "text-editor",
+    "name": "Text Editor",
+    "domain": "apps.gnome.org",
+    "color": "#2d6cc0",
+    "iconUrl": "/icons/text-editor.svg"
+  },
+  {
+    "id": "slack",
+    "name": "Slack",
+    "domain": "slack.com",
+    "color": "#4a154b",
+    "iconUrl": "/catalog/slack.png"
+  },
+  {
+    "id": "discord",
+    "name": "Discord",
+    "domain": "discord.com",
+    "color": "#5865f2",
+    "iconUrl": "/catalog/discord.png"
+  },
+  {
+    "id": "spotify",
+    "name": "Spotify",
+    "domain": "spotify.com",
+    "color": "#1db954",
+    "iconUrl": "/catalog/spotify.png"
+  },
+  {
+    "id": "docker",
+    "name": "Docker",
+    "domain": "docker.com",
+    "color": "#1d63ed",
+    "iconUrl": "/catalog/docker.png"
+  },
+  {
+    "id": "postman",
+    "name": "Postman",
+    "domain": "postman.com",
+    "color": "#ff6c37",
+    "iconUrl": "/catalog/postman.png"
+  },
+  {
+    "id": "obs",
+    "name": "OBS Studio",
+    "domain": "obsproject.com",
+    "color": "#302e31",
+    "iconUrl": "/catalog/obs.png"
+  },
+  {
+    "id": "audacity",
+    "name": "Audacity",
+    "domain": "audacityteam.org",
+    "color": "#0000cc",
+    "iconUrl": "/catalog/audacity.png"
+  },
+  {
+    "id": "steam",
+    "name": "Steam",
+    "domain": "steampowered.com",
+    "color": "#1b2838",
+    "iconUrl": "/catalog/steam.png"
+  },
+  {
+    "id": "google-cloud",
+    "name": "Google Cloud",
+    "domain": "cloud.google.com",
+    "color": "#4285f4",
+    "iconUrl": "/catalog/google-cloud.png"
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "domain": "openrouter.ai",
+    "color": "#6467f2",
+    "iconUrl": "/catalog/openrouter.png"
+  },
+  {
+    "id": "aseprite",
+    "name": "Aseprite",
+    "domain": "aseprite.org",
+    "color": "#7d929e",
+    "iconUrl": "/catalog/aseprite.png"
+  },
+  {
+    "id": "zoom",
+    "name": "Zoom",
+    "domain": "zoom.us",
+    "color": "#0b5cff",
+    "iconUrl": "/catalog/zoom.png"
+  },
+  {
+    "id": "spritesheet-packer",
+    "name": "Spritesheet Packer",
+    "domain": "codeandweb.com",
+    "color": "#2b2b2b",
+    "iconUrl": "/catalog/spritesheet-packer.png"
+  },
+  {
+    "id": "piskel",
+    "name": "Piskel",
+    "domain": "piskelapp.com",
+    "color": "#3a3a4a",
+    "iconUrl": "/catalog/piskel.png"
+  },
+  {
+    "id": "tiled",
+    "name": "Tiled",
+    "domain": "mapeditor.org",
+    "color": "#4a8c5c",
+    "iconUrl": "/catalog/tiled.png"
+  },
+  {
+    "id": "google-drive",
+    "name": "Google Drive",
+    "domain": "drive.google.com",
+    "color": "#1fa463",
+    "iconUrl": "/catalog/google-drive.png"
+  },
+  {
+    "id": "gmail",
+    "name": "Gmail",
+    "domain": "mail.google.com",
+    "color": "#d93025",
+    "iconUrl": "/catalog/gmail.png"
+  },
+  {
+    "id": "google-workspace",
+    "name": "Google Workspace",
+    "domain": "workspace.google.com",
+    "color": "#4285f4",
+    "iconUrl": "/catalog/google-workspace.png"
+  },
+  {
+    "id": "codex",
+    "name": "Codex",
+    "domain": "openai.com",
+    "color": "#10a37f",
+    "iconUrl": "/catalog/codex.png"
+  },
+  {
+    "id": "gemini-cli",
+    "name": "Gemini CLI",
+    "domain": "gemini.google.com",
+    "color": "#4f7cff",
+    "iconUrl": "/catalog/gemini-cli.png"
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "domain": "deepseek.com",
+    "color": "#4d6bfe",
+    "iconUrl": "/catalog/deepseek.png"
+  },
+  {
+    "id": "opencode",
+    "name": "OpenCode",
+    "domain": "opencode.ai",
+    "color": "#211e1e",
+    "iconUrl": "/catalog/opencode.png"
+  },
+  {
+    "id": "qwen-code",
+    "name": "Qwen Code",
+    "domain": "qwen.ai",
+    "color": "#615ced",
+    "iconUrl": "/catalog/qwen-code.png"
+  },
+  {
+    "id": "aider",
+    "name": "Aider",
+    "domain": "aider.chat",
+    "color": "#14b014",
+    "iconUrl": "/icons/aider.png"
+  },
+  {
+    "id": "lm-studio",
+    "name": "LM Studio",
+    "domain": "lmstudio.ai",
+    "color": "#4338ca",
+    "iconUrl": "/catalog/lm-studio.png"
+  },
+  {
+    "id": "code-server",
+    "name": "code-server",
+    "domain": "coder.com",
+    "color": "#0e7fd6",
+    "iconUrl": "/catalog/code-server.png"
+  },
+  {
+    "id": "vscodium",
+    "name": "VSCodium",
+    "domain": "vscodium.com",
+    "color": "#2f80ed",
+    "iconUrl": "/catalog/vscodium.png"
+  },
+  {
+    "id": "intellij-idea",
+    "name": "IntelliJ IDEA",
+    "domain": "jetbrains.com/idea",
+    "color": "#fe315d",
+    "iconUrl": "/catalog/intellij-idea.png"
+  },
+  {
+    "id": "pycharm",
+    "name": "PyCharm",
+    "domain": "jetbrains.com/pycharm",
+    "color": "#21d789",
+    "iconUrl": "/catalog/pycharm.png"
+  },
+  {
+    "id": "github-desktop",
+    "name": "GitHub Desktop",
+    "domain": "desktop.github.com",
+    "color": "#6e40c9",
+    "iconUrl": "/catalog/github-desktop.png"
+  },
+  {
+    "id": "chromium",
+    "name": "Chromium",
+    "domain": "chromium.org",
+    "color": "#4587f3",
+    "iconUrl": "/icons/chromium.png"
+  },
+  {
+    "id": "brave",
+    "name": "Brave",
+    "domain": "brave.com",
+    "color": "#fb542b",
+    "iconUrl": "/catalog/brave.png"
+  },
+  {
+    "id": "librewolf",
+    "name": "LibreWolf",
+    "domain": "librewolf.net",
+    "color": "#00acff",
+    "iconUrl": "/catalog/librewolf.png"
+  },
+  {
+    "id": "mullvad-browser",
+    "name": "Mullvad Browser",
+    "domain": "mullvad.net",
+    "color": "#294d73",
+    "iconUrl": "/catalog/mullvad-browser.png"
+  },
+  {
+    "id": "vivaldi",
+    "name": "Vivaldi",
+    "domain": "vivaldi.com",
+    "color": "#ef3939",
+    "iconUrl": "/catalog/vivaldi.png"
+  },
+  {
+    "id": "freecad",
+    "name": "FreeCAD",
+    "domain": "freecad.org",
+    "color": "#cb333b",
+    "iconUrl": "/icons/freecad.png"
+  },
+  {
+    "id": "kicad",
+    "name": "KiCad",
+    "domain": "kicad.org",
+    "color": "#314cb0",
+    "iconUrl": "/catalog/kicad.png"
+  },
+  {
+    "id": "orcaslicer",
+    "name": "OrcaSlicer",
+    "domain": "orcaslicer.net",
+    "color": "#009688",
+    "iconUrl": "/catalog/orcaslicer.png"
+  },
+  {
+    "id": "bambustudio",
+    "name": "Bambu Studio",
+    "domain": "bambulab.com",
+    "color": "#00ae42",
+    "iconUrl": "/catalog/bambustudio.png"
+  },
+  {
+    "id": "cura",
+    "name": "UltiMaker Cura",
+    "domain": "ultimaker.com",
+    "color": "#196ef0",
+    "iconUrl": "/catalog/cura.png"
+  },
+  {
+    "id": "ardour",
+    "name": "Ardour",
+    "domain": "ardour.org",
+    "color": "#c8102e",
+    "iconUrl": "/catalog/ardour.png"
+  },
+  {
+    "id": "kdenlive",
+    "name": "Kdenlive",
+    "domain": "kdenlive.org",
+    "color": "#527eb2",
+    "iconUrl": "/catalog/kdenlive.png"
+  },
+  {
+    "id": "shotcut",
+    "name": "Shotcut",
+    "domain": "shotcut.org",
+    "color": "#3a6ea5",
+    "iconUrl": "/icons/shotcut.png"
+  },
+  {
+    "id": "openshot",
+    "name": "OpenShot",
+    "domain": "openshot.org",
+    "color": "#e45e2c",
+    "iconUrl": "/catalog/openshot.png"
+  },
+  {
+    "id": "darktable",
+    "name": "darktable",
+    "domain": "darktable.org",
+    "color": "#3a3a3a",
+    "iconUrl": "/icons/darktable.png"
+  },
+  {
+    "id": "digikam",
+    "name": "digiKam",
+    "domain": "digikam.org",
+    "color": "#2c7bd0",
+    "iconUrl": "/icons/digikam.png"
+  },
+  {
+    "id": "rawtherapee",
+    "name": "RawTherapee",
+    "domain": "rawtherapee.com",
+    "color": "#8a5a2b",
+    "iconUrl": "/icons/rawtherapee.jpg"
+  },
+  {
+    "id": "onlyoffice",
+    "name": "ONLYOFFICE",
+    "domain": "onlyoffice.com",
+    "color": "#ff6f3d",
+    "iconUrl": "/catalog/onlyoffice.png"
+  },
+  {
+    "id": "zotero",
+    "name": "Zotero",
+    "domain": "zotero.org",
+    "color": "#cc2936",
+    "iconUrl": "/icons/zotero.png"
+  },
+  {
+    "id": "calibre",
+    "name": "calibre",
+    "domain": "calibre-ebook.com",
+    "color": "#7a4b2a",
+    "iconUrl": "/catalog/calibre.png"
+  },
+  {
+    "id": "signal",
+    "name": "Signal",
+    "domain": "signal.org",
+    "color": "#3a76f0",
+    "iconUrl": "/catalog/signal.png"
+  },
+  {
+    "id": "telegram",
+    "name": "Telegram",
+    "domain": "telegram.org",
+    "color": "#27a7e7",
+    "iconUrl": "/catalog/telegram.png"
+  },
+  {
+    "id": "filezilla",
+    "name": "FileZilla",
+    "domain": "filezilla-project.org",
+    "color": "#bf0000",
+    "iconUrl": "/catalog/filezilla.png"
+  },
+  {
+    "id": "wireshark",
+    "name": "Wireshark",
+    "domain": "wireshark.org",
+    "color": "#1679a7",
+    "iconUrl": "/icons/wireshark.png"
+  },
+  {
+    "id": "remmina",
+    "name": "Remmina",
+    "domain": "remmina.org",
+    "color": "#2d7fb8",
+    "iconUrl": "/catalog/remmina.png"
+  },
+  {
+    "id": "kali-linux",
+    "name": "Kali Linux",
+    "domain": "kali.org",
+    "color": "#367bf0",
+    "iconUrl": "/catalog/kali-linux.png"
+  },
+  {
+    "id": "retroarch",
+    "name": "RetroArch",
+    "domain": "retroarch.com",
+    "color": "#1e1e1e",
+    "iconUrl": "/icons/retroarch.png"
+  },
+  {
+    "id": "dolphin",
+    "name": "Dolphin",
+    "domain": "dolphin-emu.org",
+    "color": "#1e90ff",
+    "iconUrl": "/icons/dolphin.png"
+  },
+  {
+    "id": "scummvm",
+    "name": "ScummVM",
+    "domain": "scummvm.org",
+    "color": "#d0a24c",
+    "iconUrl": "/catalog/scummvm.png"
+  },
+  {
+    "id": "luanti",
+    "name": "Luanti",
+    "domain": "luanti.org",
+    "color": "#5c9e31",
+    "iconUrl": "/catalog/luanti.png"
+  }
+]
