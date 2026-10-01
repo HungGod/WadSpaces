@@ -3,7 +3,7 @@ import { ArrowRight, CheckCircle2, CloudDownload, Loader2, Gamepad2, Globe, Play
 import { AppTile } from "@/components/AppTile";
 import { Button, Modal } from "@/components/ui";
 import { openWadspace, quickLaunch } from "@/lib/launch";
-import { THIS_MACHINE, useApp } from "@/lib/store";
+import { useApp } from "@/lib/store";
 import { templateById, type Template } from "@/lib/templates";
 import type { App, Wadspace } from "@/lib/types";
 
@@ -53,7 +53,7 @@ export function WaitSheet() {
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="size-5 shrink-0 text-fg dark:text-accent" />
                 <div className="min-w-0 flex-1 text-sm font-medium">Ready to open</div>
-                <Button variant="primary" size="sm" onClick={() => { close(); openWadspace(ws, THIS_MACHINE); }}>
+                <Button variant="primary" size="sm" onClick={() => { close(); openWadspace(ws); }}>
                   <Play className="size-3.5 fill-current" /> Open
                 </Button>
               </div>
@@ -120,7 +120,7 @@ function InstantTile({ t, icon, title, blurb }: { t: Template; icon: React.React
   const user = useApp((s) => s.user);
   const existing = useApp((s) => s.wadspaces.find((w) => w.templateId === t.id && w.owner === user?.username && w.local));
   // Reuse the copy the user already has rather than stacking up duplicates.
-  const launch = () => (existing ? openWadspace(existing, THIS_MACHINE) : quickLaunch(t));
+  const launch = () => (existing ? openWadspace(existing) : quickLaunch(t));
   return (
     <button type="button" onClick={launch} className="group flex flex-col gap-3 rounded-2xl p-3.5 text-left ring-1 ring-line transition-colors hover:bg-surface-2 hover:ring-line-strong">
       <span className="flex items-center justify-between">

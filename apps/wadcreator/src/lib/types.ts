@@ -116,14 +116,12 @@ export interface ContainerRun {
   machineId: string;
   /** Who started it. */
   user: string;
-  mode: "local" | "stream" | "remote";
+  mode: "local" | "stream";
   startedAt: string;
   /** Null while it's still running. */
   endedAt: string | null;
   /** Ids of the projects it mounted. */
   projects?: string[];
-  /** People who connected to it over a stream. */
-  viewers?: { user: string; joinedAt: string; leftAt?: string }[];
 }
 
 export interface Machine {

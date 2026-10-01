@@ -13,24 +13,16 @@ import type { GithubRepo, Project, ProjectDraft, ProjectStatus } from "@core/pro
 import type { App, ContainerRun, Draft, FocusLock, LastSession, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
 
 export interface Caps {
-  /** Sign-in, profiles and other people. */
-  accounts: boolean;
   /** Share wadspaces with other users. */
   sharing: boolean;
   /** Build images on this machine (wadd + podman). */
   localBuild: boolean;
-  /** More than one machine to manage (the relay). */
-  multiMachine: boolean;
-  /** Logs and health for this machine. */
-  diagnostics: boolean;
   /** Container history (runs). */
   history: boolean;
   /** GitHub repositories cloned onto the machine and mounted into wadspaces at launch. */
   projects: boolean;
   /** Machines reach each other over the user's tailnet (Tailscale). */
   tailnet: boolean;
-  /** Run a wadspace on another of the user's trusted machines. */
-  remoteRun: boolean;
 }
 
 export type WadspaceInput = Pick<Wadspace, "name" | "description" | "visibility" | "layout" | "advanced" | "agent" | "dockerfile" | "templateId"> & {
@@ -182,7 +174,6 @@ export interface Backend {
   /** Install if needed, start, and show a wadspace on a machine's screen. */
   open(machineId: string, wadspaceId: string): Promise<void>;
   container(machineId: string, containerId: string, action: ContainerAction): Promise<void>;
-  setAllowRemote(machineId: string, allow: boolean): Promise<void>;
   /** Online: a one-time code to link a new machine (valid 15 minutes). */
   createEnrollCode?(machineName: string): Promise<string>;
   /** Offline: link this machine to an account with a code from the online app. */

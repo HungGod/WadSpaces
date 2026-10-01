@@ -18,5 +18,5 @@ export default defineConfig({
   server: { host: "localhost", port: 8081, strictPort: true },
   preview: { host: "localhost", port: 8081, strictPort: true },
   // Rules tests need the emulator: npm run test:rules.
-  test: { exclude: [...configDefaults.exclude, "tests/rules/**", "desktop/**"] },
+  test: { exclude: [...configDefaults.exclude, "tests/rules/**"] },
 });

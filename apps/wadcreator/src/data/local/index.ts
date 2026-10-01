@@ -90,15 +90,11 @@ function fromInstalled(w: WaddSpec): WadspaceSpec {
 export class LocalBackend implements Backend {
   readonly target = "offline" as const;
   readonly caps: Caps = {
-    accounts: false,
     sharing: false,
     localBuild: false, // set by init() when this wadd can build
-    multiMachine: false,
-    diagnostics: true,
     history: false, // set by init() when this wadd keeps run history
     projects: false, // set by init() when this wadd has projects
     tailnet: false, // set by init() when Tailscale is installed here
-    remoteRun: false,
   };
 
   private snap: Snapshot | null = null;
@@ -235,11 +231,6 @@ export class LocalBackend implements Backend {
 
   defaultMachineId() {
     return THIS_MACHINE;
-  }
-
-  /** The live snapshot, for pages that show wadd's own details (Diagnostics). */
-  snapshot() {
-    return this.snap;
   }
 
   // ---------------------------------------------------------------- people
@@ -652,10 +643,6 @@ export class LocalBackend implements Backend {
       return;
     }
     await wadd.action(containerId, action);
-  }
-
-  async setAllowRemote() {
-    throw new Unsupported("Remote management from here");
   }
 
   async linkMachine(code: string) {

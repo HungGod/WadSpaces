@@ -72,15 +72,11 @@ const OLD_FIELDS = { holders: deleteField(), ignore: deleteField(), folderId: de
 export class CloudBackend implements Backend {
   readonly target = "online" as const;
   readonly caps: Caps = {
-    accounts: true,
     sharing: false,
     localBuild: false,
-    multiMachine: true,
-    diagnostics: false,
     history: false,
     projects: true,
     tailnet: false,
-    remoteRun: false,
   };
 
   private listeners = new Set<(t: Topic) => void>();
@@ -591,10 +587,6 @@ export class CloudBackend implements Backend {
   async container(machineId: string, containerId: string, action: ContainerAction) {
     if (action === "download" || action === "remove") throw new Unsupported("Doing that remotely");
     await this.command(machineId, action, containerId);
-  }
-
-  async setAllowRemote() {
-    throw new Unsupported("Changing that from the web");
   }
 
   async createEnrollCode(machineName: string) {

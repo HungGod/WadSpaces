@@ -1,9 +1,3 @@
-// The offline app's Electron shell (desktop/preload.cjs), when there is one.
-// In a browser (online app, or offline dev in Chrome) it's undefined.
-
-export interface ShellBridge {
-  shell: true;
-  ready(): void;
-}
-
-export const shell: ShellBridge | undefined = (globalThis as { wadcreator?: ShellBridge }).wadcreator;
+// Whether the app runs inside the Tauri shell (the machine app). In a browser
+// (the online app, or offline dev against a dev wadd) it's false.
+export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

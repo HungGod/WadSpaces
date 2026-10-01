@@ -4,10 +4,8 @@
 import { initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
 import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
-import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
 
 const env = import.meta.env;
-export const REGION: string = env.VITE_FUNCTIONS_REGION || "australia-southeast2";
 const emulators = env.VITE_USE_EMULATORS === "1";
 
 const config = {
@@ -25,11 +23,9 @@ if (!config.apiKey || !config.projectId) {
 export const app = initializeApp(config);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const functions = getFunctions(app, REGION);
 
 if (emulators) {
   const host = env.VITE_EMULATOR_HOST || "127.0.0.1";
   connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
   connectFirestoreEmulator(db, host, 8090);
-  connectFunctionsEmulator(functions, host, 5001);
 }

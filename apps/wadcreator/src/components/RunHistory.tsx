@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Eye, Folder, History, Laptop, Loader2, MonitorPlay, Radio, Server } from "lucide-react";
+import { Folder, History, Laptop, Loader2, MonitorPlay, Radio, Server } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
 import { THIS_MACHINE, useApp } from "@/lib/store";
@@ -9,7 +9,6 @@ import { Avatar } from "./ui";
 const MODE = {
   local: { label: "Local", icon: MonitorPlay },
   stream: { label: "Streamed", icon: Radio },
-  remote: { label: "Remote", icon: Server },
 } as const;
 
 /** "1h 12m", "14m", "<1m" */
@@ -147,19 +146,6 @@ export function RunHistory({ wadspaceId, machineId, limit = 12 }: { wadspaceId?:
                       )}
                     </span>
                   </div>
-                  {!!r.viewers?.length && (
-                    <div className="ml-[76px] mt-1.5 flex flex-wrap gap-1.5">
-                      {r.viewers.map((v, i) => {
-                        const p = person(v.user);
-                        return (
-                          <span key={i} className="flex items-center gap-1.5 rounded-full bg-surface-2 py-0.5 pl-0.5 pr-2 text-[11px] text-muted ring-1 ring-line" title={`Joined ${time(v.joinedAt)}${v.leftAt ? `, left ${time(v.leftAt)}` : ", still watching"}`}>
-                            {p ? <Avatar user={p} size={16} className="ring-0" /> : <Eye className="ml-1 size-3" />}
-                            {p?.displayName ?? v.user} · {v.leftAt ? duration(Date.parse(v.leftAt) - Date.parse(v.joinedAt)) : "watching"}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
                 </li>
               );
             })}

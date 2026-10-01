@@ -4,7 +4,6 @@ import { Loader2 } from "lucide-react";
 import { backend } from "@/data";
 import { Builder } from "@/components/builder/Builder";
 import { Shell } from "@/components/Shell";
-import { shell } from "@/lib/shell";
 import type { PublicUser } from "@/lib/types";
 import Home from "@/pages/Home";
 import Launch from "@/pages/Launch";
@@ -81,8 +80,6 @@ function EditBuilder() {
 }
 
 export default function App() {
-  // Tell the offline shell the UI started.
-  useEffect(() => shell?.ready(), []);
   return (
     <Suspense fallback={<Spinner />}>
       <Routes>

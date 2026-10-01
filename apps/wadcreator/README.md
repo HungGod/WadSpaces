@@ -4,14 +4,14 @@ Design, build and run WadSpaces wadspaces: a desktop of apps and a wallpaper
 that becomes a container image, run on your WadSpaces machines.
 
 One React + Vite + TypeScript + Tailwind codebase, built two ways by
-`VITE_TARGET` (`src/lib/target.ts`):
+`VITE_TARGET` (`offline`, the default, or `online`):
 
-| | Offline (desktop app) | Online (web app) |
+| | Offline (machine app) | Online (web app) |
 |---|---|---|
-| Runs | on a WadSpaces machine, as a window of its own (Electron, `desktop/`) | in any browser, on Firebase Hosting |
+| Runs | on a WadSpaces machine, as a window of its own (being rebuilt with Tauri; for now `npm run dev` only) | in any browser, on Firebase Hosting |
 | Talks to | `wadd` on `http://127.0.0.1:8080` (`src/data/local`) | Firebase and your machines' cloud relay (`src/data/cloud`) |
 | Account | none: "you" are the machine | email/password or Google, plus a username |
-| Builds | on the machine with podman | not yet: build in the desktop app on the machine |
+| Builds | on the machine with podman | not yet: build in the machine app |
 | Updates | with the host image (the USB stick) | redeploy Hosting |
 
 Pages and components only talk to the backend interface in
@@ -31,7 +31,6 @@ src/core/          shared with Cloud Functions: no React, DOM or import.meta.env
 src/data/          backend.ts + local/ (wadd) + cloud/ (Firebase, relay)
 src/pages/         Home, Wadspaces, Launch, Manager, Login/Signup/Welcome
 src/components/    Shell, Builder, the desktop editor, cards, dialogs
-desktop/           the Electron shell
 functions/         Cloud Functions
 infra/             Google Cloud setup (see infra/README.md)
 ```
@@ -46,7 +45,7 @@ npm test                       # unit tests
 npm run test:rules             # firestore.rules against the emulator
 ```
 
-The offline UI needs `wadd`. From `../Wadspaces-Tools`:
+The offline UI needs `wadd`. From `../../legacy/wadd-py`:
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m wadd --config dev/workspaces.dev.yaml serve --dev --no-cdp --no-hotkeys
@@ -57,26 +56,16 @@ Project settings → Web app). Set `VITE_USE_EMULATORS=1` to use
 `firebase emulators:start` instead of the real project.
 
 `REQUIRE_SIBLINGS=1 npm test` fails, rather than skips, when
-`../Wadspaces-David` or `../Wadspaces-Tools` is missing: the generator tests
-compare against the real Dockerfiles and wadd's quadlet fixtures.
+`Wadspaces-David` (next to the monorepo) is missing: the generator tests
+compare against its real Dockerfiles, and against the quadlet fixtures in
+`fixtures/quadlet/` that wadd's tests share.
 
-## Offline: the desktop app
+## Offline: the machine app
 
-On a machine, Home's **Wad Creator** link asks wadd to start it
-(`POST /api/apps/wadcreator/open`); wadd runs `/usr/lib/wadcreator/wadcreator`
-in the kiosk's sway session. The UI is served from `app://wadcreator/`, an
-Origin wadd trusts.
-
-```bash
-npm run desktop          # build the offline UI and open it in Electron
-npm run build:desktop    # desktop/out/linux-unpacked/, which host/build.sh puts in the image
-```
-
-Run these from a normal terminal: VS Code sets `ELECTRON_RUN_AS_NODE`.
-
-The UI is baked into the app, which ships in the host image: a new Wad
-Creator reaches a machine with a stick update (`host/build.sh update` in
-`../Wadspaces-Tools`).
+The machine app (the offline target in a window of its own on a WadSpaces
+machine) is being rebuilt with Tauri v2 (stage 1a of the plan); the old
+Electron shell is gone. Until then the offline target runs only in a browser
+with `npm run dev`, against a dev wadd (see Develop above).
 
 ## Online: the web app
 
@@ -95,8 +84,8 @@ icons are downscaled in the browser and kept in the wadspace doc as data URLs
 (at most 400 KB each), so there's no Storage bucket.
 
 Machines link to an account with a one-time code: **Manager → Add machine**
-online, then **Manager → Link to your account** in the machine's desktop app.
-wadd (`../Wadspaces-Tools/wadd/cloud.py`) then heartbeats every 30 s and runs
+online, then **Manager → Link to your account** in the machine app.
+wadd (`../../legacy/wadd-py/wadd/cloud.py`) then heartbeats every 30 s and runs
 the commands the web app queues (`switch`, `start`, `stop`, `restart`).
 
 ## From desktop to image

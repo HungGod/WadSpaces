@@ -9,9 +9,8 @@
 #                                  read-only listings, deletes nothing
 #   ./infra/teardown.sh --apply    backs up to infra/backup/<date>/, then deletes
 #
-# Every target is named below; nothing is matched by wildcard. Run
-# `node scripts/migrate-assets.mjs --apply` first: wallpapers and icons that
-# still point at the Storage bucket break once it's gone.
+# Every target is named below; nothing is matched by wildcard. The Storage
+# bucket held no wallpapers or icons, so nothing has to move off it first.
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-wad-spaces}"
@@ -108,7 +107,6 @@ else
   done
   echo "  Firestore files/ → ${BACKUP}/files-*.json"
 fi
-echo "  Reminder: node scripts/migrate-assets.mjs --apply, before the Storage bucket goes."
 
 # --------------------------------------------------------- 2. inventory
 # Read-only, in both modes: what else is in the project, for a look. Nothing

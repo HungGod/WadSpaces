@@ -68,10 +68,6 @@ release bucket for over-the-air updates, a Storage bucket for cloud files, and
 four more service accounts. `teardown.sh` removes exactly those, by name:
 
 ```sh
-npm --prefix functions ci                  # the migration uses functions/' firebase-admin
-gcloud auth application-default login      # its credentials (or GOOGLE_APPLICATION_CREDENTIALS)
-node scripts/migrate-assets.mjs            # first: what still points at Storage (dry run)
-node scripts/migrate-assets.mjs --apply    # rewrite those images as data URLs
 ./infra/teardown.sh                        # dry run: backs nothing up, deletes nothing
 ./infra/teardown.sh --apply                # backs up to infra/backup/<date>/, then deletes
 ```

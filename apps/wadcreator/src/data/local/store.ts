@@ -1,7 +1,6 @@
-// What the offline app keeps in its own storage (Electron keeps it in the
-// kiosk user's home): the last session, the tutorial flag, and which presets'
-// default projects it has made. The Builder
-// library and drafts live in wadd (library.ts); these localStorage copies are
+// What the offline app keeps in its own storage (localStorage): the last
+// session, the tutorial flag, and which presets' default projects it has made.
+// The Builder library and drafts live in wadd (library.ts); these copies are
 // only used with an older wadd, and moved into wadd once it has a library.
 import type { Visibility, WadspaceSpec } from "@core/model";
 import type { Draft, LastSession } from "@/lib/types";

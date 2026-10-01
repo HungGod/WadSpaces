@@ -1,9 +1,7 @@
 // Client for wadd, the daemon on this machine (legacy/wadd-py/wadd/api.py).
-// The offline app talks to it directly on 127.0.0.1:8080 from the origin
-// app://wadcreator, which wadd trusts for changes. The online app never does:
-// it reaches machines through the cloud relay (relay.ts).
+// The offline app talks to it directly on 127.0.0.1:8080. The online app
+// never does: it reaches machines through the cloud relay (relay.ts).
 
-import { useEffect, useState } from "react";
 import type { GithubRepo, Project, ProjectDraft } from "@core/projects";
 import type { WaddSpec } from "@core/spec";
 import type { TailnetStatus } from "./types";
@@ -270,11 +268,7 @@ async function call<T>(method: string, path: string, body?: unknown, raw?: { dat
 }
 
 export const wadd = {
-  health: () => call<{ ok: boolean; version: string }>("GET", "/api/health"),
-  status: () => call<Omit<Snapshot, "workspaces">>("GET", "/api/status"),
-  workspaces: () => call<MachineWorkspace[]>("GET", "/api/workspaces"),
   specs: () => call<WaddSpec[]>("GET", "/api/specs"),
-  spec: (id: string) => call<WaddSpec>("GET", `/api/specs/${encodeURIComponent(id)}`),
   action: (id: string, action: "switch" | "start" | "stop" | "restart" | "download") =>
     call<{ ok: boolean }>("POST", `/api/workspaces/${encodeURIComponent(id)}/${action}`),
   launcher: () => call("POST", "/api/launcher"),
@@ -392,35 +386,4 @@ export function downloadLabel(d: Download | null): string {
   if (d.rate_bps >= 1000) bits.push(`${formatBytes(d.rate_bps)}/s`);
   if (d.eta_s != null) bits.push(`about ${formatDuration(d.eta_s)} left`);
   return bits.join(" · ");
-}
-
-/** Live machine snapshot from wadd's server-sent events. */
-export function useMachine(): { snap: Snapshot | null; error: string | null } {
-  const [snap, setSnap] = useState<Snapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    let closed = false;
-    const connect = () => {
-      es = new EventSource(`${WADD_URL}/api/events`);
-      es.addEventListener("state", (e) => {
-        setSnap(JSON.parse((e as MessageEvent).data));
-        setError(null);
-      });
-      es.onerror = () => {
-        es?.close();
-        if (closed) return;
-        setError(`Cannot reach wadd at ${WADD_URL}.`);
-        retry = setTimeout(connect, 3000);
-      };
-    };
-    connect();
-    return () => {
-      closed = true;
-      es?.close();
-      clearTimeout(retry);
-    };
-  }, []);
-  return { snap, error };
 }
