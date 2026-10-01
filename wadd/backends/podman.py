@@ -134,6 +134,83 @@ class PodmanApi:
                         blobs_seen.add(m.group(1)[:12])
                     progress(None, f"{text[:80]} ({len(blobs_seen)} layers)")
 
+    async def build(self, context: bytes, tag: str, buildargs: dict[str, str] | None = None,
+                    on_line=None) -> str:
+        """Build an image from a tar build context; returns the image id.
+
+        Each output line goes to on_line(text). podman answers 200 even when the
+        build fails, so errors come from the stream. Closing the stream (cancelling
+        the task) aborts the build (spike S4)."""
+        params = {"t": tag, "layers": "true", "rm": "true", "forcerm": "true", "pull": "false",
+                  "buildargs": json.dumps(buildargs or {})}
+        image_id = ""
+        async with self.client.stream(
+            "POST", "/build", params=params, content=context,
+            headers={"Content-Type": "application/x-tar"},
+            timeout=httpx.Timeout(30.0, read=None),
+        ) as r:
+            if r.status_code != 200:
+                await r.aread()
+                raise self._err(r, f"build {tag}")
+            async for line in r.aiter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                err = (msg.get("errorDetail") or {}).get("message") or msg.get("error")
+                if err:
+                    raise PodmanError(err.strip())
+                text = msg.get("stream") or ""
+                if re.fullmatch(r"[0-9a-f]{64}\s*", text):
+                    image_id = text.strip()
+                    continue
+                for part in text.rstrip("\n").split("\n"):
+                    if on_line:
+                        on_line(part)
+        return image_id
+
+    async def remove_image(self, ref: str) -> bool:
+        r = await self.client.delete(f"/images/{quote(ref, safe='')}")
+        if r.status_code == 404:
+            return False
+        if r.status_code not in (200, 204):
+            raise self._err(r, f"remove image {ref}")
+        return True
+
+    async def image_id(self, ref: str) -> str | None:
+        r = await self.client.get(f"/images/{quote(ref, safe='')}/json")
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise self._err(r, f"inspect image {ref}")
+        return r.json().get("Id")
+
+    async def inspect_image(self, ref: str) -> dict | None:
+        r = await self.client.get(f"/images/{quote(ref, safe='')}/json")
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise self._err(r, f"inspect image {ref}")
+        return r.json()
+
+    async def image_labels(self, ref: str) -> dict[str, str] | None:
+        """An image's labels; None if it isn't here."""
+        info = await self.inspect_image(ref)
+        if info is None:
+            return None
+        return info.get("Labels") or (info.get("Config") or {}).get("Labels") or {}
+
+    async def volume_mountpoint(self, name: str) -> str | None:
+        """Where a named volume's files are on the host; None if there's no such volume."""
+        r = await self.client.get(f"/volumes/{quote(name, safe='')}/json")
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise self._err(r, f"inspect volume {name}")
+        return r.json().get("Mountpoint") or None
+
     async def _post(self, path: str, what: str, ok=(200, 204, 304), **params) -> None:
         r = await self.client.post(path, params=params or None)
         if r.status_code not in ok:
@@ -162,6 +239,15 @@ class PodmanApi:
         if r.status_code not in (200, 204):
             raise self._err(r, f"delete secret {name}")
         return True
+
+    async def secret_value(self, name: str) -> str | None:
+        """A secret's value, for wadd's own use (git import); never sent out."""
+        r = await self.client.get(f"/secrets/{quote(name, safe='')}/json", params={"showsecret": "true"})
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise self._err(r, f"read secret {name}")
+        return r.json().get("SecretData")
 
     async def create_secret(self, name: str, value: bytes, replace: bool = True) -> None:
         if replace:

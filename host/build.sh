@@ -12,6 +12,10 @@
 #   --images writing,iq-dev        with install/update: also copy these locally
 #                                  built workspace images onto the drive, so the
 #                                  machine never downloads them
+#   --bases                        with install/update: also copy the base images
+#                                  (localhost/wadspaces-{base,stream,selkies}:trixie)
+#                                  onto the drive; the machine's own builds need
+#                                  them and it can't download them
 #   --stage-only DIR               with update: write what would go onto the
 #                                  drive into DIR instead (for testing)
 #
@@ -33,6 +37,7 @@ BIB_CONFIG="${ROOT}/host/bib-config.toml"
 TARGET="${1:-image}"
 DISK=""
 IMAGES=""
+BASES=""
 STAGE_ONLY=""
 [[ $# -gt 0 ]] && shift
 if [[ "${TARGET}" == "install" || "${TARGET}" == "update" ]] && [[ $# -gt 0 && "$1" != --* ]]; then
@@ -41,12 +46,14 @@ fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --images) IMAGES="$2"; shift 2 ;;
+        --bases) BASES=1; shift ;;
         --stage-only) STAGE_ONLY="$2"; shift 2 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 STICK_OCI="${ROOT}/.build/stick/oci"
-CONTAINERS_DIR="${ROOT}/../containers"
+# The workspace images (their Dockerfiles and compose files).
+CONTAINERS_DIR="${CONTAINERS_DIR:-${ROOT}/../Wadspaces-David}"
 
 stage_wadcreator() {
     local out="${ROOT}/.build/wadcreator-app"
@@ -85,6 +92,15 @@ stage_secrets() {
         hash="$(< "${SECRETS_DIR}/admin_password_hash")"
     else
         hash="$(bib_admin password)"
+    fi
+    # bib-config.toml may hold the password itself rather than a crypt hash
+    # (bootc-image-builder takes either); usermod -p needs the hash. The salt
+    # comes from the password so the same password gives the same hash on
+    # every build, and the machine only re-applies it when it changes.
+    if [[ -n "${hash}" && "${hash}" != \$*\$*\$* ]]; then
+        local salt
+        salt="$(printf 'wadspaces-admin:%s' "${hash}" | sha256sum | cut -c1-16)"
+        hash="$(printf '%s' "${hash}" | openssl passwd -6 -salt "${salt}" -stdin)"
     fi
     if [[ -n "${hash}" ]]; then
         (umask 077 && printf '%s' "${hash}" > "${out}/admin_password_hash")
@@ -140,9 +156,10 @@ check_update_target() {
 }
 
 # ------------------------------------------------------------ drive updates
-# What goes onto the drive: an OCI directory holding the host image ("host")
-# and workspace images ("ws-<id>"), with layers left uncompressed, so a file name is its
-# content digest and stays the same in every build that didn't change it.
+# What goes onto the drive: an OCI directory holding the host image ("host"),
+# workspace images ("ws-<id>") and base images ("base-<name>"), with layers left
+# uncompressed, so a file name is its content digest and stays the same in every
+# build that didn't change it.
 # rsync then writes only new layers. On the drive, wadspaces-import.service
 # (host/usr/libexec/wadspaces/import-updates) imports them at the next boot.
 
@@ -185,6 +202,15 @@ stage_stick() {
         skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${src}" "oci:${STICK_OCI}:ws-${id}"
         echo "ws-${id} ${target}" >> "${STICK_OCI}/import.list"
     done
+    # Bases keep their own names: wadd builds on them as they are.
+    local b
+    for b in ${BASES:+base stream selkies}; do
+        src="localhost/wadspaces-${b}:trixie"
+        podman image exists "${src}" || { echo "${src} is not built; run containers/build.sh --only _${b/base/common}" >&2; exit 1; }
+        echo ">> staging ${src}"
+        skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${src}" "oci:${STICK_OCI}:base-${b}"
+        echo "base-${b} ${src}" >> "${STICK_OCI}/import.list"
+    done
     du -sh "${STICK_OCI}" | awk '{print ">> staged " $1}'
 }
 
@@ -218,7 +244,7 @@ case "${TARGET}" in
     image|qcow2|iso|raw) ;;
     install) check_install_target ;;
     update) [[ -n "${STAGE_ONLY}" ]] || check_update_target ;;
-    *) echo "usage: host/build.sh [image|qcow2|iso|raw|install /dev/sdX|update /dev/sdX] [--images a,b]" >&2; exit 2 ;;
+    *) echo "usage: host/build.sh [image|qcow2|iso|raw|install /dev/sdX|update /dev/sdX] [--images a,b] [--bases]" >&2; exit 2 ;;
 esac
 
 stage_wadcreator
@@ -248,8 +274,8 @@ case "${TARGET}" in
             --security-opt label=type:unconfined_t \
             -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
             "${IMAGE}" bootc install to-disk --wipe "${DISK}"
-        if [[ -n "${IMAGES}" ]]; then
-            # The host image is installed already; only the workspaces go over.
+        if [[ -n "${IMAGES}" || -n "${BASES}" ]]; then
+            # The host image is installed already; only the workspaces and bases go over.
             stage_stick
             push_to_drive
         fi

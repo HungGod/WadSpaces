@@ -5,6 +5,7 @@ order, ports and hotkeys. Runtime state comes from podman.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import asdict, dataclass, field
@@ -14,6 +15,15 @@ from typing import Any
 import yaml
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+# Projects (wadd/projects.py) mounted into a workspace: ids are Firestore
+# auto-ids (20 alphanumerics) or ones wadd made the same way; the mount is the
+# folder's name on the workspace's Desktop. The image checks both again.
+PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+MOUNT_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+# A folder or drive project is mounted from its own host path (Volume=<path>:…).
+# podman splits a volume on ':', and systemd expands '%' specifiers in a unit,
+# so neither may be in one; nor quotes, backslashes or control characters.
+HOST_PATH_BAD_RE = re.compile(r"[:%\\\"'\x00-\x1f\x7f]")
 BACKENDS = ("systemd", "podman")
 PREFETCH = ("autostart", "all", "none")
 # stream: the desktop is streamed to a frame in the kiosk (an all-in-one
@@ -23,6 +33,29 @@ PREFETCH = ("autostart", "all", "none")
 #         image runs remotely next to the stream sidecar (containers/_stream).
 DISPLAYS = ("stream", "host")
 SYSTEMD_SCOPES = ("system", "user")
+# Which cloud project this machine belongs to ships with the host image, not
+# in workspaces.yaml: bootc keeps a locally changed /etc file on update (and
+# wadd rewrites workspaces.yaml whenever a workspace changes), so a project set
+# there would never move. /usr is replaced on every update. Its keys win over
+# the YAML's cloud section.
+VENDOR_CLOUD = Path("/usr/lib/wadspaces/cloud.yaml")
+# Keys older wadds wrote into workspaces.yaml (save_config writes every field)
+# whose features are gone. bootc keeps that file across updates, so they are
+# dropped on load rather than rejected as unknown. Can go after one release.
+DEPRECATED = {
+    "daemon": {"base_registry"},
+    "cloud": {"storage_bucket", "storage_base", "files_every_s"},
+}
+
+# Daemon keys newer than the host images out there: config_to_dict leaves
+# them out while they have their default (see there).
+NEWER_DAEMON_KEYS = ("projects_dir", "projects_uid", "tailscale_socket", "tailscale_bin",
+                     "tailnet_streams", "folder_roots")
+# Where folder projects (and the folder browser) may be: home folders and
+# where drives are mounted. A folder must be strictly inside one of them.
+FOLDER_ROOTS = ["/var/home", "/home", "/mnt", "/media", "/run/media", "/run/wadspaces-drives"]
+
+log = logging.getLogger(__name__)
 
 
 class ConfigError(ValueError):
@@ -49,6 +82,11 @@ class WorkspaceSpec:
     # [Install]: a boot-time pull of several GB would hit systemd timeouts)
     autostart: bool = False
     display: str = "stream"
+    # Project folders mounted read-write at ~/Desktop/<mount>, as
+    # [{"id": <project id>, "mount": <folder name>, "path"?: <host path>}]; set
+    # by a launch. path: a folder or drive project's own folder (a git
+    # project's is <projects_dir>/<id>).
+    projects: list[dict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.container_name:
@@ -106,6 +144,24 @@ class DaemonConfig:
     prefetch_min_free_gb: int = 15
     # images downloaded at once (Home starts every pick's download together)
     max_parallel_pulls: int = 3
+    # Building images on the machine (Wad Creator's Build): refuse to start
+    # with less free disk than this.
+    build_min_free_gb: int = 8
+    # Project folders, one per project (<projects_dir>/<id>). Not under
+    # state_dir, which is root-only: they belong to projects_uid, the uid of
+    # abc in the workspace images (PUID 1000, the kiosk user `wad` on the
+    # host), so the container can write them.
+    projects_dir: str = "/var/lib/wadspaces-projects"
+    projects_uid: int = 1000
+    # Tailscale, the trusted network (wadd/tailnet.py): tailscaled's LocalAPI
+    # socket and the CLI. Without them (a dev laptop) the tailnet is just
+    # reported as not installed. tailnet_streams: serve running stream
+    # workspaces on the tailnet (`tailscale serve`, HTTPS, never Funnel).
+    tailscale_socket: str = "/run/tailscale/tailscaled.sock"
+    tailscale_bin: str = "tailscale"
+    tailnet_streams: bool = True
+    # Folder projects and the folder browser stay inside these (FOLDER_ROOTS).
+    folder_roots: list[str] = field(default_factory=lambda: list(FOLDER_ROOTS))
 
     @property
     def base_url(self) -> str:
@@ -205,6 +261,14 @@ def _pick(data: dict, cls, name: str) -> dict:
     return data
 
 
+def _drop_deprecated(data: dict, section: str) -> dict:
+    out = dict(data.get(section) or {})
+    for key in DEPRECATED[section] & set(out):
+        log.debug("%s.%s is no longer used; ignoring it", section, key)
+        del out[key]
+    return out
+
+
 def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
     if not isinstance(data, dict):
         raise ConfigError("config must be a mapping")
@@ -215,7 +279,7 @@ def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
     machine = data.get("machine") or {}
     machine_name = str(machine.get("name") or "wadspaces")
 
-    d = dict(data.get("daemon") or {})
+    d = _drop_deprecated(data, "daemon")
     # `hotkeys` is the old name for `keys` (enabled + launcher only).
     raw_keys = {**dict(d.pop("hotkeys", None) or {}), **dict(d.pop("keys", None) or {})}
     keys = KeysConfig(**_pick(raw_keys, KeysConfig, "daemon.keys"))
@@ -247,7 +311,7 @@ def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
 
     cloud = None
     if data.get("cloud"):
-        c = _pick(dict(data["cloud"]), CloudConfig, "cloud")
+        c = _pick(_drop_deprecated(data, "cloud"), CloudConfig, "cloud")
         if not c.get("project_id"):
             raise ConfigError("cloud.project_id is required when cloud is set")
         cloud = CloudConfig(**c)
@@ -279,6 +343,7 @@ def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
             seen_ports.add(ws.port)
         if ws.container_name in seen_names:
             raise ConfigError(f"{where}: duplicate container_name")
+        _check_projects(ws, where)
         if ws.hotkey is not None:
             if not (1 <= int(ws.hotkey) <= 9):
                 raise ConfigError(f"{where}: hotkey must be 1..9")
@@ -295,6 +360,30 @@ def parse_config(data: dict[str, Any], path: Path | None = None) -> Config:
                   shell=shell)
 
 
+def _check_projects(ws: WorkspaceSpec, where: str) -> None:
+    if not isinstance(ws.projects, list):
+        raise ConfigError(f"{where}: projects must be a list")
+    ids, mounts = set(), set()
+    for p in ws.projects:
+        if not isinstance(p, dict) or set(p) not in ({"id", "mount"}, {"id", "mount", "path"}):
+            raise ConfigError(f"{where}: each project is {{id, mount, path?}}, not {p!r}")
+        pid, mount = str(p["id"]), str(p["mount"])
+        if "path" in p:
+            path = p["path"]
+            if not isinstance(path, str) or not path.startswith("/") or HOST_PATH_BAD_RE.search(path):
+                raise ConfigError(f"{where}: project path {path!r} must be absolute, without ':' or '%'")
+        if not PROJECT_ID_RE.match(pid):
+            raise ConfigError(f"{where}: project id {pid!r} must match {PROJECT_ID_RE.pattern}")
+        if not MOUNT_RE.match(mount) or mount in (".", ".."):
+            raise ConfigError(f"{where}: project mount {mount!r} must match {MOUNT_RE.pattern}")
+        if pid in ids:
+            raise ConfigError(f"{where}: project {pid} is listed twice")
+        if mount in mounts:
+            raise ConfigError(f"{where}: two projects are mounted at Desktop/{mount}")
+        ids.add(pid)
+        mounts.add(mount)
+
+
 def workspace_to_dict(ws: WorkspaceSpec) -> dict:
     d = asdict(ws)
     if d["container_name"] == f"wad-{ws.id}":
@@ -309,10 +398,18 @@ def workspace_to_dict(ws: WorkspaceSpec) -> dict:
 
 
 def config_to_dict(cfg: Config) -> dict:
+    daemon = asdict(cfg.daemon)
+    # Newer keys are only written when changed, so the file still loads in the
+    # wadd of the image before (bootc rollback), which rejects unknown keys.
+    for key in NEWER_DAEMON_KEYS:
+        f = DaemonConfig.__dataclass_fields__[key]
+        default = f.default_factory() if callable(f.default_factory) else f.default
+        if daemon[key] == default:
+            del daemon[key]
     out: dict[str, Any] = {
         "version": 1,
         "machine": {"name": cfg.machine_name},
-        "daemon": asdict(cfg.daemon),
+        "daemon": daemon,
         "launcher": asdict(cfg.launcher),
         "wadcreator": asdict(cfg.wadcreator),
         "shell": asdict(cfg.shell),
@@ -333,12 +430,21 @@ def save_config(cfg: Config, path: str | Path | None = None) -> Path:
     return path
 
 
-def load_config(path: str | Path) -> Config:
+def load_config(path: str | Path, vendor_cloud: str | Path | None = VENDOR_CLOUD) -> Config:
     path = Path(path)
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except FileNotFoundError as e:
         raise ConfigError(f"config not found: {path}") from e
     except yaml.YAMLError as e:
         raise ConfigError(f"{path}: {e}") from e
-    return parse_config(data or {}, path)
+    if vendor_cloud:
+        try:
+            vendor = yaml.safe_load(Path(vendor_cloud).read_text(encoding="utf-8")) or {}
+        except FileNotFoundError:
+            vendor = {}
+        except yaml.YAMLError as e:
+            raise ConfigError(f"{vendor_cloud}: {e}") from e
+        if vendor:
+            data["cloud"] = {**(data.get("cloud") or {}), **vendor}
+    return parse_config(data, path)

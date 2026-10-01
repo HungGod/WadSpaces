@@ -1,0 +1,31 @@
+{
+   "blockdevices": [
+      {"name": "loop0", "uuid": "11111111-aaaa-4bbb-8ccc-000000000001", "label": null, "fstype": "squashfs", "size": 104857600, "mountpoints": ["/var/lib/snapd/snap/core/1"], "rm": false, "hotplug": false, "model": null, "pkname": null, "type": "loop"},
+      {"name": "nvme0n1", "uuid": null, "label": null, "fstype": null, "size": 512110190592, "mountpoints": [null], "rm": false, "hotplug": false, "model": "Samsung SSD 980 PRO 512GB", "pkname": null, "type": "disk",
+         "children": [
+            {"name": "nvme0n1p1", "uuid": "1A2B-3C4D", "label": "EFI-SYSTEM", "fstype": "vfat", "size": 536870912, "mountpoints": ["/boot/efi"], "rm": false, "hotplug": false, "model": null, "pkname": "nvme0n1", "type": "part"},
+            {"name": "nvme0n1p2", "uuid": "aaaaaaaa-0000-4000-8000-000000000002", "label": "boot", "fstype": "ext4", "size": 1073741824, "mountpoints": ["/boot"], "rm": false, "hotplug": false, "model": null, "pkname": "nvme0n1", "type": "part"},
+            {"name": "nvme0n1p3", "uuid": "aaaaaaaa-0000-4000-8000-000000000003", "label": "root", "fstype": "btrfs", "size": 480000000000, "mountpoints": ["/var", "/sysroot", "/etc"], "rm": false, "hotplug": false, "model": null, "pkname": "nvme0n1", "type": "part"},
+            {"name": "nvme0n1p4", "uuid": "aaaaaaaa-0000-4000-8000-000000000004", "label": "spare", "fstype": "ext4", "size": 20000000000, "mountpoints": [null], "rm": false, "hotplug": false, "model": null, "pkname": "nvme0n1", "type": "part"}
+         ]
+      },
+      {"name": "sda", "uuid": null, "label": null, "fstype": null, "size": 2000398934016, "mountpoints": [null], "rm": false, "hotplug": false, "model": "WDC WD20EZAZ-00G", "pkname": null, "type": "disk",
+         "children": [
+            {"name": "sda1", "uuid": "bbbbbbbb-0000-4000-8000-000000000001", "label": "Data", "fstype": "ext4", "size": 1500000000000, "mountpoints": ["/mnt/data"], "rm": false, "hotplug": false, "model": null, "pkname": "sda", "type": "part"},
+            {"name": "sda2", "uuid": "bbbbbbbb-0000-4000-8000-000000000002", "label": null, "fstype": "swap", "size": 8000000000, "mountpoints": ["[SWAP]"], "rm": false, "hotplug": false, "model": null, "pkname": "sda", "type": "part"},
+            {"name": "sda3", "uuid": "bbbbbbbb-0000-4000-8000-000000000003", "label": null, "fstype": "crypto_LUKS", "size": 400000000000, "mountpoints": [null], "rm": false, "hotplug": false, "model": null, "pkname": "sda", "type": "part",
+               "children": [
+                  {"name": "luks-bbbb", "uuid": "cccccccc-0000-4000-8000-000000000001", "label": "Vault", "fstype": "xfs", "size": 399000000000, "mountpoints": [null], "rm": false, "hotplug": false, "model": null, "pkname": "sda3", "type": "crypt"}
+               ]
+            },
+            {"name": "sda4", "uuid": "Lvm1-xxxx", "label": null, "fstype": "LVM2_member", "size": 90000000000, "mountpoints": [null], "rm": false, "hotplug": false, "model": null, "pkname": "sda", "type": "part"}
+         ]
+      },
+      {"name": "sdb", "uuid": null, "label": null, "fstype": null, "size": 64023257088, "mountpoints": [null], "rm": true, "hotplug": true, "model": "SanDisk Ultra  ", "pkname": null, "type": "disk",
+         "children": [
+            {"name": "sdb1", "uuid": "5E3F-1A2B", "label": "STICK", "fstype": "exfat", "size": 64022208512, "mountpoints": [null], "rm": true, "hotplug": true, "model": null, "pkname": "sdb", "type": "part"}
+         ]
+      },
+      {"name": "zram0", "uuid": "dddddddd-0000-4000-8000-000000000001", "label": "zram0", "fstype": "swap", "size": 8589934592, "mountpoints": ["[SWAP]"], "rm": false, "hotplug": false, "model": null, "pkname": null, "type": "disk"}
+   ]
+}

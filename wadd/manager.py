@@ -37,11 +37,18 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import __version__, logbuffer, registry
+from . import __version__, gitimport, logbuffer, registry
 from .backends.base import Backend
 from .config import (Config, ConfigError, WorkspaceSpec, config_to_dict, parse_config,
                      save_config, workspace_to_dict)
+from .builds import Builds
 from .display import NullDisplay
+from .drives import DriveError, Drives
+from .github import GitHub
+from .launches import Launches
+from .library import Library
+from .projects import LOCAL, ProjectConflict, ProjectStore, project_dir, purge_dir
+from .runs import RunLog
 from .kiosk import Kiosk, KioskUnavailable
 from .readiness import http_ok, wait_http_ok
 from .state import (BUSY, ERROR, IDLE, PULLING, READY, STARTING, STOPPING, WAITING,
@@ -97,6 +104,20 @@ class WorkspaceManager:
         self._session_task: asyncio.Task | None = None
         self._bg: set[asyncio.Task] = set()
         self._app_pending: str | None = None
+        state_dir = Path(cfg.daemon.state_dir)
+        self.builds = Builds(self)
+        self.library = Library(state_dir / "library")
+        self.runs = RunLog(state_dir / "runs.jsonl")
+        self.projects = ProjectStore(state_dir / "projects", cfg.daemon.folder_roots, self.machine_ref)
+        self.drives = Drives(cfg.daemon.projects_uid)
+        self.launches = Launches(self)
+        # Where projects live; its token is the github_token secret.
+        self.github = GitHub(lambda: gitimport.find_token(getattr(self.backend, "api", None),
+                                                           cfg.daemon.secrets_dir))
+        # Set up by wadd serve when there is one: tailnet.TailnetWatch, and
+        # cloud.CloudRelay (it sets itself).
+        self.tailnet = None
+        self.cloud = None
 
     # ------------------------------------------------------------- helpers
     @property
@@ -109,8 +130,31 @@ class WorkspaceManager:
             raise KeyError(ws_id)
         return ws
 
+    def _track_run(self, ws_id: str, old: str, new: str) -> None:
+        """Container history: a run starts when a container starts and ends when
+        it stops ("unknown" means podman didn't answer, so the run stays open)."""
+        del old  # what counts is whether a run is open: "unknown" blips come and go
+        try:
+            if new == RUNNING and ws_id not in self.runs.open:
+                ws = self.cfg.workspace(ws_id)
+                self.runs.start(ws_id, ws.name, "local" if ws.native else "stream",
+                                projects=[p["id"] for p in ws.projects])
+            elif new not in (RUNNING, "unknown") and ws_id in self.runs.open:
+                self.runs.end(ws_id)
+        except (KeyError, OSError) as e:
+            log.debug("run history %s: %s", ws_id, e)
+
+    def _container_changed(self, old: str, new: str) -> None:
+        """A container started or stopped: the tailnet serves running
+        stream workspaces, so it takes another look now."""
+        if self.tailnet is not None and (old == RUNNING) != (new == RUNNING):
+            self.tailnet.kick()
+
     def _set(self, ws_id: str, **changes) -> None:
         st = self.states[ws_id]
+        if "container" in changes:
+            self._track_run(ws_id, st.container, changes["container"])
+            self._container_changed(st.container, changes["container"])
         phase_changed = "phase" in changes and changes["phase"] != st.phase
         if phase_changed:
             st.since = time.time()
@@ -829,9 +873,13 @@ class WorkspaceManager:
 
     async def update_workspace(self, ws_id: str, spec: dict) -> dict:
         """Replace a workspace's spec. A running container keeps the old spec
-        until restarted; the result says whether that is needed."""
+        until restarted; the result says whether that is needed. Its projects
+        are a launch's business (launches.py): a spec without the key (the
+        editor's, a rebuild's) keeps the ones it has."""
         old = self.cfg.workspace(ws_id)
         spec = {**spec, "id": ws_id}
+        if "projects" not in spec and old.projects:
+            spec["projects"] = old.projects
         await self._apply([spec if w.id == ws_id else workspace_to_dict(w) for w in self.cfg.workspaces])
         changed = workspace_to_dict(old) != self.spec_dict(ws_id)
         running = self.states[ws_id].container == RUNNING
@@ -842,6 +890,86 @@ class WorkspaceManager:
         if ws.enabled and self.states[ws_id].container == RUNNING:
             await self.stop(ws_id)
         await self._apply([workspace_to_dict(w) for w in self.cfg.workspaces if w.id != ws_id])
+
+    # ------------------------------------------------------------- projects
+    # The documents live in self.projects (projects.py); launches.py puts
+    # their folders on disk and mounts them. Wad Creator follows changes
+    # through `projects` events.
+    def machine_ref(self) -> tuple[str, str]:
+        """(id, name) of this machine for folder projects: its enrolled id, or
+        "local" until it is enrolled."""
+        cloud = self.cloud
+        mid = cloud.machine_id if cloud is not None and cloud.enrolled else None
+        return mid or LOCAL, self.cfg.machine_name
+
+    def folder_here(self, source: dict) -> bool:
+        """Whether a folder project's folder is this machine's."""
+        mid = self.machine_ref()[0]
+        return source.get("machineId") == mid or (mid == LOCAL and source.get("machineId") == LOCAL)
+
+    def publish_projects(self, ids: list[str]) -> None:
+        self.bus.publish({"type": "projects", "data": {"ids": ids}})
+
+    def project_mounted_in(self, pid: str) -> list[str]:
+        """Workspaces whose unit mounts this project."""
+        return [ws.id for ws in self.cfg.workspaces if any(p["id"] == pid for p in ws.projects)]
+
+    def mounted_projects(self) -> list[str]:
+        """Projects mounted in a running container (the heartbeat publishes
+        them, so a launch elsewhere can warn)."""
+        return sorted({p["id"] for ws in self.cfg.workspaces if ws.id in self.states
+                       and self.states[ws.id].container == RUNNING for p in ws.projects})
+
+    async def project_status(self, pid: str) -> dict:
+        """Where the folder is, whether a launch can have it (available, else
+        reason), who mounts it, and its git state from the refs here (git:
+        {branch, dirty, ahead, behind, upstream}, or None when the folder
+        isn't a git repository). No fetch and no mounting: this has to be
+        quick."""
+        doc = self.projects.get(pid)  # KeyError: no such project
+        src = doc.get("source") or {}
+        kind = src.get("kind")
+        reason = None
+        path: Path | None = project_dir(self.cfg.daemon.projects_dir, pid)
+        if kind == "folder":
+            path = Path(src["path"])
+            if not self.folder_here(src):
+                path, reason = None, f"on {src.get('machineName') or src.get('machineId')}"
+            elif not path.is_dir():
+                reason = f"folder {src['path']} is missing"
+        elif kind == "drive":
+            label = src.get("label") or src.get("uuid")
+            try:
+                drive, mp = await self.drives.where(src["uuid"])
+            except DriveError as e:
+                drive, mp, reason = None, None, str(e)
+            path = Path(mp, src.get("subpath") or "") if mp else None
+            if drive is None:
+                reason = reason or f"plug in the drive {label}"
+            elif path is not None and not path.is_dir():
+                reason = f"folder {src.get('subpath')} is missing on {label}"
+        elif doc.get("legacy") and not path.is_dir():
+            reason = "not a GitHub repo and not on this machine"
+        here = path is not None and path.is_dir()
+        git = await gitimport.status(path, self.cfg.daemon.projects_uid) if here else None
+        # bytes: a du of a tree with node_modules is too slow for a status call.
+        out = {"exists_on_disk": here, "path": str(path) if path is not None else None, "bytes": None,
+               "mounted_in": self.project_mounted_in(pid), "git": git, "available": reason is None}
+        if reason:
+            out["reason"] = reason
+        return out
+
+    async def delete_project(self, pid: str, purge: bool = False) -> dict:
+        """Tombstone a project; with purge, also remove its folder, unless a
+        workspace still mounts it (ProjectConflict)."""
+        self.projects.get(pid)
+        if purge and (users := self.project_mounted_in(pid)):
+            raise ProjectConflict(f"still mounted in {', '.join(users)}; launch "
+                                  f"{'it' if len(users) == 1 else 'them'} without this project first")
+        doc = self.projects.delete(pid)
+        purged = await asyncio.to_thread(purge_dir, self.cfg.daemon.projects_dir, pid) if purge else False
+        self.publish_projects([pid])
+        return {**doc, "purged": purged}
 
     # -------------------------------------------------------------- secrets
     @property
@@ -995,6 +1123,8 @@ class WorkspaceManager:
             new = {}
             if container != st.container:
                 new["container"] = container
+                self._track_run(ws.id, st.container, container)
+                self._container_changed(st.container, container)
             present = await self._image_present(ws)
             if present != st.image_present:
                 new["image_present"] = present
@@ -1028,5 +1158,8 @@ class WorkspaceManager:
             t.cancel()
         if self._session_task:
             self._session_task.cancel()
+        if self.tailnet is not None:
+            await self.tailnet.client.close()
+        await self.github.close()
         await self.backend.close()
         await self.kiosk.close()

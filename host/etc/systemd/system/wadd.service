@@ -18,7 +18,12 @@ ProtectSystem=strict
 # appears once greetd logs the kiosk in, after wadd has started; "yes" would
 # hide it for good. Connecting to a socket works on a read-only mount.
 ProtectHome=read-only
+# wadspaces-projects: project folders (git imports, as uid 1000). Podman's
+# volumes: a launch moves a project an older image cloned into a workspace's
+# /config volume over to its folder (launches.py). "-": the volumes dir only
+# exists once podman has made a volume.
 ReadWritePaths=/var/lib/wadspaces /etc/wadspaces /etc/containers/systemd /run/podman
+ReadWritePaths=-/var/lib/wadspaces-projects -/var/lib/containers/storage/volumes
 PrivateTmp=yes
 NoNewPrivileges=yes
 

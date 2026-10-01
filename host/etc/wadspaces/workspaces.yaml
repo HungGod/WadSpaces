@@ -32,10 +32,9 @@ launcher:
 wadcreator:
   enabled: false
 # The online Wad Creator reaches this machine through Firestore once it is
-# linked (Home -> Link this machine to Wad Creator). Idle until then.
-cloud:
-  project_id: wadcreator
-  functions_region: australia-southeast2
+# linked (Home -> Link this machine to Wad Creator). Idle until then. The
+# project comes from /usr/lib/wadspaces/cloud.yaml, which updates with the
+# image; a cloud: section here can add settings (e.g. heartbeat_s).
 workspaces:
   - id: writing
     name: Writing

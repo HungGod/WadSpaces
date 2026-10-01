@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,13 +15,21 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, logbuffer
+from . import __version__, logbuffer, metrics
+from .builds import MAX_CONTEXT_BYTES, BuildError
 from .config import ConfigError
+from .drives import UUID_RE, DriveError, DriveMissing, OutsideRoots, browse, browse_inside
+from .github import GitHubError
+from .launches import LaunchError
+from .library import LibraryError
 from .manager import SessionLocked, WorkspaceManager
 from .network import NetworkError
+from .projects import ProjectConflict, ProjectError, mount_for, new_id, validate
+from .tailnet import TailnetError
 
 log = logging.getLogger(__name__)
 WEB = Path(__file__).parent / "web"
+GITHUB_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 
 
 class NavigateBody(BaseModel):
@@ -59,6 +68,27 @@ class HudBody(BaseModel):
 
 class PowerBody(BaseModel):
     action: str  # poweroff | reboot
+
+
+class BuildBody(BaseModel):
+    workspace: dict
+    # The Dockerfile's `ARG BASE_IMAGE=` default; it must be on this machine.
+    base_image: str = "localhost/wadspaces-base:trixie"
+
+
+class GitHubRepoBody(BaseModel):
+    name: str
+    private: bool = True
+    description: str = ""
+    mountName: str | None = None  # default: the repo name, as a folder name
+    setup: str = ""
+
+
+class LaunchBody(BaseModel):
+    workspace: str
+    projects: list[str] = []
+    view: str | None = None  # screen | stream; only the workspace's own display for now
+    restart: bool = False    # stop it first if it's running with other projects
 
 
 def create_app(manager: WorkspaceManager, background: list | None = None, cloud=None,
@@ -256,6 +286,287 @@ def create_app(manager: WorkspaceManager, background: list | None = None, cloud=
         except KeyError:
             raise HTTPException(404, f"no workspace {ws_id!r}")
         return {"ok": True}
+
+    # ------------------------------------------ builds (Wad Creator's Build, offline)
+    @app.get("/api/builds")
+    async def builds():
+        jobs = sorted(manager.builds.jobs.values(), key=lambda j: j.created, reverse=True)
+        return [j.summary() for j in jobs]
+
+    @app.post("/api/builds", status_code=201, dependencies=mutate)
+    async def create_build(body: BuildBody):
+        try:
+            return manager.builds.create(body.workspace, body.base_image).summary()
+        except (ConfigError, TypeError) as e:
+            raise HTTPException(422, str(e))
+        except BuildError as e:
+            raise HTTPException(409, str(e))
+
+    @app.put("/api/builds/{job_id}/context", status_code=202, dependencies=mutate)
+    async def build_context(job_id: str, request: Request):
+        """The build folder as a tar (raw body; no multipart needed)."""
+        if int(request.headers.get("content-length") or 0) > MAX_CONTEXT_BYTES:
+            raise HTTPException(413, "build folder too big (64 MB max)")
+        data = await request.body()
+        try:
+            return manager.builds.start(job_id, data).summary()
+        except KeyError:
+            raise HTTPException(404, f"no build {job_id!r}")
+        except BuildError as e:
+            raise HTTPException(409, str(e))
+
+    @app.get("/api/builds/{job_id}")
+    async def build(job_id: str, since: int = 0):
+        try:
+            job = manager.builds.get(job_id)
+        except KeyError:
+            raise HTTPException(404, f"no build {job_id!r}")
+        return {**job.summary(), "from": max(0, since), "lines": job.lines_since(max(0, since))}
+
+    @app.delete("/api/builds/{job_id}", dependencies=mutate)
+    async def cancel_build(job_id: str):
+        try:
+            return manager.builds.cancel(job_id).summary()
+        except KeyError:
+            raise HTTPException(404, f"no build {job_id!r}")
+
+    # ------------------------------------------- projects (folders on the host)
+    def project_or_404(pid: str) -> dict:
+        try:
+            return manager.projects.get(pid)
+        except (KeyError, ProjectError):
+            raise HTTPException(404, f"no project {pid!r}")
+
+    def save_project(pid: str, body: dict) -> dict:
+        try:
+            doc = manager.projects.put(pid, body)
+        except ProjectConflict as e:
+            raise HTTPException(409, str(e))
+        except ProjectError as e:
+            raise HTTPException(422, str(e))
+        manager.publish_projects([pid])
+        return doc
+
+    @app.get("/api/projects")
+    async def projects(deleted: bool = False):
+        """deleted=1 includes tombstones."""
+        return manager.projects.list(include_deleted=deleted)
+
+    @app.post("/api/projects", status_code=201, dependencies=mutate)
+    async def create_project(body: dict):
+        return save_project(new_id(), body)
+
+    @app.get("/api/projects/{pid}")
+    async def project(pid: str):
+        return project_or_404(pid)
+
+    @app.put("/api/projects/{pid}", dependencies=mutate)
+    async def put_project(pid: str, body: dict):
+        return save_project(pid, body)
+
+    @app.delete("/api/projects/{pid}", dependencies=mutate)
+    async def delete_project(pid: str, purge: bool = False):
+        """Leaves a tombstone (it syncs); purge=1 also removes the folder."""
+        project_or_404(pid)
+        try:
+            return await manager.delete_project(pid, purge)
+        except ProjectConflict as e:
+            raise HTTPException(409, str(e))
+
+    @app.get("/api/projects/{pid}/status")
+    async def project_status(pid: str):
+        project_or_404(pid)
+        return await manager.project_status(pid)
+
+    # ------------------------------------- GitHub (where projects live)
+    def github_http(e: GitHubError) -> HTTPException:
+        return HTTPException(409 if e.no_token else 422 if e.status == 422 else 502, str(e))
+
+    @app.get("/api/github")
+    async def github():
+        """{token, login}: is there a token, and whose. error: why there is
+        no login although there is a token (refused, GitHub down)."""
+        try:
+            return {"token": True, **await manager.github.whoami()}
+        except GitHubError as e:
+            if e.no_token:
+                return {"token": False, "login": None}
+            return {"token": True, "login": None, "error": str(e)}
+
+    @app.get("/api/github/repos")
+    async def github_repos():
+        try:
+            login, repos = await manager.github.repos()
+        except GitHubError as e:
+            raise github_http(e)
+        return {"login": login, "repos": repos}
+
+    @app.post("/api/github/repos", status_code=201, dependencies=mutate)
+    async def create_github_repo(body: GitHubRepoBody):
+        """A new repo on GitHub (private unless asked), then a project for it."""
+        name = body.name.strip()
+        if not GITHUB_NAME_RE.match(name) or name in (".", ".."):
+            raise HTTPException(422, f"repo name {name!r} may only use letters, digits, '.', '-' and '_'")
+        pid = new_id()
+        draft = {"name": name, "mountName": body.mountName or mount_for(name), "setup": body.setup,
+                 "source": {"kind": "git", "url": f"https://github.com/o/{name}.git"}}
+        try:  # everything that could refuse the project, before the repo exists
+            validate(pid, draft)
+            manager.projects.check_mount(pid, draft["mountName"])
+        except ProjectConflict as e:
+            raise HTTPException(409, str(e))
+        except ProjectError as e:
+            raise HTTPException(422, str(e))
+        try:
+            repo = await manager.github.create_repo(name, body.private, body.description)
+        except GitHubError as e:
+            raise github_http(e)
+        doc = save_project(pid, {**draft, "source": {"kind": "git", "url": repo["url"]}})
+        if manager.cloud is not None:
+            manager.cloud.repos_due = True  # the online app's list gets it on the next poll
+        return doc
+
+    # ----------------------------------- drives and folders (folder pickers)
+    @app.get("/api/drives")
+    async def drives():
+        """Filesystems a drive project could be on (not the system's disk)."""
+        try:
+            return await manager.drives.list()
+        except DriveError as e:
+            raise HTTPException(503, str(e))
+
+    @app.get("/api/fs/browse")
+    async def fs_browse(path: str | None = None, drive: str | None = None):
+        """{path, parent, dirs: [{name, path}]}: the folders in path, inside
+        daemon.folder_roots (no path: those roots). With drive=<uuid>, path is
+        inside that drive (mounted first if needed) and so are the answers."""
+        if drive is not None and not UUID_RE.match(drive):
+            raise HTTPException(422, f"bad drive id {drive!r}")
+        try:
+            if drive:
+                mountpoint = await manager.drives.mount(drive)
+                return await asyncio.to_thread(browse_inside, mountpoint, path or "")
+            return await asyncio.to_thread(browse, path, cfg.daemon.folder_roots)
+        except OutsideRoots as e:
+            raise HTTPException(403, str(e))
+        except FileNotFoundError:
+            raise HTTPException(404, f"no folder {path!r}")
+        except PermissionError:
+            raise HTTPException(403, f"can't read {path}")
+        except DriveMissing as e:
+            raise HTTPException(409, str(e))
+        except DriveError as e:  # lsblk or the mount failed
+            raise HTTPException(502, str(e))
+
+    # ------------------------------------------- the trusted network (Tailscale)
+    @app.get("/api/tailnet")
+    async def tailnet():
+        watch = manager.tailnet
+        if watch is None:
+            return {"installed": False, "streams": []}
+        status = await watch.poll()
+        return {**status, "streams": watch.streams()}
+
+    def need_tailnet():
+        if manager.tailnet is None or not manager.tailnet.client.installed:
+            raise HTTPException(404, "Tailscale is not installed on this machine")
+        return manager.tailnet
+
+    @app.post("/api/tailnet/login", dependencies=mutate)
+    async def tailnet_login():
+        """{url}: open it (or scan it) to add this machine to your tailnet;
+        null when it is already on."""
+        watch = need_tailnet()
+        try:
+            out = await watch.client.login()
+        except TailnetError as e:
+            raise HTTPException(502, str(e))
+        watch.kick()
+        return out
+
+    @app.post("/api/tailnet/logout", dependencies=mutate)
+    async def tailnet_logout():
+        watch = need_tailnet()
+        try:
+            await watch.client.logout()
+        except TailnetError as e:
+            raise HTTPException(502, str(e))
+        watch.kick()
+        return {"ok": True}
+
+    # ------------------------------- launches (a workspace + its projects)
+    @app.get("/api/launches")
+    async def launches():
+        jobs = sorted(manager.launches.jobs.values(), key=lambda j: j.created, reverse=True)
+        return [j.summary() for j in jobs]
+
+    @app.post("/api/launches", status_code=201, dependencies=mutate)
+    async def create_launch(body: LaunchBody):
+        try:
+            return manager.launches.create(body.workspace, body.projects, body.view, body.restart).summary()
+        except KeyError:
+            raise HTTPException(404, f"no workspace {body.workspace!r}")
+        except LaunchError as e:
+            raise HTTPException(409, str(e))
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+    @app.get("/api/launches/{job_id}")
+    async def launch(job_id: str, since: int = 0):
+        try:
+            job = manager.launches.get(job_id)
+        except KeyError:
+            raise HTTPException(404, f"no launch {job_id!r}")
+        return {**job.summary(), "from": max(0, since), "lines": job.lines_since(max(0, since))}
+
+    @app.delete("/api/launches/{job_id}", dependencies=mutate)
+    async def cancel_launch(job_id: str):
+        try:
+            return manager.launches.cancel(job_id).summary()
+        except KeyError:
+            raise HTTPException(404, f"no launch {job_id!r}")
+
+    # --------------------------------- Wad Creator's library (designs, drafts)
+    @app.get("/api/library/{collection}")
+    async def library_list(collection: str):
+        try:
+            return manager.library.list(collection)
+        except LibraryError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/library/{collection}/{doc_id}")
+    async def library_get(collection: str, doc_id: str):
+        try:
+            return manager.library.get(collection, doc_id)
+        except KeyError:
+            raise HTTPException(404, f"no {doc_id!r} in {collection}")
+        except LibraryError as e:
+            raise HTTPException(404, str(e))
+
+    @app.put("/api/library/{collection}/{doc_id}", dependencies=mutate)
+    async def library_put(collection: str, doc_id: str, body: dict):
+        try:
+            return manager.library.put(collection, doc_id, body)
+        except LibraryError as e:
+            raise HTTPException(422, str(e))
+
+    @app.delete("/api/library/{collection}/{doc_id}", dependencies=mutate)
+    async def library_delete(collection: str, doc_id: str):
+        try:
+            if not manager.library.delete(collection, doc_id):
+                raise HTTPException(404, f"no {doc_id!r} in {collection}")
+        except LibraryError as e:
+            raise HTTPException(404, str(e))
+        return {"ok": True}
+
+    # ------------------------------------------------ load and history (Manager)
+    @app.get("/api/metrics")
+    async def machine_metrics():
+        return await asyncio.to_thread(metrics.snapshot, cfg.daemon.state_dir)
+
+    @app.get("/api/runs")
+    async def runs(workspace: str | None = None, limit: int = 200):
+        return manager.runs.list(workspace, max(1, min(limit, 1000)))
 
     @app.get("/api/secrets")
     async def list_secrets():

@@ -11,6 +11,7 @@ RUN dnf -y install \
       adwaita-cursor-theme google-noto-sans-fonts google-noto-emoji-fonts liberation-fonts \
       dbus-daemon dbus-tools wlr-randr NetworkManager-wifi NetworkManager-tui curl \
       gtk4 gtk4-layer-shell python3-gobject \
+      git-core \
     && dnf clean all
 
 # Hardware video decode for the WebRTC streams. The Intel VA-API drivers
@@ -22,6 +23,14 @@ RUN dnf -y install \
     && if rpm -q mesa-va-drivers > /dev/null; then \
          dnf -y swap mesa-va-drivers mesa-va-drivers-freeworld --allowerasing; \
        else dnf -y install mesa-va-drivers-freeworld; fi \
+    && dnf clean all
+
+# Tailscale, the trusted network between the owner's machines
+# (wadd/tailnet.py), from Tailscale's own repo. Its own layer, so the ones
+# above stay cached. tailscaled keeps its state in /var/lib/tailscale, which
+# bootc keeps across updates.
+RUN curl -fsSLo /etc/yum.repos.d/tailscale.repo https://pkgs.tailscale.com/stable/fedora/tailscale.repo \
+    && dnf -y install tailscale \
     && dnf clean all
 
 COPY wadd/ /usr/lib/wadspaces/wadd/
@@ -38,13 +47,14 @@ RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd && \
     find /usr/lib/wadspaces/secrets -type d -exec chmod 700 {} + && \
     find /usr/lib/wadspaces/secrets -type f -exec chmod 600 {} + && \
     chmod 644 /usr/share/wadspaces/ssh/* && \
-    for b in dbus-run-session sway chromium-browser curl nmcli skopeo bootc; do \
+    for b in dbus-run-session sway chromium-browser curl nmcli skopeo bootc tailscale; do \
       command -v "$b" > /dev/null || { echo "missing $b" >&2; exit 1; }; \
     done && \
     ls /usr/lib/firmware/mrvl/pcie8897_uapsta.bin* /usr/lib64/libgtk4-layer-shell.so.0 > /dev/null && \
     PYTHONPATH=/usr/lib/wadspaces python3 -m wadd --config /etc/wadspaces/workspaces.yaml \
       gen-quadlets --out /etc/containers/systemd && \
-    systemctl enable greetd.service podman.socket wadd.service wadspaces-admin-password.service wadspaces-import.service && \
+    systemctl enable greetd.service podman.socket wadd.service wadspaces-admin-password.service wadspaces-import.service \
+      tailscaled.service && \
     systemctl set-default graphical.target && \
     systemctl mask getty@tty1.service && \
     rm -rf /var/log/dnf5.log* /var/lib/dnf /var/cache/libdnf5 /run/dnf && \

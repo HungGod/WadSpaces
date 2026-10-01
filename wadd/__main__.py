@@ -33,6 +33,7 @@ def cmd_serve(args) -> int:
     from .kiosk import CdpClient, NullKiosk
     from .manager import WorkspaceManager
     from .network import NetworkManagerCli
+    from .tailnet import Tailnet, TailnetWatch
 
     cfg = load_config(args.config)
     if args.dev:
@@ -49,6 +50,10 @@ def cmd_serve(args) -> int:
     if not args.dev and any(ws.native for ws in cfg.enabled_workspaces):
         # Native workspaces are windows on the kiosk session's sway.
         manager.display = SwayDisplay()
+    # The trusted network: reported as not installed on a machine without
+    # tailscaled (a dev laptop), and nothing else changes there.
+    d = cfg.daemon
+    manager.tailnet = TailnetWatch(manager, Tailnet(d.tailscale_socket, d.tailscale_bin, d.state_dir))
 
     async def boot():
         # A session saved before a restart comes back first. It needs the
@@ -57,6 +62,17 @@ def cmd_serve(args) -> int:
             manager.restore_session()
         except Exception:  # noqa: BLE001 - a bad session file must not stop wadd
             log.exception("restoring the saved session failed")
+        # Units written by an older wadd (a host update keeps locally changed
+        # files in /etc) are brought up to date, e.g. dropping a mount that's gone.
+        if backend.name == "systemd":
+            from .quadlet import gen_quadlets, quadlets_current
+            try:
+                if not quadlets_current(cfg, cfg.daemon.quadlet_dir):
+                    gen_quadlets(cfg, cfg.daemon.quadlet_dir)
+                    await backend.daemon_reload()
+                    log.info("workspace units updated for this wadd")
+            except Exception:  # noqa: BLE001 - old units still start
+                log.exception("updating the workspace units failed")
         # Secrets next: autostart containers mount them.
         try:
             await manager.seed_secrets()
@@ -66,7 +82,8 @@ def cmd_serve(args) -> int:
             await manager.prefetch_loop(net)
 
     background = [manager.refresh_loop, boot, lambda: manager.network_loop(net),
-                  lambda: manager.display.run(manager.resolve_window, manager.on_native_window)]
+                  lambda: manager.display.run(manager.resolve_window, manager.on_native_window),
+                  manager.tailnet.run]
 
     keys = cfg.daemon.keys
     if keys.enabled and not args.no_hotkeys:

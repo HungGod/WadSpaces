@@ -1,0 +1,4 @@
+# The cloud project this machine links to (read by wadd over the cloud: section
+# of /etc/wadspaces/workspaces.yaml; see VENDOR_CLOUD in wadd/config.py).
+project_id: wad-spaces
+functions_region: australia-southeast2
