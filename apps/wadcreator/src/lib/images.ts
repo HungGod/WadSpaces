@@ -25,9 +25,12 @@ async function downscale(file: File, max: number, quality: number, type?: string
     canvas.height = h;
     canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
     const out = type ?? (file.type === "image/png" || file.type === "image/svg+xml" ? "image/png" : "image/jpeg");
-    return await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't process the image."))), out, quality),
-    );
+    const encode = (t: string) =>
+      new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't process the image."))), t, quality));
+    const blob = await encode(out);
+    // A browser that can't write the type asked for gives PNG instead
+    // (WebKitGTK has no WebP encoder): JPEG is far smaller than that.
+    return blob.type === out || out === "image/png" ? blob : encode("image/jpeg");
   } finally {
     URL.revokeObjectURL(url);
   }

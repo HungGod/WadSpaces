@@ -37,6 +37,7 @@ import { timeAgo, uptime } from "@/lib/format";
 import { openWadspace } from "@/lib/launch";
 import { THIS_MACHINE, isLocked, useApp } from "@/lib/store";
 import type { Container, Machine } from "@/lib/types";
+import { hasAccount, isThisMachine } from "@/lib/machine";
 
 const PHASE: Record<string, string> = {
   idle: "Stopped",
@@ -59,7 +60,7 @@ export default function ManagerPage() {
   const launchTarget = useApp((s) => s.launchTarget);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pairOpen, setPairOpen] = useState(false);
-  const offline = backend.target === "offline";
+  const offline = !hasAccount;
 
   const m = machines.find((x) => x.id === selectedId) ?? machines.find((x) => x.id === launchTarget) ?? machines[0];
 
@@ -139,7 +140,8 @@ function MachineDetail({ m }: { m: Machine }) {
   const launchTarget = useApp((s) => s.launchTarget);
   const [tab, setTab] = useState<"wadspaces" | "diagnostics">("wadspaces");
   const [deployOpen, setDeployOpen] = useState(false);
-  const offline = backend.target === "offline";
+  const offline = !hasAccount;
+  const here = isThisMachine(m.id);
   const up = m.status === "online";
   const Icon = m.id === THIS_MACHINE ? Laptop : Server;
 
@@ -183,10 +185,10 @@ function MachineDetail({ m }: { m: Machine }) {
         </div>
 
         {offline ? <LinkThisMachine linked={m.allowRemote} /> : null}
-        {offline && backend.caps.tailnet && <TailnetCard m={m} />}
+        {here && backend.caps.tailnet && <TailnetCard m={m} />}
       </div>
 
-      {offline && (
+      {here && (
         <Segmented
           value={tab}
           onChange={setTab}
@@ -229,7 +231,7 @@ function Containers({ m }: { m: Machine }) {
   const toast = useApp((s) => s.toast);
   const loadMachines = useApp((s) => s.loadMachines);
   const [busy, setBusy] = useState<string | null>(null);
-  const offline = backend.target === "offline";
+  const here = isThisMachine(m.id);
   const up = m.status === "online";
 
   const act = async (c: Container, action: ContainerAction) => {
@@ -237,7 +239,7 @@ function Containers({ m }: { m: Machine }) {
     setBusy(`${c.id}:${action}`);
     try {
       await backend.container(m.id, c.id, action);
-      if (!offline) toast({ title: "Sent", body: `${action} → ${m.label}` });
+      if (!here) toast({ title: "Sent", body: `${action} → ${m.label}` });
       loadMachines();
     } catch (e) {
       toast({ title: "Couldn't do that", body: (e as Error).message, tone: "error" });
@@ -295,7 +297,7 @@ function Containers({ m }: { m: Machine }) {
                     <Eye className="size-4" />
                   </IconButton>
                 )}
-                {offline && ws?.installed && !ws.local && !c.download && (
+                {here && ws?.installed && !ws.local && !c.download && (
                   <IconButton label="Download" disabled={!up || b("download")} onClick={() => act(c, "download")}>
                     <CloudDownload className="size-4" />
                   </IconButton>
@@ -314,7 +316,7 @@ function Containers({ m }: { m: Machine }) {
                     <Play className="size-4 fill-current" />
                   </IconButton>
                 )}
-                {offline && (
+                {here && (
                   <IconButton label="Remove from this machine" disabled={!up || on} onClick={() => act(c, "remove")}>
                     <Trash2 className="size-4" />
                   </IconButton>

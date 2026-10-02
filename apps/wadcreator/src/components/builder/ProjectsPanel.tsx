@@ -7,12 +7,14 @@ import { useApp } from "@/lib/store";
 import { AddFromGithub } from "../GithubRepos";
 import { AddDriveDialog, AddFolderDialog } from "../HostFolders";
 import { SourceIcon } from "../ProjectDialog";
+import { hasLocal } from "@/lib/machine";
 
 /** Builder step 2: the projects a wadspace opens with unless you pick others. */
 export function ProjectsPanel({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
   const projects = useApp((s) => s.projects);
   const [adding, setAdding] = useState<"github" | "folder" | "drive" | null>(null);
-  const offline = backend.target === "offline";
+  // Folders and drives are picked here when this machine's wadd is.
+  const offline = hasLocal;
 
   if (!backend.caps.projects) {
     return (

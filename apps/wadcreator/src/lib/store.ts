@@ -4,10 +4,11 @@ import type { BuildProgress, LaunchProgress, WadspacePatch } from "@/data/backen
 import type { Project } from "@core/projects";
 import type { BuildJob } from "./build";
 import type { LaunchJob } from "./launch";
+import { THIS_MACHINE, hasAccount } from "./machine";
 import type { App, Draft, FocusLock, LastSession, Machine, PublicUser, Wadspace } from "./types";
 
 /** The machine the offline app runs on. */
-export const THIS_MACHINE = "this-machine";
+export { THIS_MACHINE } from "./machine";
 
 interface Toast {
   id: number;
@@ -232,8 +233,8 @@ function follow() {
     drafts: () => s().loadDrafts(),
     machines: async () => {
       await s().loadMachines();
-      // Online, which wadspaces are "local" depends on the target machine's heartbeat.
-      if (backend.target === "online") await s().loadWadspaces();
+      // With an account, which wadspaces are "local" depends on the machines' state.
+      if (hasAccount) await s().loadWadspaces();
     },
     focus: () => s().loadFocus(),
     session: () => s().loadLastSession(),

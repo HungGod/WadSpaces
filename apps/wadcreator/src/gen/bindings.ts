@@ -9,9 +9,16 @@ export const commands = {
 	/**  The app's version, for Settings and support. */
 	appVersion: () => __TAURI_INVOKE<string>("app_version"),
 	/**  Starts a sign-in: the code for the user to enter at github.com/login/device. */
-	githubDeviceStart: () => __TAURI_INVOKE<DeviceCode>("github_device_start"),
-	/**  Waits until the user has entered the code, then returns their account. */
-	githubDeviceWait: () => __TAURI_INVOKE<GithubAccount>("github_device_wait"),
+	githubDeviceStart: () => __TAURI_INVOKE<DevicePrompt>("github_device_start"),
+	/**
+	 *  Waits until the user has entered the code, then saves the token on this
+	 *  machine and (with `account`) to the account.
+	 */
+	githubDeviceWait: (account: {
+	uid: string,
+	idToken: string,
+	projectId: string,
+} | null) => __TAURI_INVOKE<GithubSignedIn>("github_device_wait", { account }),
 	/**  Stops waiting for a sign-in. */
 	githubDeviceCancel: () => __TAURI_INVOKE<void>("github_device_cancel"),
 	/**  Calls wadd's HTTP API: `path` is like `/api/projects?x=1`. */
@@ -26,6 +33,16 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  The signed-in WadSpaces user, so the token can be saved to their account
+ *  with their own credentials (Firestore's rules apply as for the page).
+ */
+export type AccountRef = {
+	uid: string,
+	idToken: string,
+	projectId: string,
+};
+
 /**
  *  The one error shape: wadd's API returns it as the body of a failed
  *  request, and Tauri commands reject with it.
@@ -43,6 +60,13 @@ export type DeviceCode = {
 	verificationUri: string,
 	/**  Seconds until the code expires (GitHub gives 15 minutes). */
 	expiresIn: number,
+};
+
+/**  What the sign-in screen shows. */
+export type DevicePrompt = {
+	code: DeviceCode,
+	/**  A QR code of `code.verificationUri`, as an SVG document. */
+	qrSvg: string,
 };
 
 /**
@@ -74,6 +98,13 @@ export type GithubAccount = {
 	login: string,
 	name: string | null,
 	avatarUrl: string | null,
+};
+
+/**  What became of the token, as well as whose it is. */
+export type GithubSignedIn = {
+	account: GithubAccount,
+	/**  Saved to the account, for your other machines (false: this machine only). */
+	savedToAccount: boolean,
 };
 
 /**

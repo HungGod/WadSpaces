@@ -71,6 +71,19 @@ const WADD: &str = r#"(async () => {
   window.__report("wadd", r);
 })();"#;
 
+/// The Wi-Fi step (when the machine is offline): pick a network, give a password.
+const WIFI: &str = r#"(() => {
+  const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Home Network"));
+  if (!btn) return window.__report("wifi", { error: "no network list", text: document.body.innerText.slice(0, 300) });
+  btn.click();
+  setTimeout(() => {
+    const pw = document.querySelector("input[type=password]");
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(pw, "wrong-password");
+    pw.dispatchEvent(new Event("input", { bubbles: true }));
+    setTimeout(() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Join").click(), 200);
+  }, 300);
+})();"#;
+
 /// A deep route, reloaded: does the asset protocol serve the app for it?
 const RELOAD: &str = r#"history.pushState({}, "", "/signup"); location.reload();"#;
 
@@ -133,7 +146,11 @@ pub fn start(app: AppHandle, w: WebviewWindow) {
         wait(3);
         let _ = w.eval(WADD);
         wait(3);
-        let _ = w.eval(LOGIN);
+        if std::env::var_os("WADCREATOR_SPIKE_WIFI").is_some() {
+            let _ = w.eval(WIFI);
+        } else {
+            let _ = w.eval(LOGIN);
+        }
         wait(8);
         snapshot(&w, dir.join("2-login.png"));
         let _ = w.eval(AFTER);

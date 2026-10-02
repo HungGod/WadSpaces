@@ -1,9 +1,15 @@
-// Firebase for the online app. Config comes from .env.local (see
-// .env.example); VITE_USE_EMULATORS=1 points everything at the local
-// emulator suite (`firebase emulators:start`).
+// Firebase for the online app and the machine app. Config comes from
+// .env.local (see .env.example); VITE_USE_EMULATORS=1 points everything at the
+// local emulator suite (`firebase emulators:start`).
+//
+// The machine app (WebKitGTK, tauri://localhost) keeps the sign-in in
+// IndexedDB and loads no popup/redirect helper: it signs in with email and
+// password only, and Google's helper script is outside its CSP. Firestore
+// keeps a persistent cache there, so the app starts with your designs even
+// when the machine boots offline.
 import { initializeApp } from "firebase/app";
-import { connectAuthEmulator, getAuth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { browserLocalPersistence, connectAuthEmulator, getAuth, indexedDBLocalPersistence, initializeAuth } from "firebase/auth";
+import { connectFirestoreEmulator, getFirestore, initializeFirestore, persistentLocalCache, persistentSingleTabManager } from "firebase/firestore";
 
 const env = import.meta.env;
 const emulators = env.VITE_USE_EMULATORS === "1";
@@ -21,8 +27,9 @@ if (!config.apiKey || !config.projectId) {
 }
 
 export const app = initializeApp(config);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+const machine = import.meta.env.VITE_TARGET === "machine";
+export const auth = machine ? initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] }) : getAuth(app);
+export const db = machine ? initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentSingleTabManager(undefined) }) }) : getFirestore(app);
 
 if (emulators) {
   const host = env.VITE_EMULATOR_HOST || "127.0.0.1";

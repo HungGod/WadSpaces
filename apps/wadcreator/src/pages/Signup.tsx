@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router";
 import { useState } from "react";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { AuthCard, FormError, GoogleButton, OrDivider } from "@/components/AuthCard";
+import { hasGoogleSignIn } from "@/lib/machine";
 import { Button, Input, Label } from "@/components/ui";
 import { USERNAME_RE, signInGoogle, signUpEmail } from "@/data/cloud/auth";
 
@@ -38,10 +39,14 @@ export default function SignupPage() {
         <h1 className="font-display text-2xl font-bold tracking-tight">Create account</h1>
         <p className="mt-1 text-sm text-muted">Pick a username. It's how people find you to share wadspaces.</p>
 
-        <GoogleButton className="mt-6" label="Sign up with Google" disabled={busy} onClick={() => run(signInGoogle)} />
-        <OrDivider />
+        {hasGoogleSignIn && (
+          <>
+            <GoogleButton className="mt-6" label="Sign up with Google" disabled={busy} onClick={() => run(signInGoogle)} />
+            <OrDivider />
+          </>
+        )}
 
-        <div className="space-y-4">
+        <div className={hasGoogleSignIn ? "space-y-4" : "mt-6 space-y-4"}>
           <div>
             <Label hint={username && !nameOk ? "3-24 letters, digits, . _ -" : undefined}>Username</Label>
             <Input autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} />

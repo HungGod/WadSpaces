@@ -2,6 +2,7 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { useState } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { AuthCard, FormError, GoogleButton, OrDivider } from "@/components/AuthCard";
+import { hasGoogleSignIn } from "@/lib/machine";
 import { Button, Input, Label } from "@/components/ui";
 import { signInEmail, signInGoogle } from "@/data/cloud/auth";
 
@@ -37,10 +38,14 @@ export default function LoginPage() {
         <h1 className="font-display text-2xl font-bold tracking-tight">Welcome back</h1>
         <p className="mt-1 text-sm text-muted">Sign in to build, run and stream your wadspaces.</p>
 
-        <GoogleButton className="mt-6" disabled={busy} onClick={() => run(signInGoogle)} />
-        <OrDivider />
+        {hasGoogleSignIn && (
+          <>
+            <GoogleButton className="mt-6" disabled={busy} onClick={() => run(signInGoogle)} />
+            <OrDivider />
+          </>
+        )}
 
-        <div className="space-y-4">
+        <div className={hasGoogleSignIn ? "space-y-4" : "mt-6 space-y-4"}>
           <div>
             <Label>Email</Label>
             <Input type="email" autoFocus autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />

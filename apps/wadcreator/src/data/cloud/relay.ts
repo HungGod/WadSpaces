@@ -8,7 +8,7 @@ import { newEnrollCode } from "./relayCore";
 
 export { ONLINE_WITHIN_MS, isOnlineNow, newEnrollCode, type RelayWorkspace } from "./relayCore";
 
-export type CommandType = "switch" | "start" | "stop" | "restart" | "projects-sync" | "launch";
+export type CommandType = "switch" | "start" | "stop" | "restart" | "projects-sync" | "sync-secrets" | "launch";
 
 /** Queue a command; the machine picks it up within a few seconds. */
 export async function sendCommand(uid: string, mid: string, type: CommandType, wsId?: string): Promise<void> {

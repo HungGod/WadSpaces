@@ -73,6 +73,13 @@ impl Wadd {
         Self { http: reqwest::Client::new(), base: base.trim_end_matches('/').into(), last_state: Mutex::default() }
     }
 
+    /// Sets a podman secret on this machine (PUT /api/secrets/{name}).
+    pub async fn put_secret(&self, name: &str, value: &str) -> Result<(), WaddFailure> {
+        let url = format!("{}/api/secrets/{name}", self.base);
+        let res = self.http.put(url).json(&serde_json::json!({ "value": value })).send().await;
+        self.finish(res).await.map(drop)
+    }
+
     fn unreachable(&self) -> WaddFailure {
         WaddFailure::new(0, format!("Cannot reach wadd at {}. Is this a WadSpaces machine?", self.base))
     }

@@ -17,6 +17,7 @@ import { cleanDraft, toProjectDoc, type Project, type ProjectDraft } from "@core
 import { presetProjects, presetWadspace } from "@core/presets";
 import { toWaddSpec, type WaddSpec } from "@core/spec";
 import { imageDataUrl } from "@/lib/images";
+import { THIS_MACHINE } from "@/lib/machine";
 import type { App, Container, ContainerRun, Draft, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
 import {
   waddEvents,
@@ -51,7 +52,7 @@ import { buildRequest, toLaunchProgress, toProgress } from "./builds";
 import { LocalLibrary, type LibraryEntry } from "./library";
 import { lastSession, onboarded, presetProjectsMade } from "./store";
 
-export const THIS_MACHINE = "this-machine";
+export { THIS_MACHINE };
 const LOCAL_USER = "local";
 const PLAIN_WALLPAPER = "radial-gradient(90% 70% at 80% 10%, #ff3d8155 0%, transparent 60%), radial-gradient(70% 60% at 10% 90%, #5b2bff44 0%, transparent 60%), #0a0614";
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
@@ -161,6 +162,11 @@ export class LocalBackend implements Backend {
     this.listeners.forEach((fn) => fn(t));
   }
 
+  /** Something changed that wadd won't announce (the machine app set its GitHub token). */
+  changed(t: Topic) {
+    this.emit(t);
+  }
+
   private connect() {
     waddEvents(
       (event, data) => {
@@ -233,6 +239,17 @@ export class LocalBackend implements Backend {
   subscribe(fn: (t: Topic) => void) {
     this.listeners.add(fn);
     return () => void this.listeners.delete(fn);
+  }
+
+  /** Who this machine is linked to, once wadd has said (null: not linked). */
+  async linkInfo(): Promise<{ machineId: string | null; ownerUid: string | null; machineName: string | null; connected: boolean }> {
+    await this.firstSnap;
+    return { machineId: this.snap?.machine_id ?? null, ownerUid: this.snap?.owner_uid ?? null, machineName: this.snap?.machine ?? null, connected: this.connected };
+  }
+
+  /** This machine's id in the account (the heartbeat's), so the account's copy of it can be left out. */
+  cloudMachineId(): string | null {
+    return this.snap?.machine_id ?? null;
   }
 
   defaultMachineId() {
@@ -344,15 +361,24 @@ export class LocalBackend implements Backend {
       ...("dockerfile" in patch && { dockerfile: patch.dockerfile }),
     };
     await this.lib.put({ ...prev, spec, visibility: patch.visibility ?? prev.visibility, updatedAt: now });
-    // The kiosk's own copy: its name and hotkey change now; the rest (apps,
-    // wallpaper, run settings) takes effect when the image is rebuilt.
-    const installed = this.specs.find((s) => s.id === id);
-    if (installed && (installed.name !== spec.name || (installed.hotkey ?? null) !== (spec.advanced.hotkey ?? null))) {
-      await wadd.update(id, { ...installed, name: spec.name, hotkey: spec.advanced.hotkey ?? null });
-      await this.refreshSpecs();
-    }
+    await this.mirrorInstalled(id, spec.name, spec.advanced.hotkey ?? null);
     this.emit("wadspaces");
     return this.getWadspace(id);
+  }
+
+  /** The machine's own copy of an edited wadspace: its name and hotkey change
+   *  now; the rest (apps, wallpaper, run settings) when the image is rebuilt. */
+  async mirrorInstalled(id: string, name: string, hotkey: number | null) {
+    const installed = this.specs.find((s) => s.id === id);
+    if (installed && (installed.name !== name || (installed.hotkey ?? null) !== hotkey)) {
+      await wadd.update(id, { ...installed, name, hotkey });
+      await this.refreshSpecs();
+    }
+  }
+
+  /** Whether this machine has it: installed, or designed here. */
+  has(id: string): boolean {
+    return this.specs.some((s) => s.id === id) || !!this.lib.get(id);
   }
 
   async deleteWadspace(id: string) {
@@ -385,9 +411,10 @@ export class LocalBackend implements Backend {
   }
 
   // --------------------------------------------------------------- builds
-  async startBuild(wadspaceId: string) {
+  /** `design`: the wadspace as the account has it (the machine app), when it isn't designed here. */
+  async startBuild(wadspaceId: string, design?: Wadspace) {
     if (!this.caps.localBuild) throw new Unsupported("Building on this machine (it needs a newer wadd)");
-    const ws = await this.getWadspace(wadspaceId);
+    const ws = design ?? (await this.getWadspace(wadspaceId));
     const req = await buildRequest(ws, this.specs.find((s) => s.id === wadspaceId), this.projects);
     const job = await wadd.createBuild(req.workspace, req.baseImage);
     await wadd.buildContext(job.id, req.tarball);
@@ -623,10 +650,11 @@ export class LocalBackend implements Backend {
     ];
   }
 
-  async open(_machineId: string, wadspaceId: string) {
+  /** `design`: as in startBuild. */
+  async open(_machineId: string, wadspaceId: string, design?: Wadspace) {
     const installed = this.specs.find((s) => s.id === wadspaceId);
     if (!installed) {
-      const ws = this.assemble(wadspaceId);
+      const ws = design ?? this.assemble(wadspaceId);
       if (ws && ws.advanced.image) {
         // Designed elsewhere but the image is known: add it to the machine.
         const { spec } = toBuildSpec(ws, { image: ws.advanced.image });

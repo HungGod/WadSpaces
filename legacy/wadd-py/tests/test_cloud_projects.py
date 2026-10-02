@@ -292,3 +292,48 @@ def test_projects_sync_reports_a_github_failure(relay):
     mgr.github.repos = down
     out = asyncio.run(r.execute({"type": "projects-sync"}))
     assert out == {"ok": True, "pulled": 0, "pushed": 0, "repos": {"error": "the GitHub token was refused"}}
+
+
+def enroll_with(r, owner: str, deleted: list):
+    """Point enroll() at a fake enrollMachine and Identity Toolkit for `owner`."""
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/enrollMachine"):
+            return httpx.Response(200, json={"result": {"machineId": "m9", "ownerUid": owner, "customToken": "c"}})
+        return httpx.Response(200, json={"idToken": "T", "refreshToken": "R", "expiresIn": "3600"})
+
+    async def delete_secret(name):
+        deleted.append(name)
+        return True
+
+    r.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    r.manager.delete_secret = delete_secret
+
+
+def test_linking_to_a_new_owner_sets_their_projects_and_token_aside(relay, tmp_path):
+    r, mgr, fs, events = relay
+    mgr.projects.put("old", {"name": "Theirs", "mountName": "Theirs", "source": gh("old")})
+    deleted = []
+    enroll_with(r, "u2", deleted)
+    asyncio.run(r.enroll("CODE"))
+    assert r.state["owner_uid"] == "u2" and mgr.projects.list() == []
+    aside = [p for p in tmp_path.iterdir() if p.name.startswith("projects.u1.")]
+    assert len(aside) == 1 and (aside[0] / "old.json").is_file()
+    assert deleted == ["github_token"]
+    snap = mgr.snapshot()
+    assert snap["machine_id"] == "m9" and snap["owner_uid"] == "u2"
+
+
+def test_relinking_the_same_owner_keeps_everything(relay):
+    r, mgr, fs, events = relay
+    mgr.projects.put("mine", {"name": "Mine", "mountName": "Mine", "source": gh("mine")})
+    deleted = []
+    enroll_with(r, "u1", deleted)
+    asyncio.run(r.enroll("CODE"))
+    assert [p["id"] for p in mgr.projects.list()] == ["mine"] and deleted == []
+
+
+def test_snapshot_before_linking_has_no_cloud_ids(relay):
+    r, mgr, fs, events = relay
+    mgr.enrolled = False
+    snap = mgr.snapshot()
+    assert snap["machine_id"] is None and snap["owner_uid"] is None

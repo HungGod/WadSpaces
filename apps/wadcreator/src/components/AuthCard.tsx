@@ -3,7 +3,7 @@ import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 
 /** Shared frame for the sign-in and create-account screens. */
-export function AuthCard({ children }: { children: React.ReactNode }) {
+export function AuthCard({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <main className="ws-backdrop relative grid min-h-screen place-items-center overflow-hidden p-6">
       <div aria-hidden className="pointer-events-none absolute inset-0 hidden dark:block">
@@ -21,7 +21,7 @@ export function AuthCard({ children }: { children: React.ReactNode }) {
       <div className="absolute right-5 top-5 w-44">
         <ThemeToggle />
       </div>
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 200, damping: 26 }} className="relative w-full max-w-[420px]">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 200, damping: 26 }} className={wide ? "relative w-full max-w-[640px]" : "relative w-full max-w-[420px]"}>
         <div className="mb-6 flex justify-center">
           <Logo className="h-36" />
         </div>

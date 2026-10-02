@@ -10,6 +10,7 @@ import { timeAgo } from "@/lib/format";
 import { useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui";
 import type { Draft, Wadspace } from "@/lib/types";
+import { hasAccount, hasLocal } from "@/lib/machine";
 
 type Tab = "all" | "local" | "shared" | "drafts";
 type Sort = "recent" | "name" | "size";
@@ -25,7 +26,7 @@ export default function WadspacesPage() {
   const [sort, setSort] = useState<Sort>("recent");
 
   const me = user?.username;
-  const offline = backend.target === "offline";
+  const offline = !hasAccount;
   const filters: Record<Exclude<Tab, "drafts">, (w: Wadspace) => boolean> = {
     all: (w) => w.owner === me || w.sharedWith.includes(me ?? ""),
     local: (w) => w.local,
@@ -69,7 +70,7 @@ export default function WadspacesPage() {
           onChange={setTab}
           options={[
             { value: "all" as Tab, label: <><Boxes className="size-3.5" /> All <Count n={count("all")} /></> },
-            { value: "local" as Tab, label: <><HardDrive className="size-3.5" /> {offline ? "On this machine" : "On machine"} <Count n={count("local")} /></> },
+            { value: "local" as Tab, label: <><HardDrive className="size-3.5" /> {hasLocal ? "On this machine" : "On machine"} <Count n={count("local")} /></> },
             ...(backend.caps.sharing ? [{ value: "shared" as Tab, label: <><Users className="size-3.5" /> Shared with me <Count n={count("shared")} /></> }] : []),
             { value: "drafts" as Tab, label: <><FilePen className="size-3.5" /> Drafts <Count n={count("drafts")} /></> },
           ]}
@@ -101,7 +102,7 @@ export default function WadspacesPage() {
         <EmptyState
           icon={<Boxes className="size-6" />}
           title={q ? "No matches" : tab === "shared" ? "Nothing shared with you yet" : "No wadspaces here"}
-          body={q ? `Nothing matches "${q}".` : tab === "local" ? (offline ? "Build a wadspace in the Builder to put it on this machine." : "Install a wadspace on your default machine to see it here.") : "Build one in the Wadspace Builder to get started."}
+          body={q ? `Nothing matches "${q}".` : tab === "local" ? (hasLocal ? "Build a wadspace in the Builder to put it on this machine." : "Install a wadspace on your default machine to see it here.") : "Build one in the Wadspace Builder to get started."}
           action={!q && <Link to="/builder"><Button variant="primary"><Plus className="size-4" /> Open Builder</Button></Link>}
         />
       )}

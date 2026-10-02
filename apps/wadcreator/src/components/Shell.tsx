@@ -21,6 +21,8 @@ import { WaitSheet } from "./WaitSheet";
 import { RunDialog } from "./RunDialog";
 import { ActivityTray, BuildLog } from "./ActivityTray";
 import { ProfileNotices } from "./ProfileNotices";
+import { TARGET } from "@/lib/machine";
+import { MachineButtons } from "./machine/MachineButtons";
 
 const NAV = [
   { href: "/", label: "Home", icon: Home },
@@ -128,6 +130,7 @@ export function Shell({ user, children }: { user: PublicUser; children: React.Re
 
         <div className="mt-auto flex flex-col gap-3 p-3">
           <ActivityTray narrow={narrow} />
+          {TARGET === "machine" && <MachineButtons narrow={narrow} />}
           {offline && (
             <button
               type="button"

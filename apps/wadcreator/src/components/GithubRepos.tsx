@@ -8,13 +8,16 @@ import { timeAgo } from "@/lib/format";
 import { useApp } from "@/lib/store";
 import { ProjectForm } from "./ProjectDialog";
 import { Badge, Button, Input, Label, Modal, Toggle } from "./ui";
+import { canOpenLinks } from "@/lib/machine";
+import { TARGET } from "@/lib/machine";
+import { openMachinePanel } from "./machine/panels";
 
 const TOKEN_CMD = "printf '%s' '<PAT>' | podman secret create github_token -";
 export const GITHUB_NEW = "https://github.com/new";
 
 /** A link where the app can open one (a browser); plain text in the machine's own app, which opens none. */
 export function OutLink({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) {
-  if (backend.target === "offline") return <span className={className}>{children}</span>;
+  if (!canOpenLinks) return <span className={className}>{children}</span>;
   return (
     <a href={href} target="_blank" rel="noreferrer" className={clsx("underline decoration-line-strong underline-offset-2 hover:text-fg", className)}>
       {children}
@@ -28,6 +31,21 @@ export function OutLink({ href, children, className }: { href: string; children:
  */
 export function GithubTokenCallout({ missing, onRetry, busy }: { missing: "token" | "shared"; onRetry?: () => void; busy?: boolean }) {
   const [copied, setCopied] = useState(false);
+  // The machine app signs the machine in itself.
+  if (TARGET === "machine" && missing === "token") {
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-accent-2-soft p-4 text-sm ring-1 ring-accent-2/45">
+        <KeyRound className="size-4 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold">This machine isn't signed in to GitHub</div>
+          <p className="text-muted">Projects are your GitHub repositories. Sign in once and this machine can list, clone and push them.</p>
+        </div>
+        <Button variant="primary" size="sm" onClick={() => openMachinePanel("github")}>
+          Sign in to GitHub
+        </Button>
+      </div>
+    );
+  }
   const copy = async () => {
     await navigator.clipboard.writeText(TOKEN_CMD).catch(() => {});
     setCopied(true);

@@ -52,6 +52,9 @@ export interface Snapshot {
   view: string;
   /** Linked to an account through the cloud relay. */
   enrolled?: boolean;
+  /** This machine's id in the account, and the account's uid (null until linked). */
+  machine_id?: string | null;
+  owner_uid?: string | null;
   cloud_enabled?: boolean;
   kiosk_connected: boolean;
   backend: string;
@@ -84,6 +87,19 @@ export interface NetworkStatus {
   ssid?: string | null;
   signal?: number | null;
   error?: string;
+}
+
+/** GET /api/network/wifi: one network in range (wadd/network.py). */
+export interface WifiNetwork {
+  ssid: string;
+  signal: number;
+  security: string;
+  secure: boolean;
+  /** WPA personal or open: enterprise and WEP networks can't be joined here. */
+  supported: boolean;
+  active: boolean;
+  /** Saved: joins without asking for the password again. */
+  known: boolean;
 }
 
 export interface LogLine {
@@ -306,6 +322,15 @@ export const wadd = {
     call<{ workspace: WaddSpec; restart_required: boolean }>("PUT", `/api/workspaces/${encodeURIComponent(id)}`, spec),
   remove: (id: string) => call("DELETE", `/api/workspaces/${encodeURIComponent(id)}`),
   diagnostics: () => call<Diagnostics>("GET", "/api/diagnostics"),
+  // Wi-Fi and power (the machine app's menus)
+  network: () => call<NetworkStatus>("GET", "/api/network"),
+  wifiScan: () => call<WifiNetwork[]>("GET", "/api/network/wifi"),
+  wifiConnect: (ssid: string, password?: string) => call<{ ok: boolean }>("POST", "/api/network/wifi/connect", { ssid, ...(password && { password }) }),
+  wifiDisconnect: () => call<{ ok: boolean }>("POST", "/api/network/wifi/disconnect"),
+  wifiForget: (ssid: string) => call<{ ok: boolean }>("POST", "/api/network/wifi/forget", { ssid }),
+  power: (action: "poweroff" | "reboot") => call<{ ok: boolean }>("POST", "/api/power", { action }),
+  /** The HUD's menu was closed: wadd puts back what was on screen. */
+  hudClosed: () => call<{ ok: boolean }>("POST", "/api/hud/closed"),
   // Builds on this machine
   builds: () => call<BuildSummary[]>("GET", "/api/builds"),
   createBuild: (workspace: WaddSpec, baseImage: string) => call<BuildSummary>("POST", "/api/builds", { workspace, base_image: baseImage }),

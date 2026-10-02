@@ -203,6 +203,10 @@ class WorkspaceManager:
             "backend_connected": self.backend_ok,
             "enrolled": self.enrolled,
             "cloud_enabled": self.cfg.cloud is not None,
+            # Which cloud machine this is and whose (null until linked), so
+            # Wad Creator can tell itself apart from the owner's other machines.
+            "machine_id": self.cloud.machine_id if self.cloud and self.enrolled else None,
+            "owner_uid": self.cloud.state.get("owner_uid") if self.cloud and self.enrolled else None,
             "hotkey_devices": len(self.hotkey_devices),
             "network": self.network,
             "wadcreator_url": self.cfg.launcher.wadcreator_url,

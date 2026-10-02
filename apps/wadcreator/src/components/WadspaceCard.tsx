@@ -10,6 +10,7 @@ import { useUi } from "@/lib/ui";
 import type { Wadspace } from "@/lib/types";
 import { Thumb } from "./Thumb";
 import { Avatar, Badge, Button, Dropdown, IconButton } from "./ui";
+import { hasAccount, hasLocal } from "@/lib/machine";
 
 const RING = 2 * Math.PI * 15.5;
 
@@ -38,7 +39,7 @@ export function WadspaceCard({ ws, index = 0 }: { ws: Wadspace; index?: number }
   const runningOn = machines.filter((m) => m.containers.some((c) => c.wadspaceId === ws.id && c.status === "running"));
 
   const remove = async () => {
-    const where = backend.target === "offline" ? "This removes it from this machine." : "This removes it from your account.";
+    const where = hasAccount ? "This removes it from your account." : "This removes it from this machine.";
     if (!confirm(`Delete "${ws.name}"? ${where}`)) return;
     try {
       await backend.deleteWadspace(ws.id);
@@ -90,7 +91,7 @@ export function WadspaceCard({ ws, index = 0 }: { ws: Wadspace; index?: number }
         )}
 
         <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
-          {ws.local && <Badge tone="glass"><HardDrive className="size-3" /> {backend.target === "offline" ? "On this machine" : "On machine"}</Badge>}
+          {ws.local && <Badge tone="glass"><HardDrive className="size-3" /> {hasLocal ? "On this machine" : "On machine"}</Badge>}
           {ws.installed && !ws.local && <Badge tone="glass"><CloudDownload className="size-3" /> Not downloaded</Badge>}
           {ws.visibility === "shared" && <Badge tone="glass"><Users className="size-3" /> Shared</Badge>}
           {ws.templateId && <Badge tone="glass"><Rocket className="size-3" /> Quick launch</Badge>}
@@ -166,8 +167,8 @@ export function WadspaceCard({ ws, index = 0 }: { ws: Wadspace; index?: number }
               { label: "Edit in Builder", icon: <Pencil />, hidden: !mine, onClick: () => navigate(`/builder/${ws.id}`) },
               { label: "Duplicate in Builder", icon: <Copy />, onClick: () => navigate(`/builder/${ws.id}?duplicate=1`) },
               "divider",
-              { label: "Download to this machine", icon: <CloudDownload />, hidden: backend.target !== "offline" || !ws.installed || ws.local || !!download, onClick: () => transfer(ws, "pull") },
-              { label: "Remove from this machine", icon: <HardDrive />, hidden: backend.target !== "offline" || !ws.installed, onClick: () => transfer(ws, "remove-local") },
+              { label: "Download to this machine", icon: <CloudDownload />, hidden: !hasLocal || !ws.installed || ws.local || !!download, onClick: () => transfer(ws, "pull") },
+              { label: "Remove from this machine", icon: <HardDrive />, hidden: !hasLocal || !ws.installed, onClick: () => transfer(ws, "remove-local") },
               { label: "Delete wadspace", icon: <Trash2 />, danger: true, hidden: !mine, onClick: remove },
             ]}
           />

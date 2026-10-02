@@ -11,12 +11,15 @@ import Manager from "@/pages/Manager";
 import Projects from "@/pages/Projects";
 import Wadspaces from "@/pages/Wadspaces";
 
-// Online-only pages load Firebase Auth; the offline build never includes them.
-// The target check is inline so the bundler can drop these chunks offline.
-const online = import.meta.env.VITE_TARGET === "online";
-const Login = online ? lazy(() => import("@/pages/Login")) : null;
-const Signup = online ? lazy(() => import("@/pages/Signup")) : null;
-const Welcome = online ? lazy(() => import("@/pages/Welcome")) : null;
+// Account pages load Firebase Auth: the web portal and the machine app have
+// them, the offline build never includes them. The target check is inline so
+// the bundler can drop these chunks offline.
+const account = import.meta.env.VITE_TARGET === "online" || import.meta.env.VITE_TARGET === "machine";
+const Login = account ? lazy(() => import("@/pages/Login")) : null;
+const Signup = account ? lazy(() => import("@/pages/Signup")) : null;
+const Welcome = account ? lazy(() => import("@/pages/Welcome")) : null;
+// The machine app's first-run setup and its overlays for wadd (Wi-Fi, power, the switcher).
+const MachineGate = import.meta.env.VITE_TARGET === "machine" ? lazy(() => import("@/components/machine/MachineGate")) : null;
 
 function Spinner() {
   return (
@@ -80,27 +83,26 @@ function EditBuilder() {
 }
 
 export default function App() {
-  return (
-    <Suspense fallback={<Spinner />}>
-      <Routes>
-        {Login && Signup && Welcome && (
-          <>
-            <Route path="login" element={<Login />} />
-            <Route path="signup" element={<Signup />} />
-            <Route path="welcome" element={<Welcome />} />
-          </>
-        )}
-        <Route element={<AppLayout />}>
-          <Route index element={<Home />} />
-          <Route path="wadspaces" element={<Wadspaces />} />
-          <Route path="projects" element={<Projects />} />
-          <Route path="launch" element={<Launch />} />
-          <Route path="manager" element={<Manager />} />
-          <Route path="builder" element={<NewBuilder />} />
-          <Route path="builder/:id" element={<EditBuilder />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </Suspense>
+  const routes = (
+    <Routes>
+      {Login && Signup && Welcome && (
+        <>
+          <Route path="login" element={<Login />} />
+          <Route path="signup" element={<Signup />} />
+          <Route path="welcome" element={<Welcome />} />
+        </>
+      )}
+      <Route element={<AppLayout />}>
+        <Route index element={<Home />} />
+        <Route path="wadspaces" element={<Wadspaces />} />
+        <Route path="projects" element={<Projects />} />
+        <Route path="launch" element={<Launch />} />
+        <Route path="manager" element={<Manager />} />
+        <Route path="builder" element={<NewBuilder />} />
+        <Route path="builder/:id" element={<EditBuilder />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
   );
+  return <Suspense fallback={<Spinner />}>{MachineGate ? <MachineGate>{routes}</MachineGate> : routes}</Suspense>;
 }

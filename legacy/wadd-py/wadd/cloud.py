@@ -207,6 +207,9 @@ class CloudRelay:
         api_key = res.get("apiKey") or self.cfg.api_key
         tok = await self._post_identity("accounts:signInWithCustomToken", api_key,
                                         {"token": res["customToken"], "returnSecureToken": True})
+        previous = self.state.get("owner_uid")
+        if previous and previous != res["ownerUid"]:
+            await self._forget_owner(previous)
         self.state = {
             "machine_id": res["machineId"],
             "owner_uid": res["ownerUid"],
@@ -223,6 +226,25 @@ class CloudRelay:
             self.manager.publish()
         log.info("enrolled as machine %s", res["machineId"])
         return {"machineId": res["machineId"]}
+
+    async def _forget_owner(self, uid: str) -> None:
+        """Linked to someone else now: the last owner's projects and GitHub
+        token mustn't become theirs. The project documents move aside (the
+        relay would push them up to the new account); the clones stay on disk,
+        unused, under their old ids."""
+        if self.manager is None:
+            return
+        root = self.manager.projects.root
+        if root.is_dir() and any(root.iterdir()):
+            aside = root.with_name(f"projects.{uid}.{int(time.time())}")
+            root.rename(aside)
+            self.projects_seen = -1
+            log.info("linked to a new owner: %s's projects moved to %s", uid, aside)
+        try:
+            if await self.manager.delete_secret("github_token"):
+                log.info("linked to a new owner: removed %s's github_token", uid)
+        except Exception as e:  # noqa: BLE001 - linking still goes ahead
+            log.warning("couldn't remove the last owner's github_token: %s", e)
 
     async def _post_identity(self, path: str, api_key: str, payload: dict) -> dict:
         r = await self.http.post(f"{IDENTITY}/{path}", params={"key": api_key}, json=payload)

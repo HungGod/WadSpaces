@@ -24,6 +24,7 @@ import { DockerfileEditor } from "./DockerfileEditor";
 import { Catalog } from "./Catalog";
 import { Customize, DesktopSettings } from "./Properties";
 import { ProjectsPanel } from "./ProjectsPanel";
+import { hasLocal } from "@/lib/machine";
 
 /** The Builder walks through these in order, then builds. */
 type Step = "apps" | "projects" | "customize";
@@ -503,7 +504,7 @@ export function Builder({ id, duplicate = false, agent: startWithAgent = false, 
                     Live desktop · drag apps in, double-click to open
                   </span>
                 ) : (
-                  <span>{backend.target === "online" ? "Generated from the desktop" : "Edit the container definition directly"}</span>
+                  <span>{hasLocal ? "Edit the container definition directly" : "Generated from the desktop"}</span>
                 )}
                 {view === "desktop" && (
                   <span className="ml-auto font-mono text-faint">
@@ -532,7 +533,7 @@ export function Builder({ id, duplicate = false, agent: startWithAgent = false, 
                   onReset={() => setDockerfile(null)}
                   width={room.w}
                   height={room.h}
-                  readOnly={backend.target === "online"}
+                  readOnly={!hasLocal}
                   actions={
                     <Button size="sm" variant="ghost" onClick={downloadFolder} title="The Dockerfile, root/ overlay, compose file and quadlet as a zip">
                       <Download className="size-3.5" /> Build folder
@@ -566,7 +567,7 @@ export function Builder({ id, duplicate = false, agent: startWithAgent = false, 
             {rightTab === "agent" ? (
               <AgentSoon />
             ) : rightTab === "advanced" ? (
-              <AdvancedPanel value={advanced} onChange={setAdvanced} offline={backend.target === "offline"} />
+              <AdvancedPanel value={advanced} onChange={setAdvanced} offline={hasLocal} />
             ) : (
               <DesktopSettings layout={layout} commit={commitLayout} onArrange={arrange} />
             )}

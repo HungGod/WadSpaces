@@ -1,10 +1,12 @@
-// What the pages need from "the server". Two implementations, picked at build
-// time by VITE_TARGET (see index.ts):
+// What the pages need from "the server". Three implementations, picked at
+// build time by VITE_TARGET (see index.ts and lib/machine.ts):
 //
-//   offline  local/  wadd on this machine (HTTP + server-sent events); the
-//                    library and drafts are kept on the machine.
-//   online   cloud/  Firebase Auth and Firestore, and the machines' cloud
-//                    relay (users/{uid}/machines/*/commands).
+//   offline  local/    wadd on this machine (HTTP + server-sent events); the
+//                      library and drafts are kept on the machine.
+//   online   cloud/    Firebase Auth and Firestore, and the machines' cloud
+//                      relay (users/{uid}/machines/*/commands).
+//   machine  machine/  both: the account for you and your designs, wadd for
+//                      this machine.
 //
 // The UI keys people by username (owner, sharedWith, run history); each
 // backend translates to whatever it stores.
@@ -140,7 +142,7 @@ export interface FolderListing {
 export type Topic = "user" | "wadspaces" | "drafts" | "machines" | "focus" | "session" | "projects" | "github";
 
 export interface Backend {
-  readonly target: "offline" | "online";
+  readonly target: "offline" | "online" | "machine";
   readonly caps: Caps;
 
   /** Settle what this backend can do before the app renders (e.g. which wadd). */

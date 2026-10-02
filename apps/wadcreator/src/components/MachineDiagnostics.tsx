@@ -14,6 +14,7 @@ import {
 } from "@/lib/wadd";
 import { useApp } from "@/lib/store";
 import { Button, Progress } from "./ui";
+import { copyText } from "@/lib/clipboard";
 
 // When a download stalls or a workspace won't start, this shows where it is
 // and what broke, without SSH. Everything wadd returns here is redacted.
@@ -117,7 +118,8 @@ export function MachineDiagnostics() {
   }, [log, follow]);
 
   const copyReport = async () => {
-    const report = {
+    // Started during the click, finished when the report is ready (see copyText).
+    const report = (async () => ({
       generated: new Date().toISOString(),
       diagnostics: diag ?? (await wadd.diagnostics().catch((e) => ({ error: e.message }))),
       daemon_log: await wadd
@@ -125,9 +127,9 @@ export function MachineDiagnostics() {
         .then((r) => daemonText(r.lines))
         .catch((e) => e.message),
       api_failures: failures,
-    };
+    }))();
     try {
-      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+      await copyText(report.then((r) => JSON.stringify(r, null, 2)));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {

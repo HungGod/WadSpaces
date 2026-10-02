@@ -12,6 +12,7 @@ import { useUi } from "@/lib/ui";
 import type { ContainerRun, Visibility } from "@/lib/types";
 import { Thumb } from "./Thumb";
 import { Avatar, Badge, Button, Drawer, IconButton, Input, Label, Segmented, Textarea } from "./ui";
+import { hasAccount, isThisMachine } from "@/lib/machine";
 
 export function WadspaceDrawer() {
   const detailsId = useUi((s) => s.detailsId);
@@ -85,7 +86,7 @@ export function WadspaceDrawer() {
     patchWadspace(ws.id, { sharedWith: ws.sharedWith.includes(u) ? ws.sharedWith.filter((x) => x !== u) : [...ws.sharedWith, u] });
 
   const remove = async () => {
-    if (!confirm(`Delete "${ws.name}"?${backend.target === "offline" ? " This removes it from this machine." : ""}`)) return;
+    if (!confirm(`Delete "${ws.name}"?${hasAccount ? "" : " This removes it from this machine."}`)) return;
     try {
       await backend.deleteWadspace(ws.id);
     } catch (e) {
@@ -233,11 +234,11 @@ export function WadspaceDrawer() {
           <div className="divide-y divide-line overflow-hidden rounded-2xl ring-1 ring-line">
             <StorageRow
               icon={<HardDrive className="size-4" />}
-              title={backend.target === "offline" ? "This machine" : (machines.find((m) => m.id === launchTarget)?.label ?? "Your machine")}
-              status={!ws.installed ? `Not built ${backend.target === "offline" ? "here" : "there"} yet` : ws.local ? "Ready" : download ? `Downloading · ${Math.floor(download.progress * 100)}%` : "Image not downloaded"}
+              title={isThisMachine(launchTarget) ? "This machine" : (machines.find((m) => m.id === launchTarget)?.label ?? "Your machine")}
+              status={!ws.installed ? `Not built ${isThisMachine(launchTarget) ? "here" : "there"} yet` : ws.local ? "Ready" : download ? `Downloading · ${Math.floor(download.progress * 100)}%` : "Image not downloaded"}
               on={ws.local}
               action={
-                backend.target === "offline" && ws.installed && !ws.local && !download ? (
+                isThisMachine(launchTarget) && ws.installed && !ws.local && !download ? (
                   <Button size="sm" onClick={() => transfer(ws, "pull")}>
                     Download
                   </Button>

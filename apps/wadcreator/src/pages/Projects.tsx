@@ -10,6 +10,7 @@ import { backend } from "@/data";
 import type { GithubStatus } from "@/data/backend";
 import { sourceLabel, sourcePath, type Project, type ProjectStatus } from "@core/projects";
 import { useApp } from "@/lib/store";
+import { hasLocal } from "@/lib/machine";
 
 type Adding = "github" | "github-new" | "folder" | "drive";
 
@@ -26,7 +27,7 @@ export default function ProjectsPage() {
   const [status, setStatus] = useState<Record<string, ProjectStatus | null>>({});
   const [github, setGithub] = useState<GithubStatus | null>(null);
   const [checking, setChecking] = useState(false);
-  const offline = backend.target === "offline";
+  const offline = hasLocal;
 
   // Offline, each project's folder on this machine (refreshed as wadspaces start and stop).
   useEffect(() => {
@@ -263,7 +264,7 @@ function DeleteProject({ project: p, status, onClose }: { project: Project | nul
   const [purge, setPurge] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const offline = backend.target === "offline";
+  const offline = hasLocal;
   // Only wadd's own folders: a clone, or an empty folder from before.
   const ours = !!p && (p.legacy || p.source.kind === "git");
 

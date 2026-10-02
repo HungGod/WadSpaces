@@ -13,6 +13,7 @@ tauri-build.workspace = true
 wad-proto.workspace = true
 wad-github.workspace = true
 wad-firebase.workspace = true
+qrcode.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

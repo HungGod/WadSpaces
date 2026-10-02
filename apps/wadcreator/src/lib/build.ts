@@ -6,6 +6,7 @@
 import { backend } from "@/data";
 import { openWadspace } from "./launch";
 import { useApp } from "./store";
+import { hasLocal } from "./machine";
 
 /** An image build running in the background; the sidebar shows its progress and log. */
 export interface BuildJob {
@@ -29,7 +30,7 @@ export async function startBuild(opts: { wadspaceId: string; name: string; rebui
     toast({
       title: `Saved ${opts.name}`,
       body:
-        backend.target === "offline"
+        hasLocal
           ? "This machine's wadd can't build yet (it needs a system update). Until then, download the build folder from the Builder's Dockerfile view."
           : "Build it in Wad Creator on your machine, or download the build folder from the Builder's Dockerfile view.",
       tone: "success",

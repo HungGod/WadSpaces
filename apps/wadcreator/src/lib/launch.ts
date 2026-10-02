@@ -12,6 +12,7 @@ import { THIS_MACHINE, useApp } from "./store";
 import type { Template } from "./templates";
 import type { Wadspace } from "./types";
 import { useUi } from "./ui";
+import { hasAccount, isThisMachine } from "./machine";
 
 /** A launch on this machine; the sidebar and the Run dialog show its parts. */
 export interface LaunchJob {
@@ -37,7 +38,7 @@ function fail(title: string, e: unknown) {
 
 /** Whether opening this wadspace there goes through a launch (with projects). */
 export function opensByLaunch(ws: Wadspace, machineId = useApp.getState().launchTarget) {
-  return backend.target === "offline" && backend.caps.projects && machineId === THIS_MACHINE && !!ws.installed;
+  return backend.caps.projects && isThisMachine(machineId) && !!ws.installed;
 }
 
 /** Open a wadspace on a machine (default: the launch target). */
@@ -58,7 +59,7 @@ export async function openWadspace(ws: Wadspace, machineId = useApp.getState().l
   }
   try {
     await backend.open(machineId, ws.id);
-    if (backend.target === "online") toast({ title: `Opening on ${machineLabel(machineId)}`, body: ws.name, tone: "success" });
+    if (!isThisMachine(machineId)) toast({ title: `Opening on ${machineLabel(machineId)}`, body: ws.name, tone: "success" });
     loadMachines();
     loadLastSession();
   } catch (e) {
@@ -161,7 +162,7 @@ export async function discardWadspace(ws: Wadspace) {
   const { machines, toast, loadWadspaces, loadMachines } = useApp.getState();
   try {
     for (const m of machines) {
-      if (m.containers.some((c) => c.wadspaceId === ws.id) && (m.id === THIS_MACHINE || backend.target === "online")) {
+      if (m.containers.some((c) => c.wadspaceId === ws.id) && (isThisMachine(m.id) || hasAccount)) {
         await backend.container(m.id, ws.id, "remove").catch(() => {});
       }
     }

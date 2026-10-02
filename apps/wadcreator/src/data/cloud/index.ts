@@ -93,8 +93,39 @@ export class CloudBackend implements Backend {
   private uid: string | null = null;
   private loaded: Promise<void> = Promise.resolve();
 
-  constructor() {
+  /** `thisMachine`: in the machine app, this machine's id in the account.
+   *  Its heartbeat is left out: the app shows the machine from wadd instead. */
+  constructor(private opts: { thisMachine?: () => string | null } = {}) {
     onAuthUser((u) => this.attach(u?.uid ?? null));
+  }
+
+  /** The account's machines, without the one the app runs on. */
+  private others(): [string, DocumentData][] {
+    const skip = this.opts.thisMachine?.() ?? null;
+    return [...this.machines].filter(([id]) => id !== skip);
+  }
+
+  /** In the account: yours, or shared with you. */
+  knows(id: string): boolean {
+    return this.owned.has(id) || this.shared.has(id);
+  }
+
+  owns(id: string): boolean {
+    return this.owned.has(id);
+  }
+
+  /** The machine picked for "Open", if one was and it's still linked. */
+  pickedMachine(): string | null {
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(PICK_KEY);
+    } catch {}
+    return saved && this.others().some(([id]) => id === saved) ? saved : null;
+  }
+
+  /** Signed-in user's uid, or null. */
+  uidNow(): string | null {
+    return this.uid;
   }
 
   // ------------------------------------------------------------- listening
@@ -276,7 +307,7 @@ export class CloudBackend implements Backend {
   private machineOnly(): Map<string, Wadspace> {
     const out = new Map<string, Wadspace>();
     const me = this.uid ? this.nameOf(this.uid) : "";
-    for (const [mid, m] of this.machines) {
+    for (const [mid, m] of this.others()) {
       for (const w of (m.workspaces ?? []) as RelayWorkspace[]) {
         if (this.owned.has(w.id) || this.shared.has(w.id) || out.has(w.id)) continue;
         const preset = presetWadspace(w.id);
@@ -445,10 +476,15 @@ export class CloudBackend implements Backend {
   /** Ask the online machines to sync projects (and share the repo list) now
    *  rather than at their next turn. How many were asked. */
   private syncMachines(uid: string) {
+    return this.tellMachines(uid, "projects-sync");
+  }
+
+  /** Send a command to your online machines (not the one the app runs on). How many were asked. */
+  tellMachines(uid: string, type: CommandType) {
     let n = 0;
-    for (const [mid, m] of this.machines) {
+    for (const [mid, m] of this.others()) {
       if (!isUp(m)) continue;
-      sendCommand(uid, mid, "projects-sync").catch(() => {});
+      sendCommand(uid, mid, type).catch(() => {});
       n++;
     }
     return n;
@@ -563,7 +599,7 @@ export class CloudBackend implements Backend {
 
   async listMachines() {
     await this.loaded;
-    return [...this.machines].map(([id, d]) => this.toMachine(id, d));
+    return this.others().map(([id, d]) => this.toMachine(id, d));
   }
 
   private async command(machineId: string, type: CommandType, wsId: string) {
