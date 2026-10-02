@@ -10,6 +10,12 @@ publish.workspace = true
 wad-config.workspace = true
 wad-proto.workspace = true
 wad-store.workspace = true
+wad-core.workspace = true
+wad-podman.workspace = true
+wad-systemd.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+reqwest.workspace = true
 axum.workspace = true
 clap.workspace = true
 futures-util.workspace = true
@@ -24,3 +30,5 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+wiremock.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

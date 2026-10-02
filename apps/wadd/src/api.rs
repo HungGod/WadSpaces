@@ -12,40 +12,41 @@ use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::stream::{self, Stream, StreamExt};
 use serde::Deserialize;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::BroadcastStream;
-use wad_proto::v1::{CloudLink, Event, Health, LogLine, MachineInfo, Project, Run, Session, Workspace};
+use wad_proto::v1::{CloudLink, Event, Health, LogLine, MachineInfo, Project, Run, Session, Workspace, WorkspaceState};
 use wad_proto::{ApiError, ErrorCode};
 
 use crate::access::{Peer, Policy};
 use crate::events::Bus;
 use crate::logbuf::LogBuffer;
+use crate::registry::Registry;
 
 pub struct AppState {
     pub bus: Bus,
+    pub registry: Arc<Registry>,
     pub logs: LogBuffer,
     pub policy: Policy,
     /// What's on disk (the Python wadd's formats).
     pub store: wad_store::State,
-    /// The Python wadd's workspaces.yaml, and the image's cloud.yaml.
-    pub legacy_config: std::path::PathBuf,
-    pub vendor_cloud: std::path::PathBuf,
-}
-
-impl AppState {
-    fn workspaces(&self) -> Result<Vec<Workspace>, Failure> {
-        wad_store::legacy::read(&self.legacy_config, Some(&self.vendor_cloud))
-            .map(|c| c.workspaces)
-            .map_err(|e| Failure(ApiError::new(ErrorCode::Internal, e.to_string())))
-    }
 }
 
 /// An ApiError as an HTTP response.
 pub struct Failure(pub ApiError);
+
+impl From<ApiError> for Failure {
+    fn from(e: ApiError) -> Self {
+        Self(e)
+    }
+}
+
+fn no_workspace(id: &str) -> Failure {
+    Failure(ApiError::new(ErrorCode::NotFound, format!("no workspace {id:?}")))
+}
 
 impl IntoResponse for Failure {
     fn into_response(self) -> Response {
@@ -95,6 +96,12 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/events", get(events))
         .route("/v1/workspaces", get(workspaces))
         .route("/v1/workspaces/{id}", get(workspace))
+        .route("/v1/workspaces/{id}/state", get(workspace_state))
+        .route("/v1/workspaces/{id}/start", post(start))
+        .route("/v1/workspaces/{id}/stop", post(stop))
+        .route("/v1/workspaces/{id}/restart", post(restart))
+        .route("/v1/workspaces/{id}/download", post(download))
+        .route("/v1/states", get(states))
         .route("/v1/projects", get(projects))
         .route("/v1/runs", get(runs))
         .route("/v1/session", get(session))
@@ -122,16 +129,65 @@ async fn logs(State(app): State<Arc<AppState>>, Query(q): Query<LogsQuery>) -> J
     Json(app.logs.tail(q.lines.unwrap_or(200).clamp(1, 2000)))
 }
 
-async fn workspaces(State(app): State<Arc<AppState>>) -> Result<Json<Vec<Workspace>>, Failure> {
-    app.workspaces().map(Json)
+async fn workspaces(State(app): State<Arc<AppState>>) -> Json<Vec<Workspace>> {
+    Json(app.registry.workspaces())
 }
 
 async fn workspace(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Workspace>, Failure> {
-    app.workspaces()?
-        .into_iter()
-        .find(|w| w.id == id)
-        .map(Json)
-        .ok_or_else(|| Failure(ApiError::new(ErrorCode::NotFound, format!("no workspace {id:?}"))))
+    app.registry.workspaces().into_iter().find(|w| w.id == id).map(Json).ok_or_else(|| no_workspace(&id))
+}
+
+async fn states(State(app): State<Arc<AppState>>) -> Json<Vec<WorkspaceState>> {
+    Json(app.registry.states())
+}
+
+fn state_of(app: &AppState, id: &str) -> Result<Json<WorkspaceState>, Failure> {
+    app.registry.state(id).map(Json).ok_or_else(|| no_workspace(id))
+}
+
+async fn workspace_state(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<WorkspaceState>, Failure> {
+    state_of(&app, &id)
+}
+
+/// Starts bringing a workspace up; its progress arrives as workspaceState
+/// events.
+async fn start(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<WorkspaceState>), Failure> {
+    app.registry.start(&id)?;
+    Ok((StatusCode::ACCEPTED, state_of(&app, &id)?))
+}
+
+async fn stop(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<WorkspaceState>, Failure> {
+    app.registry.stop(&id).await?;
+    state_of(&app, &id)
+}
+
+async fn restart(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<WorkspaceState>), Failure> {
+    app.registry.restart(&id).await?;
+    Ok((StatusCode::ACCEPTED, state_of(&app, &id)?))
+}
+
+/// Downloads a workspace's image in the background (progress as events).
+async fn download(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<WorkspaceState>), Failure> {
+    let state = state_of(&app, &id)?;
+    let registry = app.registry.clone();
+    tokio::spawn(async move {
+        if let Err(e) = registry.download(&id).await {
+            tracing::warn!("download {id}: {}", e.message);
+        }
+    });
+    Ok((StatusCode::ACCEPTED, state))
 }
 
 async fn projects(State(app): State<Arc<AppState>>) -> Json<Vec<Project>> {
@@ -149,7 +205,7 @@ async fn runs(State(app): State<Arc<AppState>>, Query(q): Query<RunsQuery>) -> J
 }
 
 async fn session(State(app): State<Arc<AppState>>) -> Json<Option<Session>> {
-    let known: Vec<String> = app.workspaces().map(|ws| ws.into_iter().map(|w| w.id).collect()).unwrap_or_default();
+    let known: Vec<String> = app.registry.workspaces().into_iter().map(|w| w.id).collect();
     Json(app.store.session(&known))
 }
 

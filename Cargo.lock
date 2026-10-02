@@ -5013,6 +5013,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -5510,6 +5511,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "wad-podman"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "wad-proto"
 version = "0.1.0"
 dependencies = [
@@ -5530,6 +5548,16 @@ dependencies = [
  "thiserror 2.0.21",
  "wad-core",
  "wad-proto",
+]
+
+[[package]]
+name = "wad-systemd"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "thiserror 2.0.21",
+ "tokio",
+ "zbus",
 ]
 
 [[package]]
@@ -5570,10 +5598,13 @@ dependencies = [
 name = "wadd"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
+ "base64 0.22.1",
  "clap",
  "futures-util",
  "nix",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
@@ -5583,8 +5614,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wad-config",
+ "wad-core",
+ "wad-podman",
  "wad-proto",
  "wad-store",
+ "wad-systemd",
+ "wiremock",
 ]
 
 [[package]]
@@ -6331,6 +6366,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_repr",
+ "tokio",
  "tracing",
  "uds_windows",
  "uuid",

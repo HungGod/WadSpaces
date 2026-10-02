@@ -15,6 +15,8 @@ wad-firebase = { path = "crates/wad-firebase" }
 wad-core = { path = "crates/wad-core" }
 wad-config = { path = "crates/wad-config" }
 wad-store = { path = "crates/wad-store" }
+wad-podman = { path = "crates/wad-podman" }
+wad-systemd = { path = "crates/wad-systemd" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -24,7 +26,7 @@ toml = "1"
 serde_norway = "0.9"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "signal", "io-util", "fs"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "query", "rustls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
@@ -46,6 +48,12 @@ nix = { version = "0.31", features = ["user", "fs"] }
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tempfile = "3"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+async-trait = "0.1"
+zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 [profile.release]
 lto = "thin"

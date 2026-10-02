@@ -6,12 +6,14 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 use wad_config::{Config, Profile};
+use wadd::backend::{self, Backend};
 use wadd::logbuf::{BufferLayer, LogBuffer};
 use wadd::{Listen, Server, systemd};
 
@@ -119,7 +121,14 @@ fn serve(user: bool, config: Option<PathBuf>, socket: Option<PathBuf>) -> ExitCo
         }
     };
     let result = rt.block_on(async move {
-        let server = Server::new(&cfg, profile, listen, logs)?;
+        let backend: Arc<dyn Backend> = match backend::connect(&cfg.daemon, profile).await {
+            Ok(real) => Arc::new(real),
+            Err(e) => {
+                tracing::error!("can't manage workspaces: {e}");
+                Arc::new(backend::Offline(e))
+            }
+        };
+        let server = Server::new(&cfg, profile, listen, logs, backend)?;
         match &server.bound {
             Some(p) => tracing::info!("wadd {} listening on {}", env!("CARGO_PKG_VERSION"), p.display()),
             None => tracing::info!("wadd {} listening on the socket systemd passed", env!("CARGO_PKG_VERSION")),

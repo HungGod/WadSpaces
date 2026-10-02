@@ -1,26 +1,32 @@
 //! wadd, the WadSpaces machine daemon, in Rust (stage 2 of the plan). It
-//! serves `/v1` on a Unix socket to the callers its policy allows; the rest
-//! (workspaces, projects, the account, ...) arrives milestone by milestone.
+//! serves `/v1` on a Unix socket to the callers its policy allows, and runs
+//! the machine's workspaces (registry.rs); the rest (projects, the account,
+//! ...) arrives milestone by milestone.
 
 pub mod access;
 pub mod api;
+pub mod backend;
 pub mod events;
 pub mod logbuf;
+pub mod pull;
+pub mod registry;
 pub mod systemd;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::net::UnixListener;
 use wad_config::{Config, Profile};
-use wad_proto::v1::{self, MachineInfo};
+use wad_proto::v1::{self, MachineInfo, Workspace};
 
 use crate::access::{Peer, Policy};
 use crate::api::AppState;
+use crate::backend::Backend;
 use crate::events::Bus;
 use crate::logbuf::LogBuffer;
+use crate::registry::{Registry, Settings};
 
 /// Where the API listens.
 pub enum Listen {
@@ -35,6 +41,26 @@ pub struct Server {
     /// The path we bound, to clean up; None when systemd owns the socket.
     pub bound: Option<PathBuf>,
     pub state: Arc<AppState>,
+    /// The workspaces to take on when serving starts.
+    workspaces: Vec<Workspace>,
+    reconcile_every: Duration,
+    prefetch: (wad_config::Prefetch, u64),
+}
+
+/// The machine's workspaces: `workspaces.json` in the state directory (the
+/// Rust wadd's own list) if there is one, else the Python wadd's
+/// workspaces.yaml.
+pub fn read_workspaces(daemon: &wad_config::Daemon) -> Result<Vec<Workspace>, String> {
+    let own = daemon.state_dir.join("workspaces.json");
+    match std::fs::read_to_string(&own) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", own.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            wad_store::legacy::read(&daemon.legacy_config, Some(&daemon.vendor_cloud))
+                .map(|c| c.workspaces)
+                .map_err(|e| e.to_string())
+        }
+        Err(e) => Err(format!("{}: {e}", own.display())),
+    }
 }
 
 fn now_secs() -> u64 {
@@ -64,7 +90,14 @@ fn bind(path: &Path, profile: Profile) -> std::io::Result<UnixListener> {
 }
 
 impl Server {
-    pub fn new(config: &Config, profile: Profile, listen: Listen, logs: LogBuffer) -> std::io::Result<Self> {
+    /// A server for `config`, managing workspaces through `backend`.
+    pub fn new(
+        config: &Config,
+        profile: Profile,
+        listen: Listen,
+        logs: LogBuffer,
+        backend: Arc<dyn Backend>,
+    ) -> std::io::Result<Self> {
         let (listener, bound) = match listen {
             Listen::Activated(std) => {
                 std.set_nonblocking(true)?;
@@ -87,21 +120,51 @@ impl Server {
             groups: config.daemon.allow_groups.clone(),
             directory: Box::new(access::System),
         };
-        let state = Arc::new(AppState {
-            bus: Bus::new(machine),
-            logs,
-            policy,
-            store: wad_store::State::new(&config.daemon.state_dir),
-            legacy_config: config.daemon.legacy_config.clone(),
-            vendor_cloud: config.daemon.vendor_cloud.clone(),
+        let d = &config.daemon;
+        let bus = Bus::new(machine);
+        let uid = nix::unistd::getuid().as_raw();
+        let registry = Registry::new(
+            backend,
+            bus.clone(),
+            Settings {
+                ready_timeout: Duration::from_secs(d.ready_timeout_s),
+                max_parallel_pulls: d.max_parallel_pulls,
+                projects_dir: d.projects_dir.to_string_lossy().into_owned(),
+                state_dir: d.state_dir.clone(),
+                // Rootless podman maps you to this uid inside (PUID 1000).
+                rootless_uid: (uid != 0).then_some(uid),
+                poll: Duration::from_secs(1),
+            },
+        );
+        let workspaces = read_workspaces(d).unwrap_or_else(|e| {
+            tracing::error!("no workspaces: {e}");
+            vec![]
         });
-        Ok(Self { listener, bound, state })
+        let state =
+            Arc::new(AppState { bus, registry, logs, policy, store: wad_store::State::new(&config.daemon.state_dir) });
+        Ok(Self {
+            listener,
+            bound,
+            state,
+            workspaces,
+            reconcile_every: Duration::from_secs(d.reconcile_s.max(1)),
+            prefetch: (d.prefetch, d.prefetch_min_free_gb),
+        })
     }
 
     /// Serves until `shutdown` resolves.
     pub async fn run(self, shutdown: impl Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
+        let registry = self.state.registry.clone();
+        if let Err(e) = registry.load(self.workspaces).await {
+            tracing::warn!("workspace units: {e}");
+        }
+        let reconcile = registry.spawn_reconcile(self.reconcile_every);
+        let (mode, min_free_gb) = self.prefetch;
+        let prefetch = tokio::spawn(registry.clone().prefetch(mode, min_free_gb, Duration::from_secs(300)));
         let app = api::router(self.state.clone()).into_make_service_with_connect_info::<Peer>();
         let res = axum::serve(self.listener, app).with_graceful_shutdown(shutdown).await;
+        reconcile.abort();
+        prefetch.abort();
         if let Some(p) = &self.bound {
             let _ = std::fs::remove_file(p);
         }

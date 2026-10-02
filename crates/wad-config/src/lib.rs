@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const VENDOR: &str = "/usr/lib/wadspaces/wadd.toml";
 pub const ADMIN: &str = "/etc/wadspaces/wadd.toml";
@@ -24,6 +24,18 @@ pub enum Profile {
     System,
     /// A laptop or desktop: your user, rootless podman, your paths.
     User,
+}
+
+/// What wadd downloads on its own once podman is up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Prefetch {
+    /// Nothing: images download from the launcher or on first use.
+    None,
+    /// The workspaces that start at boot (which it then starts).
+    Autostart,
+    /// Those, then every other workspace's image while disk allows.
+    All,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -56,6 +68,23 @@ pub struct Daemon {
     pub legacy_config: PathBuf,
     /// The image's cloud settings (its keys win over the legacy file's).
     pub vendor_cloud: PathBuf,
+    /// Podman's API socket.
+    pub podman_socket: PathBuf,
+    /// Where wadd writes the workspaces' quadlet units (rewritten at every
+    /// start, so they're never stale; quadlet reads this directory).
+    pub units_dir: PathBuf,
+    /// Project folders, one per project.
+    pub projects_dir: PathBuf,
+    /// How long a workspace may take to come up.
+    pub ready_timeout_s: u64,
+    /// Images downloaded at once.
+    pub max_parallel_pulls: usize,
+    /// How often wadd checks the workspaces against podman.
+    pub reconcile_s: u64,
+    pub prefetch: Prefetch,
+    /// With prefetch, skip an image (not an autostart one) when less than
+    /// this is free, so small disks don't fill up.
+    pub prefetch_min_free_gb: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -102,6 +131,14 @@ impl Daemon {
                 allow_groups: vec!["wad".into(), "wheel".into()],
                 legacy_config: "/etc/wadspaces/workspaces.yaml".into(),
                 vendor_cloud: "/usr/lib/wadspaces/cloud.yaml".into(),
+                podman_socket: "/run/podman/podman.sock".into(),
+                units_dir: "/run/containers/systemd".into(),
+                projects_dir: "/var/lib/wadspaces-projects".into(),
+                ready_timeout_s: 900,
+                max_parallel_pulls: 3,
+                reconcile_s: 5,
+                prefetch: Prefetch::None,
+                prefetch_min_free_gb: 15,
             },
             Profile::User => Self {
                 socket: runtime_dir().join("wadd/wadd.sock"),
@@ -110,6 +147,14 @@ impl Daemon {
                 allow_groups: vec![],
                 legacy_config: config_home().join("wadspaces/workspaces.yaml"),
                 vendor_cloud: "/usr/lib/wadspaces/cloud.yaml".into(),
+                podman_socket: runtime_dir().join("podman/podman.sock"),
+                units_dir: runtime_dir().join("containers/systemd"),
+                projects_dir: home().join(".local/share/wadspaces-projects"),
+                ready_timeout_s: 900,
+                max_parallel_pulls: 3,
+                reconcile_s: 5,
+                prefetch: Prefetch::None,
+                prefetch_min_free_gb: 15,
             },
         }
     }
@@ -184,6 +229,14 @@ struct RawDaemon {
     allow_groups: Vec<String>,
     legacy_config: PathBuf,
     vendor_cloud: PathBuf,
+    podman_socket: PathBuf,
+    units_dir: PathBuf,
+    projects_dir: PathBuf,
+    ready_timeout_s: u64,
+    max_parallel_pulls: usize,
+    reconcile_s: u64,
+    prefetch: Prefetch,
+    prefetch_min_free_gb: u64,
 }
 #[derive(serde::Serialize)]
 struct RawLog {
@@ -202,6 +255,14 @@ impl From<&Config> for Raw {
                 allow_groups: c.daemon.allow_groups.clone(),
                 legacy_config: c.daemon.legacy_config.clone(),
                 vendor_cloud: c.daemon.vendor_cloud.clone(),
+                podman_socket: c.daemon.podman_socket.clone(),
+                units_dir: c.daemon.units_dir.clone(),
+                projects_dir: c.daemon.projects_dir.clone(),
+                ready_timeout_s: c.daemon.ready_timeout_s,
+                max_parallel_pulls: c.daemon.max_parallel_pulls,
+                reconcile_s: c.daemon.reconcile_s,
+                prefetch: c.daemon.prefetch,
+                prefetch_min_free_gb: c.daemon.prefetch_min_free_gb,
             },
             log: RawLog { level: c.log.level.clone(), buffer_lines: c.log.buffer_lines },
         }
@@ -278,6 +339,11 @@ mod tests {
         assert_eq!(c.log.level, "warn");
         assert_eq!(c.log.buffer_lines, 10);
         assert_eq!(c.daemon.state_dir, PathBuf::from("/var/lib/wadspaces"));
+        assert_eq!(c.daemon.prefetch, Prefetch::None);
+        let all = write(d.path(), "all.toml", "[daemon]\nprefetch = \"all\"\n");
+        assert_eq!(Config::load(Profile::System, &[all]).unwrap().daemon.prefetch, Prefetch::All);
+        let bad = write(d.path(), "some.toml", "[daemon]\nprefetch = \"some\"\n");
+        assert!(Config::load(Profile::System, &[bad]).is_err());
     }
 
     #[test]

@@ -1,0 +1,8 @@
+# A tiny "workspace" for trying wadd on a laptop: a web page on port 3000,
+# standing in for a stream's desktop.
+FROM docker.io/library/busybox:latest
+RUN mkdir -p /www && echo '<h1>wadspaces test workspace</h1>' > /www/index.html
+LABEL io.wadspaces.workspace=test
+# httpd as PID 1 ignores SIGTERM; without this every stop waits 10 s.
+STOPSIGNAL SIGKILL
+CMD ["httpd", "-f", "-p", "3000", "-h", "/www"]

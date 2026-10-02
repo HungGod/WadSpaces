@@ -83,6 +83,7 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
             a(0),
             opt_s(1).unwrap_or(generator::PROJECTS_DIR),
             opt_s(2).unwrap_or(generator::STATE_DIR),
+            args.get(3).and_then(Value::as_u64).map(|u| u as u32),
         )
         .into(),
         "workspacesYamlSnippet" => generator::workspaces_yaml_snippet(a(0)).into(),

@@ -46,10 +46,12 @@ pub struct LogLine {
 
 /// GET /v1/events: server-sent events, named by `type`, with `data` as JSON.
 /// The stream starts with the current state of each kind.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum Event {
     Machine(MachineInfo),
+    /// A workspace's state changed.
+    WorkspaceState(WorkspaceState),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
@@ -61,6 +63,7 @@ impl Event {
     pub fn name(&self) -> &'static str {
         match self {
             Event::Machine(_) => "machine",
+            Event::WorkspaceState(_) => "workspaceState",
             Event::Notice { .. } => "notice",
         }
     }
@@ -199,4 +202,61 @@ pub struct CloudLink {
     pub owner_uid: Option<String>,
     pub project_id: Option<String>,
     pub linked_at: Option<String>,
+}
+
+/// Where a workspace is in its life.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Phase {
+    /// Not running (or unknown); nothing in progress.
+    Idle,
+    /// Downloading its image.
+    Pulling,
+    /// Its unit is starting.
+    Starting,
+    /// Up, waiting for the desktop (its window, or its stream answering).
+    Waiting,
+    Ready,
+    Stopping,
+    Error,
+}
+
+impl Phase {
+    /// Something is in progress.
+    pub fn busy(self) -> bool {
+        matches!(self, Phase::Pulling | Phase::Starting | Phase::Waiting | Phase::Stopping)
+    }
+}
+
+/// An image download's progress (bytes measured on the machine's network).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Download {
+    /// Still to download; None when the registry's sizes aren't known.
+    pub total_bytes: Option<u64>,
+    pub done_bytes: u64,
+    pub layers: u32,
+    pub rate_bps: u64,
+    pub eta_s: Option<u64>,
+    /// Downloaded; podman is unpacking the layers.
+    pub unpacking: bool,
+}
+
+/// A workspace's state on this machine (GET /v1/states, `workspaceState` events).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceState {
+    pub id: String,
+    /// The container: running, exited, missing, ... ("unknown": podman didn't say).
+    pub container: String,
+    pub phase: Phase,
+    /// 0..100 while something is in progress, when it can tell.
+    pub progress: Option<u8>,
+    pub message: Option<String>,
+    pub error: Option<String>,
+    /// Is its image here? None: unknown.
+    pub image_present: Option<bool>,
+    pub download: Option<Download>,
+    /// When the phase last changed (Unix seconds).
+    pub since: f64,
 }

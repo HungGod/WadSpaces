@@ -243,8 +243,22 @@ pub fn compose(spec: &Value) -> String {
 pub const PROJECTS_DIR: &str = "/var/lib/wadspaces-projects";
 pub const STATE_DIR: &str = "/var/lib/wadspaces";
 
-/// wadd's quadlet unit for a workspace (wad-<id>.container).
-pub fn quadlet(w: &Value, projects_dir: &str, state_dir: &str) -> String {
+/// Rootless podman (wadd under your own systemd, on a laptop): the
+/// container's root is you and its uid 1000 a subordinate id, so abc (PUID
+/// 1000) couldn't write your project folders. These maps put you at uid 1000
+/// inside instead and keep the rest of the usual 65536 ids. (keep-id would
+/// too, but its passwd entry stops the image's init moving abc onto that uid.)
+const SUBORDINATE_IDS: u32 = 65536;
+
+fn id_maps(uid: u32) -> Vec<String> {
+    let ranges =
+        [format!("0:1:{uid}"), format!("{uid}:0:1"), format!("{}:{}:{}", uid + 1, uid + 1, SUBORDINATE_IDS - uid - 1)];
+    ranges.iter().map(|r| format!("UIDMap={r}")).chain(ranges.iter().map(|r| format!("GIDMap={r}"))).collect()
+}
+
+/// wadd's quadlet unit for a workspace (wad-<id>.container). `rootless_uid`:
+/// the host user to map to uid 1000 inside (rootless podman only).
+pub fn quadlet(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: Option<u32>) -> String {
     let native = w.get("display").and_then(Value::as_str) == Some("host");
     let id = js::field(w, "id");
     let container_name = match w.get("container_name").filter(|c| js::truthy(c)) {
@@ -263,6 +277,9 @@ pub fn quadlet(w: &Value, projects_dir: &str, state_dir: &str) -> String {
         format!("ContainerName={container_name}"),
         format!("Label=wadspaces.id={id}"),
     ];
+    if let Some(uid) = rootless_uid {
+        lines.extend(id_maps(uid));
+    }
     if !native {
         let cport = js::present(w, "container_port").map(js::string).unwrap_or_else(|| "3000".into());
         lines.push(format!("PublishPort=127.0.0.1:{}:{cport}", js::field(w, "port")));
@@ -422,7 +439,7 @@ pub fn bundle_files(spec: &Value, wallpaper: Option<&[u8]>, dockerfile_text: Opt
         ),
         ("docker-compose.yml".into(), Content::Text(compose(spec))),
         ("README.md".into(), Content::Text(readme(spec))),
-        (format!("wad-{id}.container"), Content::Text(quadlet(&w, PROJECTS_DIR, STATE_DIR))),
+        (format!("wad-{id}.container"), Content::Text(quadlet(&w, PROJECTS_DIR, STATE_DIR, None))),
         ("workspaces.yaml.snippet".into(), Content::Text(workspaces_yaml_snippet(&w))),
     ];
     if spec.get("layout").is_some_and(js::truthy) {
@@ -438,4 +455,21 @@ pub fn bundle_files(spec: &Value, wallpaper: Option<&[u8]>, dockerfile_text: Opt
         ));
     }
     files
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn rootless_units_match_the_python_wadd() {
+        let w = json!({
+            "id": "writing", "name": "Writing", "image": "localhost/wadspaces-writing:latest", "display": "host",
+            "env": {"PUID": "1000", "TZ": "Pacific/Fiji"}, "secrets": ["github_token"], "devices": ["/dev/dri"],
+            "shm_size": "1g", "projects": [{"id": "p1", "mount": "Notes"}],
+        });
+        let got =
+            super::quadlet(&w, "/home/u/.local/share/wadspaces-projects", "/home/u/.local/state/wadspaces", Some(1000));
+        assert_eq!(got, include_str!("../../../fixtures/quadlet/wad-writing-rootless.container"));
+    }
 }

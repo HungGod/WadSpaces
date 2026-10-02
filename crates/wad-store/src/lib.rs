@@ -18,6 +18,7 @@
 
 pub mod legacy;
 pub mod migrate;
+pub mod runs;
 pub mod state;
 
 pub use state::State;
