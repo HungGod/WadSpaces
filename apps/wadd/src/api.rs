@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::connect_info::Connected;
-use axum::extract::{ConnectInfo, Query, Request, State};
+use axum::extract::{ConnectInfo, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
@@ -18,7 +18,7 @@ use futures_util::stream::{self, Stream, StreamExt};
 use serde::Deserialize;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::BroadcastStream;
-use wad_proto::v1::{Event, Health, LogLine, MachineInfo};
+use wad_proto::v1::{CloudLink, Event, Health, LogLine, MachineInfo, Project, Run, Session, Workspace};
 use wad_proto::{ApiError, ErrorCode};
 
 use crate::access::{Peer, Policy};
@@ -29,6 +29,19 @@ pub struct AppState {
     pub bus: Bus,
     pub logs: LogBuffer,
     pub policy: Policy,
+    /// What's on disk (the Python wadd's formats).
+    pub store: wad_store::State,
+    /// The Python wadd's workspaces.yaml, and the image's cloud.yaml.
+    pub legacy_config: std::path::PathBuf,
+    pub vendor_cloud: std::path::PathBuf,
+}
+
+impl AppState {
+    fn workspaces(&self) -> Result<Vec<Workspace>, Failure> {
+        wad_store::legacy::read(&self.legacy_config, Some(&self.vendor_cloud))
+            .map(|c| c.workspaces)
+            .map_err(|e| Failure(ApiError::new(ErrorCode::Internal, e.to_string())))
+    }
 }
 
 /// An ApiError as an HTTP response.
@@ -80,6 +93,13 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/machine", get(machine))
         .route("/v1/logs", get(logs))
         .route("/v1/events", get(events))
+        .route("/v1/workspaces", get(workspaces))
+        .route("/v1/workspaces/{id}", get(workspace))
+        .route("/v1/projects", get(projects))
+        .route("/v1/runs", get(runs))
+        .route("/v1/session", get(session))
+        .route("/v1/cloud", get(cloud))
+        .route("/v1/library/{collection}", get(library))
         .fallback(|| async { Failure(ApiError::new(ErrorCode::NotFound, "no such endpoint")) })
         .layer(middleware::from_fn_with_state(app.clone(), check_peer))
         .with_state(app)
@@ -100,6 +120,51 @@ struct LogsQuery {
 
 async fn logs(State(app): State<Arc<AppState>>, Query(q): Query<LogsQuery>) -> Json<Vec<LogLine>> {
     Json(app.logs.tail(q.lines.unwrap_or(200).clamp(1, 2000)))
+}
+
+async fn workspaces(State(app): State<Arc<AppState>>) -> Result<Json<Vec<Workspace>>, Failure> {
+    app.workspaces().map(Json)
+}
+
+async fn workspace(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Workspace>, Failure> {
+    app.workspaces()?
+        .into_iter()
+        .find(|w| w.id == id)
+        .map(Json)
+        .ok_or_else(|| Failure(ApiError::new(ErrorCode::NotFound, format!("no workspace {id:?}"))))
+}
+
+async fn projects(State(app): State<Arc<AppState>>) -> Json<Vec<Project>> {
+    Json(app.store.projects())
+}
+
+#[derive(Deserialize)]
+struct RunsQuery {
+    workspace: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn runs(State(app): State<Arc<AppState>>, Query(q): Query<RunsQuery>) -> Json<Vec<Run>> {
+    Json(app.store.runs(q.workspace.as_deref(), q.limit.unwrap_or(200).clamp(1, 2000)))
+}
+
+async fn session(State(app): State<Arc<AppState>>) -> Json<Option<Session>> {
+    let known: Vec<String> = app.workspaces().map(|ws| ws.into_iter().map(|w| w.id).collect()).unwrap_or_default();
+    Json(app.store.session(&known))
+}
+
+async fn cloud(State(app): State<Arc<AppState>>) -> Json<CloudLink> {
+    Json(app.store.cloud())
+}
+
+async fn library(
+    State(app): State<Arc<AppState>>,
+    Path(collection): Path<String>,
+) -> Result<Json<Vec<serde_json::Value>>, Failure> {
+    app.store
+        .library(&collection)
+        .map(Json)
+        .ok_or_else(|| Failure(ApiError::new(ErrorCode::NotFound, format!("no collection {collection:?}"))))
 }
 
 fn sse(e: &Event) -> SseEvent {

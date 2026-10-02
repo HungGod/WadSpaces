@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 wad-config.workspace = true
 wad-proto.workspace = true
+wad-store.workspace = true
 axum.workspace = true
 clap.workspace = true
 futures-util.workspace = true

@@ -36,6 +36,21 @@ enum Cmd {
         #[arg(long)]
         socket: Option<PathBuf>,
     },
+    /// What moving this machine's state to the Rust wadd would do.
+    Migrate {
+        /// Only say what would happen (all there is until the cutover).
+        #[arg(long)]
+        dry_run: bool,
+        /// As JSON.
+        #[arg(long)]
+        json: bool,
+        /// The Python wadd's workspaces.yaml (default: the config's).
+        #[arg(long)]
+        from: Option<PathBuf>,
+        /// Read the laptop profile's config.
+        #[arg(long)]
+        user: bool,
+    },
     /// Print the version.
     Version,
 }
@@ -47,7 +62,31 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Cmd::Serve { user, config, socket } => serve(user, config, socket),
+        Cmd::Migrate { dry_run, json, from, user } => migrate(dry_run, json, from, user),
     }
+}
+
+fn migrate(dry_run: bool, json: bool, from: Option<PathBuf>, user: bool) -> ExitCode {
+    if !dry_run {
+        eprintln!("wadd migrate: only --dry-run for now (the cutover image migrates on its first boot)");
+        return ExitCode::from(2);
+    }
+    let profile = if user { Profile::User } else { Profile::System };
+    let cfg = match Config::load(profile, &Config::files(profile)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("wadd: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let yaml = from.unwrap_or(cfg.daemon.legacy_config);
+    let plan = wad_store::migrate::plan(&yaml, Some(&cfg.daemon.vendor_cloud));
+    if json {
+        println!("{}", serde_json::to_string_pretty(&plan).expect("plans serialize"));
+    } else {
+        print!("{}", plan.text());
+    }
+    ExitCode::SUCCESS
 }
 
 fn serve(user: bool, config: Option<PathBuf>, socket: Option<PathBuf>) -> ExitCode {

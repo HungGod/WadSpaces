@@ -1,0 +1,586 @@
+[
+ {
+  "name": "image",
+  "yaml": "# WadSpaces host configuration, read by wadd.\n# Workspaces here become quadlet units (wad-<id>.container). Wad Creator (the\n# kiosk's shell, /usr/bin/wadcreator) edits this file through wadd's API.\nversion: 1\nmachine:\n  name: wadspaces\ndaemon:\n  bind: 127.0.0.1\n  port: 8080\n  backend: systemd\n  podman_socket: /run/podman/podman.sock\n  cdp_url: http://127.0.0.1:9222\n  quadlet_dir: /etc/containers/systemd\n  # wadd grabs the keyboards: Super+Tab switches, Super+1..9 jump, Super+0 or\n  # Super+Space bring back Wad Creator, and the `block` chords never reach\n  # the kiosk.\n  keys:\n    enabled: true\n    launcher: [KEY_0, KEY_SPACE]\n    block: [alt+f4, ctrl+shift+q, ctrl+alt+backspace]\n  ready_timeout_s: 900\n  # Images are downloaded from Wad Creator (Download on a wadspace) or on the\n  # first switch, never in the background at boot: on a small disk the six\n  # images (~20 GB, sharing a 2.8 GB base) do not all fit. \"autostart\" or\n  # \"all\" download after boot instead, keeping prefetch_min_free_gb free.\n  prefetch: none\n  prefetch_min_free_gb: 5\nlauncher:\n  # The old Electron Wad Creator, which ran as a window of its own; nothing is\n  # installed here now. Never /usr/bin/wadcreator: wadd would take the shell\n  # for that window and move it off the screen.\n  wadcreator_app: /usr/lib/wadcreator/wadcreator\n  allow_navigate: []\n# The old in-kiosk web copy of Wad Creator (dev only now).\nwadcreator:\n  enabled: false\n# The online Wad Creator reaches this machine through Firestore once it is\n# linked (Wad Creator links it when you first sign in). Idle until then. The\n# project comes from /usr/lib/wadspaces/cloud.yaml, which updates with the\n# image; a cloud: section here can add settings (e.g. heartbeat_s).\nworkspaces:\n  - id: writing\n    name: Writing\n    image: ghcr.io/hunggod/wadspaces-cosmic-bodybuilding:latest\n    # lean image: its desktop is a window on this screen, not a stream\n    display: host\n    hotkey: 1\n    icon: /usr/share/wadspaces/icons/writing.png\n    env:\n      PUID: \"1000\"\n      PGID: \"1000\"\n      TZ: Pacific/Fiji\n      GIT_USER_NAME: HungGod\n      GIT_USER_EMAIL: throwupcow@gmail.com\n    secrets: [github_token]\n    volumes: [wad-writing-obsidian:/config/.config/obsidian:z]\n    devices: [/dev/dri]\n    shm_size: 1g\n  - id: iq-dev\n    name: IntelligenceQuest Dev\n    image: ghcr.io/hunggod/wadspaces-iq-dev:latest\n    # lean image: its desktop is a window on this screen, not a stream\n    display: host\n    hotkey: 2\n    icon: /usr/share/wadspaces/icons/iq-dev.png\n    env:\n      PUID: \"1000\"\n      PGID: \"1000\"\n      TZ: Pacific/Fiji\n      GIT_USER_NAME: HungGod\n      GIT_USER_EMAIL: throwupcow@gmail.com\n    secrets: [github_token]\n    volumes: [wad-iq-dev-config:/config:z]\n    devices: [/dev/dri]\n    shm_size: 1g\n  - id: wad-c\n    name: Wad Creator Dev\n    image: ghcr.io/hunggod/wadspaces-wad-c:latest\n    # lean image: its desktop is a window on this screen, not a stream\n    display: host\n    hotkey: 3\n    icon: /usr/share/wadspaces/icons/wad-c.png\n    env:\n      PUID: \"1000\"\n      PGID: \"1000\"\n      TZ: Pacific/Fiji\n      GIT_USER_NAME: HungGod\n      GIT_USER_EMAIL: throwupcow@gmail.com\n    secrets: [github_token]\n    volumes: [wad-wad-c-config:/config:z]\n    devices: [/dev/dri]\n    shm_size: 1g\n  - id: kale-b\n    name: Kale Browser\n    image: ghcr.io/hunggod/wadspaces-kale-b:latest\n    # lean image: its desktop is a window on this screen, not a stream\n    display: host\n    hotkey: 4\n    icon: /usr/share/wadspaces/icons/kale-b.png\n    env:\n      PUID: \"1000\"\n      PGID: \"1000\"\n      TZ: Pacific/Fiji\n      GIT_USER_NAME: HungGod\n      GIT_USER_EMAIL: throwupcow@gmail.com\n    secrets: [github_token]\n    volumes: [wad-kale-b-config:/config:z]\n    devices: [/dev/dri]\n    shm_size: 1g\n  - id: vanua-academy\n    name: Vanua Academy\n    image: ghcr.io/hunggod/wadspaces-vanua-academy:latest\n    # lean image: its desktop is a window on this screen, not a stream\n    display: host\n    hotkey: 5\n    icon: /usr/share/wadspaces/icons/vanua-academy.jpg\n    env:\n      PUID: \"1000\"\n      PGID: \"1000\"\n      TZ: Pacific/Fiji\n      GIT_USER_NAME: HungGod\n      GIT_USER_EMAIL: throwupcow@gmail.com\n    secrets: [github_token]\n    volumes: [wad-vanua-academy-config:/config:z]\n    devices: [/dev/dri]\n    shm_size: 1g\n  - id: kale-p\n    name: Kale Phone\n    image: ghcr.io/hunggod/wadspaces-kale-p:latest\n    # lean image: its desktop is a window on this screen, not a stream\n    display: host\n    hotkey: 6\n    icon: /usr/share/wadspaces/icons/kale-p.png\n    env:\n      PUID: \"1000\"\n      PGID: \"1000\"\n      TZ: Pacific/Fiji\n      GIT_USER_NAME: HungGod\n      GIT_USER_EMAIL: throwupcow@gmail.com\n    secrets: [github_token]\n    volumes: [wad-kale-p-config:/config:z]\n    devices: [/dev/dri, /dev/kvm]\n    shm_size: 1g\n",
+  "machine": "wadspaces",
+  "cloud": false,
+  "workspaces": [
+   {
+    "id": "writing",
+    "name": "Writing",
+    "image": "ghcr.io/hunggod/wadspaces-cosmic-bodybuilding:latest",
+    "port": null,
+    "hotkey": 1,
+    "icon": "/usr/share/wadspaces/icons/writing.png",
+    "enabled": true,
+    "container_name": "wad-writing",
+    "container_port": 3000,
+    "env": {
+     "PUID": "1000",
+     "PGID": "1000",
+     "TZ": "Pacific/Fiji",
+     "GIT_USER_NAME": "HungGod",
+     "GIT_USER_EMAIL": "throwupcow@gmail.com"
+    },
+    "secrets": [
+     "github_token"
+    ],
+    "volumes": [
+     "wad-writing-obsidian:/config/.config/obsidian:z"
+    ],
+    "devices": [
+     "/dev/dri"
+    ],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "host",
+    "projects": []
+   },
+   {
+    "id": "iq-dev",
+    "name": "IntelligenceQuest Dev",
+    "image": "ghcr.io/hunggod/wadspaces-iq-dev:latest",
+    "port": null,
+    "hotkey": 2,
+    "icon": "/usr/share/wadspaces/icons/iq-dev.png",
+    "enabled": true,
+    "container_name": "wad-iq-dev",
+    "container_port": 3000,
+    "env": {
+     "PUID": "1000",
+     "PGID": "1000",
+     "TZ": "Pacific/Fiji",
+     "GIT_USER_NAME": "HungGod",
+     "GIT_USER_EMAIL": "throwupcow@gmail.com"
+    },
+    "secrets": [
+     "github_token"
+    ],
+    "volumes": [
+     "wad-iq-dev-config:/config:z"
+    ],
+    "devices": [
+     "/dev/dri"
+    ],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "host",
+    "projects": []
+   },
+   {
+    "id": "wad-c",
+    "name": "Wad Creator Dev",
+    "image": "ghcr.io/hunggod/wadspaces-wad-c:latest",
+    "port": null,
+    "hotkey": 3,
+    "icon": "/usr/share/wadspaces/icons/wad-c.png",
+    "enabled": true,
+    "container_name": "wad-wad-c",
+    "container_port": 3000,
+    "env": {
+     "PUID": "1000",
+     "PGID": "1000",
+     "TZ": "Pacific/Fiji",
+     "GIT_USER_NAME": "HungGod",
+     "GIT_USER_EMAIL": "throwupcow@gmail.com"
+    },
+    "secrets": [
+     "github_token"
+    ],
+    "volumes": [
+     "wad-wad-c-config:/config:z"
+    ],
+    "devices": [
+     "/dev/dri"
+    ],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "host",
+    "projects": []
+   },
+   {
+    "id": "kale-b",
+    "name": "Kale Browser",
+    "image": "ghcr.io/hunggod/wadspaces-kale-b:latest",
+    "port": null,
+    "hotkey": 4,
+    "icon": "/usr/share/wadspaces/icons/kale-b.png",
+    "enabled": true,
+    "container_name": "wad-kale-b",
+    "container_port": 3000,
+    "env": {
+     "PUID": "1000",
+     "PGID": "1000",
+     "TZ": "Pacific/Fiji",
+     "GIT_USER_NAME": "HungGod",
+     "GIT_USER_EMAIL": "throwupcow@gmail.com"
+    },
+    "secrets": [
+     "github_token"
+    ],
+    "volumes": [
+     "wad-kale-b-config:/config:z"
+    ],
+    "devices": [
+     "/dev/dri"
+    ],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "host",
+    "projects": []
+   },
+   {
+    "id": "vanua-academy",
+    "name": "Vanua Academy",
+    "image": "ghcr.io/hunggod/wadspaces-vanua-academy:latest",
+    "port": null,
+    "hotkey": 5,
+    "icon": "/usr/share/wadspaces/icons/vanua-academy.jpg",
+    "enabled": true,
+    "container_name": "wad-vanua-academy",
+    "container_port": 3000,
+    "env": {
+     "PUID": "1000",
+     "PGID": "1000",
+     "TZ": "Pacific/Fiji",
+     "GIT_USER_NAME": "HungGod",
+     "GIT_USER_EMAIL": "throwupcow@gmail.com"
+    },
+    "secrets": [
+     "github_token"
+    ],
+    "volumes": [
+     "wad-vanua-academy-config:/config:z"
+    ],
+    "devices": [
+     "/dev/dri"
+    ],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "host",
+    "projects": []
+   },
+   {
+    "id": "kale-p",
+    "name": "Kale Phone",
+    "image": "ghcr.io/hunggod/wadspaces-kale-p:latest",
+    "port": null,
+    "hotkey": 6,
+    "icon": "/usr/share/wadspaces/icons/kale-p.png",
+    "enabled": true,
+    "container_name": "wad-kale-p",
+    "container_port": 3000,
+    "env": {
+     "PUID": "1000",
+     "PGID": "1000",
+     "TZ": "Pacific/Fiji",
+     "GIT_USER_NAME": "HungGod",
+     "GIT_USER_EMAIL": "throwupcow@gmail.com"
+    },
+    "secrets": [
+     "github_token"
+    ],
+    "volumes": [
+     "wad-kale-p-config:/config:z"
+    ],
+    "devices": [
+     "/dev/dri",
+     "/dev/kvm"
+    ],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "host",
+    "projects": []
+   }
+  ]
+ },
+ {
+  "name": "dev",
+  "yaml": "# Dev config: drives the containers made by podman-compose in ../containers/*\n# (container_name wad-<id>) over the user podman socket. Run dev/run-dev.sh.\nversion: 1\nmachine:\n  name: dev\ndaemon:\n  backend: podman\n  keys:\n    enabled: true\nlauncher:\n  wadcreator_url: http://localhost:8081/\nwadcreator:\n  enabled: true\n  dist: ../../apps/wadcreator/dist\nworkspaces:\n  - id: writing\n    name: Writing\n    image: localhost/wadspaces-cosmic-bodybuilding:latest\n    port: 3100\n    hotkey: 1\n    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/cosmic-bodybuilding/root/usr/share/backgrounds/wallpaper.png\n  - id: iq-dev\n    name: IntelligenceQuest Dev\n    image: localhost/wadspaces-iq-dev:latest\n    port: 3110\n    hotkey: 2\n    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/iq-dev/root/usr/share/backgrounds/wallpaper.png\n  - id: wad-c\n    name: Wad Creator Dev\n    image: localhost/wadspaces-wad-c:latest\n    port: 3120\n    hotkey: 3\n    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/wad-c/root/usr/share/backgrounds/wallpaper.png\n  - id: kale-b\n    name: Kale Browser\n    image: localhost/wadspaces-kale-b:latest\n    port: 3130\n    hotkey: 4\n    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/kale-b/root/usr/share/backgrounds/wallpaper.png\n  - id: vanua-academy\n    name: Vanua Academy\n    image: localhost/wadspaces-vanua-academy:latest\n    port: 3140\n    hotkey: 5\n    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/vanua-academy/root/usr/share/backgrounds/wallpaper.jpg\n  - id: kale-p\n    name: Kale Phone\n    image: localhost/wadspaces-kale-p:latest\n    port: 3150\n    hotkey: 6\n    icon: /home/dwadsworth/Desktop/Dev/WadSpaces/containers/kale-p/root/usr/share/backgrounds/wallpaper.png\n",
+  "machine": "dev",
+  "cloud": false,
+  "workspaces": [
+   {
+    "id": "writing",
+    "name": "Writing",
+    "image": "localhost/wadspaces-cosmic-bodybuilding:latest",
+    "port": 3100,
+    "hotkey": 1,
+    "icon": "/home/dwadsworth/Desktop/Dev/WadSpaces/containers/cosmic-bodybuilding/root/usr/share/backgrounds/wallpaper.png",
+    "enabled": true,
+    "container_name": "wad-writing",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   },
+   {
+    "id": "iq-dev",
+    "name": "IntelligenceQuest Dev",
+    "image": "localhost/wadspaces-iq-dev:latest",
+    "port": 3110,
+    "hotkey": 2,
+    "icon": "/home/dwadsworth/Desktop/Dev/WadSpaces/containers/iq-dev/root/usr/share/backgrounds/wallpaper.png",
+    "enabled": true,
+    "container_name": "wad-iq-dev",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   },
+   {
+    "id": "wad-c",
+    "name": "Wad Creator Dev",
+    "image": "localhost/wadspaces-wad-c:latest",
+    "port": 3120,
+    "hotkey": 3,
+    "icon": "/home/dwadsworth/Desktop/Dev/WadSpaces/containers/wad-c/root/usr/share/backgrounds/wallpaper.png",
+    "enabled": true,
+    "container_name": "wad-wad-c",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   },
+   {
+    "id": "kale-b",
+    "name": "Kale Browser",
+    "image": "localhost/wadspaces-kale-b:latest",
+    "port": 3130,
+    "hotkey": 4,
+    "icon": "/home/dwadsworth/Desktop/Dev/WadSpaces/containers/kale-b/root/usr/share/backgrounds/wallpaper.png",
+    "enabled": true,
+    "container_name": "wad-kale-b",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   },
+   {
+    "id": "vanua-academy",
+    "name": "Vanua Academy",
+    "image": "localhost/wadspaces-vanua-academy:latest",
+    "port": 3140,
+    "hotkey": 5,
+    "icon": "/home/dwadsworth/Desktop/Dev/WadSpaces/containers/vanua-academy/root/usr/share/backgrounds/wallpaper.jpg",
+    "enabled": true,
+    "container_name": "wad-vanua-academy",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   },
+   {
+    "id": "kale-p",
+    "name": "Kale Phone",
+    "image": "localhost/wadspaces-kale-p:latest",
+    "port": 3150,
+    "hotkey": 6,
+    "icon": "/home/dwadsworth/Desktop/Dev/WadSpaces/containers/kale-p/root/usr/share/backgrounds/wallpaper.png",
+    "enabled": true,
+    "container_name": "wad-kale-p",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   }
+  ]
+ },
+ {
+  "name": "old-names",
+  "yaml": "\nversion: 1\ndaemon:\n  base_registry: ghcr.io/old\n  hotkeys: {enabled: false}\ncloud: {project_id: p, storage_bucket: gone}\nworkspaces:\n  - {id: a, name: A, image: i, port: 3100, env: {N: 1, B: true, S: \"x\", Z: null}}\n",
+  "machine": "wadspaces",
+  "cloud": true,
+  "workspaces": [
+   {
+    "id": "a",
+    "name": "A",
+    "image": "i",
+    "port": 3100,
+    "hotkey": null,
+    "icon": null,
+    "enabled": true,
+    "container_name": "wad-a",
+    "container_port": 3000,
+    "env": {
+     "N": "1",
+     "B": "True",
+     "S": "x",
+     "Z": "None"
+    },
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   }
+  ]
+ },
+ {
+  "name": "defaults",
+  "yaml": "\nworkspaces:\n  - {id: a, name: A, image: i, port: 3100}\n  - {id: b, name: B, image: i, display: host, hotkey: 2, shm_size: null, container_name: custom, enabled: false}\n  - id: c\n    name: C\n    image: i\n    display: host\n    projects: [{id: p1, mount: Notes}, {id: d1, mount: Photos, path: /run/media/x}]\n",
+  "machine": "wadspaces",
+  "cloud": false,
+  "workspaces": [
+   {
+    "id": "a",
+    "name": "A",
+    "image": "i",
+    "port": 3100,
+    "hotkey": null,
+    "icon": null,
+    "enabled": true,
+    "container_name": "wad-a",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   },
+   {
+    "id": "b",
+    "name": "B",
+    "image": "i",
+    "port": null,
+    "hotkey": 2,
+    "icon": null,
+    "enabled": false,
+    "container_name": "custom",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": null,
+    "autostart": false,
+    "display": "host",
+    "projects": []
+   },
+   {
+    "id": "c",
+    "name": "C",
+    "image": "i",
+    "port": null,
+    "hotkey": null,
+    "icon": null,
+    "enabled": true,
+    "container_name": "wad-c",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "host",
+    "projects": [
+     {
+      "id": "p1",
+      "mount": "Notes"
+     },
+     {
+      "id": "d1",
+      "mount": "Photos",
+      "path": "/run/media/x"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "unknown-key",
+  "yaml": "workspaces: [{id: a, name: A, image: i, port: 3100, colour: red}]",
+  "error": "workspaces[0]: unknown keys ['colour']"
+ },
+ {
+  "name": "stream-without-port",
+  "yaml": "workspaces: [{id: a, name: A, image: i}]",
+  "error": "workspaces[0]: missing port (a streamed workspace needs one)"
+ },
+ {
+  "name": "bad-display",
+  "yaml": "workspaces: [{id: a, name: A, image: i, display: tv}]",
+  "error": "workspaces[0]: display must be one of ('stream', 'host')"
+ },
+ {
+  "name": "bad-id",
+  "yaml": "workspaces: [{id: A_1, name: A, image: i, port: 3100}]",
+  "error": "workspace 'A_1': id must match ^[a-z0-9][a-z0-9-]{0,62}$"
+ },
+ {
+  "name": "duplicate-id",
+  "yaml": "workspaces: [{id: a, name: A, image: i, port: 3100}, {id: a, name: B, image: i, port: 3101}]",
+  "error": "workspace 'a': duplicate id"
+ },
+ {
+  "name": "port-clash",
+  "yaml": "workspaces: [{id: a, name: A, image: i, port: 8080}]",
+  "error": "workspace 'a': port 8080 already used"
+ },
+ {
+  "name": "port-clash-wadcreator",
+  "yaml": "workspaces: [{id: a, name: A, image: i, port: 8081}]",
+  "error": "workspace 'a': port 8081 already used"
+ },
+ {
+  "name": "port-ok-wadcreator-off",
+  "yaml": "wadcreator: {enabled: false}\nworkspaces: [{id: a, name: A, image: i, port: 8081}]",
+  "machine": "wadspaces",
+  "cloud": false,
+  "workspaces": [
+   {
+    "id": "a",
+    "name": "A",
+    "image": "i",
+    "port": 8081,
+    "hotkey": null,
+    "icon": null,
+    "enabled": true,
+    "container_name": "wad-a",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   }
+  ]
+ },
+ {
+  "name": "hotkey-range",
+  "yaml": "workspaces: [{id: a, name: A, image: i, port: 3100, hotkey: 10}]",
+  "error": "workspace 'a': hotkey must be 1..9"
+ },
+ {
+  "name": "hotkey-twice",
+  "yaml": "workspaces: [{id: a, name: A, image: i, port: 3100, hotkey: 1}, {id: b, name: B, image: i, port: 3101, hotkey: 1}]",
+  "error": "workspace 'b': hotkey 1 already used"
+ },
+ {
+  "name": "hotkey-twice-disabled",
+  "yaml": "workspaces: [{id: a, name: A, image: i, port: 3100, hotkey: 1}, {id: b, name: B, image: i, port: 3101, hotkey: 1, enabled: false}]",
+  "machine": "wadspaces",
+  "cloud": false,
+  "workspaces": [
+   {
+    "id": "a",
+    "name": "A",
+    "image": "i",
+    "port": 3100,
+    "hotkey": 1,
+    "icon": null,
+    "enabled": true,
+    "container_name": "wad-a",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   },
+   {
+    "id": "b",
+    "name": "B",
+    "image": "i",
+    "port": 3101,
+    "hotkey": 1,
+    "icon": null,
+    "enabled": false,
+    "container_name": "wad-b",
+    "container_port": 3000,
+    "env": {},
+    "secrets": [],
+    "volumes": [],
+    "devices": [],
+    "shm_size": "1g",
+    "autostart": false,
+    "display": "stream",
+    "projects": []
+   }
+  ]
+ },
+ {
+  "name": "project-shape",
+  "yaml": "workspaces: [{id: a, name: A, image: i, display: host, projects: [{id: p}]}]",
+  "error": "workspace 'a': each project is {id, mount, path?}, not {'id': 'p'}"
+ },
+ {
+  "name": "project-path",
+  "yaml": "workspaces: [{id: a, name: A, image: i, display: host, projects: [{id: p, mount: M, path: 'rel:x'}]}]",
+  "error": "workspace 'a': project path 'rel:x' must be absolute, without ':' or '%'"
+ },
+ {
+  "name": "project-twice",
+  "yaml": "workspaces: [{id: a, name: A, image: i, display: host, projects: [{id: p, mount: M}, {id: p, mount: N}]}]",
+  "error": "workspace 'a': project p is listed twice"
+ },
+ {
+  "name": "mount-twice",
+  "yaml": "workspaces: [{id: a, name: A, image: i, display: host, projects: [{id: p, mount: M}, {id: q, mount: M}]}]",
+  "error": "workspace 'a': two projects are mounted at Desktop/M"
+ },
+ {
+  "name": "version-2",
+  "yaml": "version: 2",
+  "error": "unsupported config version 2"
+ },
+ {
+  "name": "cloud-no-project",
+  "yaml": "cloud: {heartbeat_s: 5}",
+  "error": "cloud.project_id is required when cloud is set"
+ },
+ {
+  "name": "bad-backend",
+  "yaml": "daemon: {backend: docker}",
+  "error": "daemon.backend must be one of ('systemd', 'podman')"
+ },
+ {
+  "name": "empty",
+  "yaml": "",
+  "machine": "wadspaces",
+  "cloud": false,
+  "workspaces": []
+ }
+]

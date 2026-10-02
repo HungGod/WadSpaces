@@ -87,7 +87,14 @@ impl Server {
             groups: config.daemon.allow_groups.clone(),
             directory: Box::new(access::System),
         };
-        let state = Arc::new(AppState { bus: Bus::new(machine), logs, policy });
+        let state = Arc::new(AppState {
+            bus: Bus::new(machine),
+            logs,
+            policy,
+            store: wad_store::State::new(&config.daemon.state_dir),
+            legacy_config: config.daemon.legacy_config.clone(),
+            vendor_cloud: config.daemon.vendor_cloud.clone(),
+        });
         Ok(Self { listener, bound, state })
     }
 

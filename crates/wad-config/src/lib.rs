@@ -52,6 +52,10 @@ pub struct Daemon {
     pub allow_users: Vec<String>,
     /// ...and members of these groups.
     pub allow_groups: Vec<String>,
+    /// The Python wadd's workspace list, read until the cutover moves it into state.
+    pub legacy_config: PathBuf,
+    /// The image's cloud settings (its keys win over the legacy file's).
+    pub vendor_cloud: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -96,12 +100,16 @@ impl Daemon {
                 // The kiosk user, and anyone an admin adds to group wad.
                 allow_users: vec!["wad".into()],
                 allow_groups: vec!["wad".into(), "wheel".into()],
+                legacy_config: "/etc/wadspaces/workspaces.yaml".into(),
+                vendor_cloud: "/usr/lib/wadspaces/cloud.yaml".into(),
             },
             Profile::User => Self {
                 socket: runtime_dir().join("wadd/wadd.sock"),
                 state_dir: home().join(".local/state/wadspaces"),
                 allow_users: vec![],
                 allow_groups: vec![],
+                legacy_config: config_home().join("wadspaces/workspaces.yaml"),
+                vendor_cloud: "/usr/lib/wadspaces/cloud.yaml".into(),
             },
         }
     }
@@ -174,6 +182,8 @@ struct RawDaemon {
     state_dir: PathBuf,
     allow_users: Vec<String>,
     allow_groups: Vec<String>,
+    legacy_config: PathBuf,
+    vendor_cloud: PathBuf,
 }
 #[derive(serde::Serialize)]
 struct RawLog {
@@ -190,6 +200,8 @@ impl From<&Config> for Raw {
                 state_dir: c.daemon.state_dir.clone(),
                 allow_users: c.daemon.allow_users.clone(),
                 allow_groups: c.daemon.allow_groups.clone(),
+                legacy_config: c.daemon.legacy_config.clone(),
+                vendor_cloud: c.daemon.vendor_cloud.clone(),
             },
             log: RawLog { level: c.log.level.clone(), buffer_lines: c.log.buffer_lines },
         }
