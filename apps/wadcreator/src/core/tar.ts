@@ -36,11 +36,19 @@ function header(name: string, size: number, type: "0" | "5"): Uint8Array {
   return h;
 }
 
+/** UTF-8 byte order (as Rust sorts strings), so both build the same tar. */
+function byteOrder(a: string, b: string): number {
+  const x = enc.encode(a);
+  const y = enc.encode(b);
+  for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return x.length - y.length;
+}
+
 /** Files (paths relative to the folder) as a tar, with parent directories. */
 export function tar(entries: TarEntry[]): Uint8Array {
   const parts: Uint8Array[] = [];
   const dirs = new Set<string>();
-  for (const e of [...entries].sort((a, b) => a.path.localeCompare(b.path))) {
+  for (const e of [...entries].sort((a, b) => byteOrder(a.path, b.path))) {
     if (e.path.startsWith("/") || e.path.split("/").includes("..")) throw new Error(`bad path in build folder: ${e.path}`);
     const segs = e.path.split("/");
     for (let i = 1; i < segs.length; i++) {
