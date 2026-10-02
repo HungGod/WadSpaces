@@ -161,7 +161,8 @@ export default function MachineGate({ children }: { children: React.ReactNode })
       online: isOnline(snap),
       signedIn: !!uid,
       uid: uid ?? null,
-      ownerUid: snap.owner_uid ?? null,
+      // A wadd without cloud settings (a dev laptop) can't be linked: take it as yours.
+      ownerUid: snap.cloud_enabled === false ? (uid ?? null) : (snap.owner_uid ?? null),
       github: github ?? true, // unknown yet: don't flash the step
       githubSkipped: skipped,
     });

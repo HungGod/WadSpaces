@@ -28,9 +28,17 @@ After changing a Tauri command or a `wad-proto` type, run `cargo xtask bindings`
 
 ## The machine app
 
+Try it on a laptop, in a window, without the host image:
+
+```bash
+legacy/wadd-py/dev/run-app.sh    # a dev wadd on :8080, then the app with hot reload
+```
+
+You sign in with your real account (Firebase). The dev wadd has no cloud settings, so the laptop isn't linked and setup skips that step. Wi-Fi and Power in the app act on the laptop for real. State is kept in `~/.local/state/wadspaces-dev`.
+
 ```bash
 cd apps/wadcreator
-npm run app          # dev: a window on Vite's dev server, with hot reload
+npm run app          # the app alone (expects wadd on 127.0.0.1:8080, or WADD_URL)
 npm run build:app    # release build at target/release/wadcreator (--kiosk for fullscreen)
 ```
 
