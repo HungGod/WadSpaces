@@ -1,0 +1,8 @@
+#!/bin/bash
+# Wad Creator, the kiosk's shell (etc/sway/wadspaces.conf). Restarted if it
+# ever exits, after a pause so a crash can't spin. Its output goes to the
+# journal: journalctl -b -t wadcreator.
+while true; do
+    systemd-cat -t wadcreator /usr/bin/wadcreator --kiosk
+    sleep 2
+done

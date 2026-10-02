@@ -1,11 +1,12 @@
 [Unit]
-Description=WadSpaces workspace switcher (wadd) and local Wad Creator
+Description=WadSpaces workspace switcher (wadd)
 Wants=network-online.target podman.socket
 After=network-online.target podman.socket
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/wadd --config /etc/wadspaces/workspaces.yaml serve
+# --no-cdp: the shell is Wad Creator (a Tauri app), not a browser to steer.
+ExecStart=/usr/bin/wadd --config /etc/wadspaces/workspaces.yaml serve --no-cdp
 Restart=always
 RestartSec=2
 TimeoutStopSec=10

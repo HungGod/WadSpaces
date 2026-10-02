@@ -1,6 +1,6 @@
 # WadSpaces host configuration, read by wadd.
-# Workspaces here become quadlet units (wad-<id>.container) and launcher tiles.
-# Wad Creator (served locally on :8081) edits this file through wadd's API.
+# Workspaces here become quadlet units (wad-<id>.container). Wad Creator (the
+# kiosk's shell, /usr/bin/wadcreator) edits this file through wadd's API.
 version: 1
 machine:
   name: wadspaces
@@ -12,27 +12,30 @@ daemon:
   cdp_url: http://127.0.0.1:9222
   quadlet_dir: /etc/containers/systemd
   # wadd grabs the keyboards: Super+Tab switches, Super+1..9 jump, Super+0 or
-  # Super+Space go home, and the `block` chords never reach the kiosk.
+  # Super+Space bring back Wad Creator, and the `block` chords never reach
+  # the kiosk.
   keys:
     enabled: true
     launcher: [KEY_0, KEY_SPACE]
     block: [alt+f4, ctrl+shift+q, ctrl+alt+backspace]
   ready_timeout_s: 900
-  # Images are downloaded from the launcher (Download on a tile) or on the
+  # Images are downloaded from Wad Creator (Download on a wadspace) or on the
   # first switch, never in the background at boot: on a small disk the six
   # images (~20 GB, sharing a 2.8 GB base) do not all fit. "autostart" or
   # "all" download after boot instead, keeping prefetch_min_free_gb free.
   prefetch: none
   prefetch_min_free_gb: 5
 launcher:
-  # Home's "Wad Creator" link opens the desktop app as a window of its own.
+  # The old Electron Wad Creator, which ran as a window of its own; nothing is
+  # installed here now. Never /usr/bin/wadcreator: wadd would take the shell
+  # for that window and move it off the screen.
   wadcreator_app: /usr/lib/wadcreator/wadcreator
   allow_navigate: []
 # The old in-kiosk web copy of Wad Creator (dev only now).
 wadcreator:
   enabled: false
 # The online Wad Creator reaches this machine through Firestore once it is
-# linked (Home -> Link this machine to Wad Creator). Idle until then. The
+# linked (Wad Creator links it when you first sign in). Idle until then. The
 # project comes from /usr/lib/wadspaces/cloud.yaml, which updates with the
 # image; a cloud: section here can add settings (e.g. heartbeat_s).
 workspaces:
@@ -73,7 +76,8 @@ workspaces:
   - id: wad-c
     name: Wad Creator Dev
     image: ghcr.io/hunggod/wadspaces-wad-c:latest
-    port: 3120
+    # lean image: its desktop is a window on this screen, not a stream
+    display: host
     hotkey: 3
     icon: /usr/share/wadspaces/icons/wad-c.png
     env:
@@ -89,7 +93,8 @@ workspaces:
   - id: kale-b
     name: Kale Browser
     image: ghcr.io/hunggod/wadspaces-kale-b:latest
-    port: 3130
+    # lean image: its desktop is a window on this screen, not a stream
+    display: host
     hotkey: 4
     icon: /usr/share/wadspaces/icons/kale-b.png
     env:
@@ -105,7 +110,8 @@ workspaces:
   - id: vanua-academy
     name: Vanua Academy
     image: ghcr.io/hunggod/wadspaces-vanua-academy:latest
-    port: 3140
+    # lean image: its desktop is a window on this screen, not a stream
+    display: host
     hotkey: 5
     icon: /usr/share/wadspaces/icons/vanua-academy.jpg
     env:
@@ -121,7 +127,8 @@ workspaces:
   - id: kale-p
     name: Kale Phone
     image: ghcr.io/hunggod/wadspaces-kale-p:latest
-    port: 3150
+    # lean image: its desktop is a window on this screen, not a stream
+    display: host
     hotkey: 6
     icon: /usr/share/wadspaces/icons/kale-p.png
     env:

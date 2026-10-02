@@ -17,6 +17,8 @@ import { isOnline, useWaddState } from "./useWadd";
 import { WifiPanel } from "./WifiPanel";
 
 const machine = () => backend as MachineBackend;
+/** wadd's words for a token GitHub refuses (wadd/github.py REFUSED). */
+const refused = (error?: string) => !!error && /refused|revoked|bad credentials|401/i.test(error);
 const SKIP_KEY = (uid: string) => `wadcreator.githubLater.${uid}`;
 
 function readSkip(uid: string | null) {
@@ -128,9 +130,11 @@ export default function MachineGate({ children }: { children: React.ReactNode })
   }, [uid, hasProfile, pathname]);
 
   const linked = !!uid && snap?.owner_uid === uid;
-  // Whether this machine has a GitHub token, once it's this user's.
+  // Whether this machine has a working GitHub token, once it's this user's. A
+  // refused one (revoked, like the old baked-in token) counts as none; one
+  // that can't be checked offline counts as fine.
   const checkGithub = useCallback(() => {
-    backend.githubStatus().then((s) => setGithub(s.token), () => setGithub(false));
+    backend.githubStatus().then((s) => setGithub(s.token && !refused(s.error)), () => setGithub(false));
   }, []);
   useEffect(() => {
     if (linked) checkGithub();

@@ -19,13 +19,16 @@
 #   --stage-only DIR               with update: write what would go onto the
 #                                  drive into DIR instead (for testing)
 #
-# WADCREATOR_DIR (default apps/wadcreator): its desktop app (npm run build:desktop,
-# Electron) goes into the image at /usr/lib/wadcreator. Without it, none.
+# WADCREATOR_DIR (default apps/wadcreator): Wad Creator, the kiosk's shell. Its
+# Tauri app (npm run build:app) goes into the image at /usr/bin/wadcreator. It
+# needs Rust (rustup), Node, the WebKitGTK dev packages, and the Firebase web
+# config in WADCREATOR_DIR/.env.local.
 #
 # Baked-in secrets come from host/secrets/ (gitignored, never in the build
 # context directly):
-#   github_auth.json       {"github_pat": "..."} -> podman secret github_token
 #   admin_password_hash    crypt hash for `admin` (default: the one in bib-config.toml)
+# No GitHub token is baked in any more: each machine signs in to GitHub from
+# Wad Creator (device sign-in), and gets the token from the account.
 # ADMIN_SSH_KEY (default: the key in bib-config.toml) is admin's SSH key.
 set -euo pipefail
 
@@ -55,16 +58,21 @@ STICK_OCI="${ROOT}/.build/stick/oci"
 # The workspace images (their Dockerfiles and compose files).
 CONTAINERS_DIR="${CONTAINERS_DIR:-${ROOT}/../Wadspaces-David}"
 
+# Built here rather than in a container: this laptop runs Fedora 43 like the
+# image, so the app links against the same WebKitGTK. The image build runs
+# `wadcreator --version` to check that it loads.
 stage_wadcreator() {
     local out="${ROOT}/.build/wadcreator-app"
     rm -rf "${out}" && mkdir -p "${out}"
-    if [[ -f "${WADCREATOR_DIR}/desktop/package.json" ]]; then
-        echo ">> building the Wad Creator desktop app in ${WADCREATOR_DIR}"
-        (cd "${WADCREATOR_DIR}" && npm ci --no-audit --no-fund && ELECTRON_RUN_AS_NODE= npm run build:desktop)
-        cp -a "${WADCREATOR_DIR}/desktop/out/linux-unpacked/." "${out}/"
-    else
-        echo ">> no Wad Creator at ${WADCREATOR_DIR}; the image ships without it"
+    if ! command -v cargo > /dev/null && [[ -f "${HOME}/.cargo/env" ]]; then
+        # shellcheck disable=SC1091
+        source "${HOME}/.cargo/env"
     fi
+    command -v cargo > /dev/null || { echo "cargo not found: install Rust with rustup" >&2; exit 1; }
+    [[ -f "${WADCREATOR_DIR}/.env.local" ]] || { echo "no ${WADCREATOR_DIR}/.env.local: Wad Creator needs the Firebase web config (see .env.example)" >&2; exit 1; }
+    echo ">> building Wad Creator (Tauri) in ${WADCREATOR_DIR}"
+    (cd "${WADCREATOR_DIR}" && npm ci --no-audit --no-fund && npm run build:app)
+    install -m 755 "${ROOT}/target/release/wadcreator" "${out}/wadcreator"
 }
 
 # admin's password hash or SSH key from bib-config.toml ("password" / "key").
@@ -79,14 +87,8 @@ EOF
 
 stage_secrets() {
     local out="${ROOT}/.build/secrets"
+    # podman/: files wadd seeds as podman secrets (none baked in now).
     rm -rf "${out}" && (umask 077 && mkdir -p "${out}/podman")
-    if [[ -f "${SECRETS_DIR}/github_auth.json" ]]; then
-        (umask 077 && python3 -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["github_pat"].strip())' \
-            "${SECRETS_DIR}/github_auth.json" > "${out}/podman/github_token")
-        echo ">> baking github_token from host/secrets/github_auth.json"
-    else
-        echo ">> WARNING: no host/secrets/github_auth.json; git push in workspaces needs \`wadd secret set github_token\`"
-    fi
     local hash
     if [[ -f "${SECRETS_DIR}/admin_password_hash" ]]; then
         hash="$(< "${SECRETS_DIR}/admin_password_hash")"
