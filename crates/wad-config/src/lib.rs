@@ -47,6 +47,21 @@ pub struct Config {
     pub keys: Keys,
     pub display: Display,
     pub cloud: Cloud,
+    pub github: Github,
+}
+
+/// GitHub (where projects live).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Github {
+    /// The OAuth App's settings (client_id, scopes) for the device sign-in.
+    pub app: PathBuf,
+}
+
+impl Default for Github {
+    fn default() -> Self {
+        Self { app: "/usr/lib/wadspaces/github.toml".into() }
+    }
 }
 
 /// The account link (the cloud relay). An empty project_id takes the image's
@@ -290,6 +305,7 @@ impl Config {
             keys: Keys::for_profile(profile),
             display: Display::for_profile(profile),
             cloud: Cloud::default(),
+            github: Github::default(),
         }
     }
 
@@ -352,6 +368,7 @@ struct Raw {
     keys: Keys,
     display: Display,
     cloud: Cloud,
+    github: Github,
 }
 #[derive(serde::Serialize)]
 struct RawMachine {
@@ -410,6 +427,7 @@ impl From<&Config> for Raw {
             keys: c.keys.clone(),
             display: c.display.clone(),
             cloud: c.cloud.clone(),
+            github: c.github.clone(),
         }
     }
 }

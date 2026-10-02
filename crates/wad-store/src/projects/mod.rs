@@ -392,6 +392,13 @@ impl ProjectStore {
         Ok(Some(json!({"kind": "folder", "machineId": mid, "machineName": name, "path": real})))
     }
 
+    /// Whether put() would take this (nothing is saved): to check before
+    /// doing what can't be undone (making a GitHub repo).
+    pub fn check(&self, pid: &str, body: &Value) -> Result<()> {
+        let fields = validate(pid, body)?;
+        self.check_mount(pid, fields["mountName"].as_str().unwrap_or_default())
+    }
+
     /// Creates or updates (and undeletes). The store sets the timestamps.
     pub fn put(&self, pid: &str, body: &Value) -> Result<Value> {
         let old = self.get_or_none(pid).unwrap_or_else(|| json!({}));

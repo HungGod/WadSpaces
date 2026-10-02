@@ -68,6 +68,8 @@ pub enum Event {
     Build(BuildLog),
     /// The account link changed (linked, unlinked, a heartbeat, an error).
     Cloud(CloudLink),
+    /// A GitHub device sign-in moved on.
+    Github(crate::github::SignIn),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
@@ -87,6 +89,7 @@ impl Event {
             Event::Launch(_) => "launch",
             Event::Build(_) => "build",
             Event::Cloud(_) => "cloud",
+            Event::Github(_) => "github",
             Event::Notice { .. } => "notice",
         }
     }

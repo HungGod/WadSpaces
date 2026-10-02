@@ -136,7 +136,8 @@ impl Backend for Fake {
         self.0.lock().unwrap().volumes.get(name).cloned()
     }
     async fn github_token(&self) -> Option<String> {
-        Some(TOKEN.into())
+        let v = self.0.lock().unwrap().secrets.get("github_token").cloned()?;
+        Some(String::from_utf8_lossy(&v).trim().to_string()).filter(|t| !t.is_empty())
     }
     async fn secret_names(&self) -> Result<Vec<String>, String> {
         let mut n: Vec<String> = self.0.lock().unwrap().secrets.keys().cloned().collect();

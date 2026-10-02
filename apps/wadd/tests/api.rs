@@ -298,3 +298,18 @@ async fn builds() {
     assert!(body.contains("trybuild"), "{body}");
     let _ = stop.send(());
 }
+
+#[tokio::test]
+async fn github_without_a_token() {
+    let (_d, sock, stop) = start(true).await;
+    let (status, body) = get(&sock, "/v1/github").await;
+    assert_eq!(status, 200);
+    assert!(body.contains(r#""token":false"#), "{body}");
+    let (status, body) = get(&sock, "/v1/github/repos").await;
+    assert_eq!(status, 409, "{body}");
+    // No app settings in tests: the sign-in says why it can't start.
+    let (status, body) = request(&sock, "POST", "/v1/github/device").await;
+    assert_eq!(status, 500, "{body}");
+    assert!(body.contains("GitHub app settings"), "{body}");
+    let _ = stop.send(());
+}

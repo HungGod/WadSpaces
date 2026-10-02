@@ -39,6 +39,7 @@ pub struct AppState {
     pub launches: Arc<crate::launches::Launches>,
     pub builds: Arc<crate::builds::Builds>,
     pub secrets: Arc<crate::secrets::Secrets>,
+    pub github: Arc<crate::github::GithubService>,
     /// The account link; None without cloud settings.
     pub cloud: Option<Arc<crate::cloud::CloudRelay>>,
     /// The keyboard proxy, while it runs.
@@ -140,6 +141,9 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/session", delete(session_end))
         .route("/v1/cloud", get(cloud).delete(cloud_unlink))
         .route("/v1/cloud/link", post(cloud_link))
+        .route("/v1/github", get(github).delete(github_sign_out))
+        .route("/v1/github/device", post(github_device).delete(github_device_cancel))
+        .route("/v1/github/repos", get(github_repos).post(github_repo_create))
         .route("/v1/secrets", get(secrets))
         .route("/v1/secrets/{name}", axum::routing::put(secret_put).delete(secret_delete))
         .route("/v1/library/{collection}", get(library))
@@ -476,6 +480,71 @@ async fn cloud_link(State(app): State<Arc<AppState>>, Json(b): Json<LinkBody>) -
 async fn cloud_unlink(State(app): State<Arc<AppState>>) -> Result<StatusCode, Failure> {
     relay(&app)?.unlink().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn github(State(app): State<Arc<AppState>>) -> Json<wad_proto::github::GithubStatus> {
+    Json(app.github.status().await)
+}
+
+/// Forgets the GitHub token here (the account keeps its copy).
+async fn github_sign_out(State(app): State<Arc<AppState>>) -> Result<StatusCode, Failure> {
+    app.github.sign_out().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DeviceBody {
+    #[serde(default)]
+    account: Option<wad_proto::github::AccountRef>,
+}
+
+/// Starts a GitHub device sign-in: the code to show. How it ends arrives
+/// as github events (and in GET /v1/github).
+async fn github_device(
+    State(app): State<Arc<AppState>>,
+    body: axum::body::Bytes,
+) -> Result<Json<wad_proto::github::SignIn>, Failure> {
+    // The body is optional: {"account": ...} saves the token to that account too.
+    let b: DeviceBody = if body.iter().all(u8::is_ascii_whitespace) {
+        DeviceBody::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|e| Failure(ApiError::new(ErrorCode::BadRequest, e.to_string())))?
+    };
+    Ok(Json(app.github.start(b.account).await?))
+}
+
+async fn github_device_cancel(State(app): State<Arc<AppState>>) -> StatusCode {
+    app.github.cancel();
+    StatusCode::NO_CONTENT
+}
+
+#[derive(Deserialize)]
+struct FreshQuery {
+    #[serde(default)]
+    fresh: bool,
+}
+
+/// The repos the owner can use (from the last minute's unless ?fresh=true).
+async fn github_repos(
+    State(app): State<Arc<AppState>>,
+    Query(q): Query<FreshQuery>,
+) -> Result<Json<wad_proto::github::Repos>, Failure> {
+    match app.github.repos(q.fresh).await? {
+        Some(r) => Ok(Json(r)),
+        None => Err(Failure(ApiError::new(
+            ErrorCode::Conflict,
+            "no GitHub token on this machine (sign in to GitHub first)",
+        ))),
+    }
+}
+
+/// A new repo on GitHub, and a project for it.
+async fn github_repo_create(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<wad_proto::github::NewRepo>,
+) -> Result<(StatusCode, Json<Project>), Failure> {
+    Ok((StatusCode::CREATED, Json(app.github.create_repo(&req).await?)))
 }
 
 /// The secrets' names and where they came from; never their values.

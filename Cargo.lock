@@ -5565,6 +5565,7 @@ dependencies = [
 name = "wad-github"
 version = "0.1.0"
 dependencies = [
+ "qrcode",
  "reqwest",
  "serde",
  "serde_json",
@@ -5663,7 +5664,6 @@ name = "wadcreator"
 version = "0.1.0"
 dependencies = [
  "cairo-rs 0.18.5",
- "qrcode",
  "reqwest",
  "serde",
  "serde_json",
@@ -5707,6 +5707,7 @@ dependencies = [
  "wad-core",
  "wad-firebase",
  "wad-git",
+ "wad-github",
  "wad-input",
  "wad-podman",
  "wad-proto",

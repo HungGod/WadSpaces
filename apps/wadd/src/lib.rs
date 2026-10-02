@@ -11,6 +11,7 @@ pub mod cloud;
 pub mod display;
 pub mod drives;
 pub mod events;
+pub mod github;
 pub mod joblog;
 pub mod launches;
 pub mod logbuf;
@@ -244,8 +245,19 @@ impl Server {
         );
         let builds =
             builds::Builds::new(registry.clone(), backend.clone(), bus.clone(), &d.state_dir, d.build_min_free_gb);
-        let secrets = Arc::new(secrets::Secrets::new(backend, &d.state_dir));
-        let cloud = cloud_settings(config).map(|(cs, ends)| {
+        let secrets = Arc::new(secrets::Secrets::new(backend.clone(), &d.state_dir));
+        let cloud_cfg = cloud_settings(config);
+        let github = github::GithubService::new(
+            wad_github::Github::new(reqwest::Client::new()),
+            config.github.app.clone(),
+            reqwest::Client::new(),
+            cloud_cfg
+                .as_ref()
+                .map(|(_, e)| e.firestore_base.clone())
+                .unwrap_or_else(|| "https://firestore.googleapis.com".into()),
+            github::Parts { backend, secrets: secrets.clone(), projects: projects.clone(), bus: bus.clone() },
+        );
+        let cloud = cloud_cfg.map(|(cs, ends)| {
             cloud::CloudRelay::new(
                 cs,
                 reqwest::Client::new(),
@@ -256,11 +268,13 @@ impl Server {
                     projects: projects.clone(),
                     secrets: secrets.clone(),
                     launches: launches.clone(),
+                    github: github.clone(),
                     bus: bus.clone(),
                 },
             )
         });
         let state = Arc::new(AppState {
+            github,
             secrets,
             cloud,
             bus,

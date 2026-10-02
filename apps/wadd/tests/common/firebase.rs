@@ -198,12 +198,17 @@ async fn firestore(
             let b: Value = serde_json::from_slice(&body).unwrap();
             let mask: Vec<String> =
                 q.iter().filter(|(k, _)| k == "updateMask.fieldPaths").map(|(_, v)| v.clone()).collect();
-            let entry = f.docs.entry(rest.clone()).or_insert_with(|| json!({}));
-            for k in mask {
-                match b["fields"].get(&k) {
-                    Some(v) => entry[&k] = v.clone(),
-                    None => {
-                        entry.as_object_mut().unwrap().remove(&k);
+            if mask.is_empty() {
+                // No mask: the document is replaced, as Firestore does.
+                f.docs.insert(rest.clone(), b["fields"].clone());
+            } else {
+                let entry = f.docs.entry(rest.clone()).or_insert_with(|| json!({}));
+                for k in mask {
+                    match b["fields"].get(&k) {
+                        Some(v) => entry[&k] = v.clone(),
+                        None => {
+                            entry.as_object_mut().unwrap().remove(&k);
+                        }
                     }
                 }
             }

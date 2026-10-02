@@ -5,13 +5,17 @@
 //! (<https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow>):
 //! no client secret and no browser on the machine. The token comes back as a
 //! [`Token`], which never prints and never serializes.
+//!
+//! [`Github::repos`] and [`Github::create_repo`] are the REST calls projects
+//! need (github.py): the repos the owner can use, every page, and a new one
+//! with a first commit so it can be cloned straight away.
 
 use std::fmt;
 use std::time::Duration;
 
 use serde::Deserialize;
 use tokio::time::Instant;
-use wad_proto::github::{DeviceCode, GithubAccount};
+use wad_proto::github::{DeviceCode, GithubAccount, Repo};
 use wad_proto::{ApiError, ErrorCode};
 
 const WEB: &str = "https://github.com";
@@ -71,6 +75,9 @@ pub enum Error {
     BadToken,
     #[error("couldn't reach GitHub: {0}")]
     Network(#[source] reqwest::Error),
+    /// GitHub refused what was asked (a repo by that name exists, ...).
+    #[error("{0}")]
+    Invalid(String),
     #[error("GitHub answered {status}: {message}")]
     Upstream { status: u16, message: String },
 }
@@ -89,6 +96,7 @@ impl From<Error> for ApiError {
         let code = match e {
             Error::Expired | Error::Denied => ErrorCode::Cancelled,
             Error::BadToken => ErrorCode::Unauthorized,
+            Error::Invalid(_) => ErrorCode::BadRequest,
             Error::Network(_) => ErrorCode::Offline,
             Error::DeviceFlowDisabled | Error::BadClient | Error::Upstream { .. } => ErrorCode::Upstream,
         };
@@ -242,6 +250,114 @@ async fn read_json<T: serde::de::DeserializeOwned>(res: reqwest::Response) -> Re
         return Err(Error::Upstream { status: status.as_u16(), message: text.chars().take(200).collect() });
     }
     res.json().await.map_err(Error::from)
+}
+
+/// What the repo list asks for: what `gh repo list` shows, plus
+/// collaborations and organisations, most recently pushed first.
+const REPOS_QUERY: &str = "per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member";
+
+/// A GitHub repo as Wad Creator sees it.
+fn repo_of(r: &serde_json::Value) -> Repo {
+    let s = |k: &str| r.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    Repo {
+        full_name: s("full_name"),
+        name: s("name"),
+        private: r.get("private").and_then(|v| v.as_bool()).unwrap_or(false),
+        url: s("clone_url"),
+        default_branch: s("default_branch"),
+        pushed_at: r.get("pushed_at").and_then(|v| v.as_str()).map(String::from),
+        description: s("description"),
+    }
+}
+
+/// What GitHub said went wrong: its field errors when there are any ("name
+/// already exists on this account"), else its message.
+fn message_of(body: &serde_json::Value, status: u16) -> String {
+    let fields: Vec<String> = body
+        .get("errors")
+        .and_then(|e| e.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            e.get("message").and_then(|m| m.as_str()).map(String::from).or_else(|| {
+                let f = |k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                e.is_object().then(|| format!("{} {}", f("field"), f("code")))
+            })
+        })
+        .collect();
+    if !fields.is_empty() {
+        return fields.join("; ");
+    }
+    body.get("message").and_then(|m| m.as_str()).map(String::from).unwrap_or_else(|| format!("HTTP {status}"))
+}
+
+/// The `rel="next"` URL of a Link header.
+fn next_link(res: &reqwest::Response) -> Option<String> {
+    let link = res.headers().get("link")?.to_str().ok()?;
+    link.split(',').find_map(|part| {
+        let (url, rel) = part.split_once(';')?;
+        rel.contains("rel=\"next\"").then(|| url.trim().trim_start_matches('<').trim_end_matches('>').to_string())
+    })
+}
+
+impl Github {
+    async fn api_call(&self, req: reqwest::RequestBuilder, token: &Token) -> Result<reqwest::Response, Error> {
+        let res = req
+            .header("accept", "application/vnd.github+json")
+            .header("x-github-api-version", "2022-11-28")
+            .header("user-agent", USER_AGENT)
+            .bearer_auth(token.expose())
+            .send()
+            .await
+            .map_err(Error::Network)?;
+        let status = res.status().as_u16();
+        match status {
+            200..=299 => Ok(res),
+            401 => Err(Error::BadToken),
+            _ => {
+                let body: serde_json::Value = res.json().await.unwrap_or(serde_json::Value::Null);
+                let message = message_of(&body, status);
+                Err(if status == 422 { Error::Invalid(message) } else { Error::Upstream { status, message } })
+            }
+        }
+    }
+
+    /// The owner's login and every repo they can use (every page).
+    pub async fn repos(&self, token: &Token) -> Result<(String, Vec<Repo>), Error> {
+        let login = self.user(token).await?.login;
+        let mut out = vec![];
+        let mut url = Some(format!("{}/user/repos?{REPOS_QUERY}", self.api));
+        while let Some(u) = url {
+            let res = self.api_call(self.http.get(&u), token).await?;
+            url = next_link(&res);
+            let page: serde_json::Value = res.json().await.map_err(Error::Network)?;
+            out.extend(page.as_array().into_iter().flatten().filter(|r| r.is_object()).map(repo_of));
+        }
+        Ok((login, out))
+    }
+
+    /// A new repo, private unless asked, with a first commit (auto_init).
+    pub async fn create_repo(
+        &self,
+        token: &Token,
+        name: &str,
+        private: bool,
+        description: &str,
+    ) -> Result<Repo, Error> {
+        let body = serde_json::json!({"name": name, "private": private, "description": description, "auto_init": true});
+        let res = self.api_call(self.http.post(format!("{}/user/repos", self.api)).json(&body), token).await?;
+        let r: serde_json::Value = res.json().await.map_err(Error::Network)?;
+        Ok(repo_of(&r))
+    }
+}
+
+/// A QR code of `text` (a sign-in address), as an SVG document, for a phone
+/// to scan.
+pub fn qr_svg(text: &str) -> String {
+    use qrcode::render::svg;
+    qrcode::QrCode::new(text.as_bytes())
+        .map(|q| q.render::<svg::Color>().min_dimensions(200, 200).quiet_zone(true).build())
+        .unwrap_or_default()
 }
 
 /// The OAuth `error` in a body, as an [`Error`].

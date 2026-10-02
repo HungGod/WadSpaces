@@ -70,13 +70,6 @@ fn app_config() -> Result<AppConfig, ApiError> {
     AppConfig::load(&path).map_err(|e| ApiError::new(ErrorCode::Internal, e))
 }
 
-fn qr_svg(text: &str) -> String {
-    use qrcode::render::svg;
-    qrcode::QrCode::new(text.as_bytes())
-        .map(|q| q.render::<svg::Color>().min_dimensions(200, 200).quiet_zone(true).build())
-        .unwrap_or_default()
-}
-
 /// Starts a sign-in: the code for the user to enter at github.com/login/device.
 #[tauri::command]
 #[specta::specta]
@@ -85,7 +78,7 @@ pub async fn github_device_start(state: State<'_, GithubState>) -> Result<Device
     let code = start.code.clone();
     state.cancel.send_modify(|n| *n += 1);
     *state.flow.lock().unwrap() = Some(start);
-    Ok(DevicePrompt { qr_svg: qr_svg(&code.verification_uri), code })
+    Ok(DevicePrompt { qr_svg: wad_github::qr_svg(&code.verification_uri), code })
 }
 
 /// Waits until the user has entered the code, then saves the token on this
@@ -174,7 +167,7 @@ pub fn github_device_cancel(app: AppHandle, state: State<'_, GithubState>) {
 mod tests {
     #[test]
     fn qr_is_an_svg() {
-        let svg = super::qr_svg("https://github.com/login/device");
+        let svg = wad_github::qr_svg("https://github.com/login/device");
         assert!(svg.starts_with("<?xml") && svg.contains("<svg"), "{}", &svg[..60.min(svg.len())]);
     }
 }

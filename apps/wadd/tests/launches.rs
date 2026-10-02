@@ -108,6 +108,7 @@ async fn env() -> Env {
         m.volumes.insert("wad-a-config".into(), tmp.join("volumes/wad-a-config/_data").to_string_lossy().into());
         m.answering.insert("http://127.0.0.1:3100/".into());
         m.answering.insert("http://127.0.0.1:3101/".into());
+        m.secrets.insert("github_token".into(), TOKEN.as_bytes().to_vec());
     });
     let bus = Bus::new(wad_proto::v1::MachineInfo {
         name: "t".into(),

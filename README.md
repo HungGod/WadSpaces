@@ -59,6 +59,8 @@ apps/wadd/dev/try-build.sh   # builds: a design built on the lean base, installe
                              # in the headless sway
 apps/wadd/dev/try-cloud.sh   # the account link, against the Firebase emulators (real rules and
                              # enrollMachine): link, heartbeat, commands, project and secret sync
+apps/wadd/dev/try-github.sh  # GitHub for real: whose token podman has, and your repos
+                             # (--sign-in: the device sign-in first; it replaces that token)
 sudo target/debug/wadd keys  # the keyboard proxy for 20 s (prints what Super chords would do)
 ```
 

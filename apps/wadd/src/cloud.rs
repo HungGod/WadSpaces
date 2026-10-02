@@ -15,8 +15,9 @@
 //! - open_elsewhere(): the owner's other machines, so a launch can warn
 //!   when a project is open on one of them.
 //!
-//! The owner's GitHub repo list (for the online app) comes with the GitHub
-//! client (M7).
+//! - the owner's GitHub repo list (users/{uid}/github/repos) for the online
+//!   app, which has no token: checked every 20th heartbeat, and written only
+//!   when it changed; sooner after a repo is made or a sign-in here.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
@@ -146,6 +147,7 @@ pub struct Parts {
     pub projects: Arc<Projects>,
     pub secrets: Arc<Secrets>,
     pub launches: Arc<Launches>,
+    pub github: Arc<crate::github::GithubService>,
     pub bus: Bus,
 }
 
@@ -162,6 +164,8 @@ pub struct CloudRelay {
     projects_seen: AtomicI64,
     secrets_due: std::sync::atomic::AtomicBool,
     siblings: Mutex<Vec<Sibling>>,
+    /// The repo list as last written to the account.
+    repos_written: Mutex<Option<wad_proto::github::Repos>>,
     status: Mutex<(Option<u64>, Option<String>)>,
     kick: Notify,
 }
@@ -183,6 +187,7 @@ impl CloudRelay {
             projects_seen: AtomicI64::new(-1),
             secrets_due: std::sync::atomic::AtomicBool::new(true),
             siblings: Mutex::default(),
+            repos_written: Mutex::default(),
             status: Mutex::default(),
             kick: Notify::new(),
         });
@@ -372,6 +377,7 @@ impl CloudRelay {
         }
         self.projects_seen.store(-1, Ordering::Relaxed);
         self.siblings.lock().unwrap().clear();
+        *self.repos_written.lock().unwrap() = None;
     }
 
     /// Forgets the link here (the account keeps the machine's entry until the
@@ -509,7 +515,13 @@ impl CloudRelay {
             }
             "projects-sync" => {
                 let (pulled, pushed) = self.sync_projects().await?;
-                return Ok(json!({"ok": true, "pulled": pulled, "pushed": pushed}));
+                // The online app asks this when it wants the repo list now too.
+                let repos = match self.sync_repos(true).await {
+                    Ok(Some(written)) => json!({"written": written}),
+                    Ok(None) => Value::Null,
+                    Err(e) => json!({"error": e}),
+                };
+                return Ok(json!({"ok": true, "pulled": pulled, "pushed": pushed, "repos": repos}));
             }
             "navigate" => return Err("this machine shows no web pages any more".into()),
             other => return Err(format!("unknown command type {other:?}")),
@@ -619,6 +631,28 @@ impl CloudRelay {
         Ok(r)
     }
 
+    /// Writes the owner's repo list to the account when it differs from what
+    /// was last written: Some(written?), None without a token.
+    pub async fn sync_repos(&self, fresh: bool) -> Result<Option<bool>, String> {
+        let (uid, _) = self.ids().ok_or("not linked")?;
+        self.parts.github.repos_due.store(false, Ordering::Relaxed);
+        let Some(list) = self.parts.github.repos(fresh).await.map_err(|e| e.message)? else { return Ok(None) };
+        if self.repos_written.lock().unwrap().as_ref() == Some(&list) {
+            return Ok(Some(false));
+        }
+        let mut data = Map::new();
+        data.insert("login".into(), list.login.clone().into());
+        data.insert("repos".into(), serde_json::to_value(&list.repos).expect("json"));
+        data.insert("updatedAt".into(), time(now_ms()));
+        let tok = self.id_token().await?;
+        self.firestore()?
+            .patch(&tok, &format!("users/{uid}/github/repos"), &data, &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        *self.repos_written.lock().unwrap() = Some(list);
+        Ok(Some(true))
+    }
+
     /// The owner's other machines.
     pub async fn load_siblings(&self) -> Result<Vec<Sibling>, String> {
         let (uid, mid) = self.ids().ok_or("not linked")?;
@@ -676,6 +710,11 @@ impl CloudRelay {
         {
             self.secrets_due.store(false, Ordering::Relaxed);
             tracing::warn!("secrets sync: {e}");
+        }
+        if ((beat && beats % SECRETS_EVERY == 1) || self.parts.github.repos_due.load(Ordering::Relaxed))
+            && let Err(e) = self.sync_repos(false).await
+        {
+            tracing::warn!("GitHub repo list: {e}");
         }
         self.poll_once().await
     }

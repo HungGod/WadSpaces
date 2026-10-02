@@ -41,7 +41,11 @@ impl Bus {
                 Event::Carousel(_) => l.carousel = Some(e.clone()),
                 Event::Session(_) => l.session = Some(e.clone()),
                 Event::Cloud(_) => l.cloud = Some(e.clone()),
-                Event::Notice { .. } | Event::Projects { .. } | Event::Launch(_) | Event::Build(_) => {}
+                Event::Notice { .. }
+                | Event::Projects { .. }
+                | Event::Launch(_)
+                | Event::Build(_)
+                | Event::Github(_) => {}
             }
         }
         let _ = self.tx.send(e);

@@ -28,6 +28,7 @@ struct Env {
     _d: tempfile::TempDir,
     state: PathBuf,
     fb: FakeFirebase,
+    _github: Arc<wiremock::MockServer>,
     fake: Fake,
     reg: Arc<Registry>,
     view: Arc<View>,
@@ -89,6 +90,31 @@ async fn env() -> Env {
     let launches =
         Launches::new(reg.clone(), view.clone(), Arc::new(fake.clone()), projects.clone(), bus.clone(), &state);
     let secrets = Arc::new(Secrets::new(Arc::new(fake.clone()), &state));
+    // GitHub: the owner and two repos.
+    let gh_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::path("/api/user"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({"login": "HungGod"})))
+        .mount(&gh_server)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::path("/api/user/repos"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!([
+            {"full_name": "HungGod/notes", "name": "notes", "private": true, "clone_url": "https://github.com/HungGod/notes.git", "default_branch": "main"},
+            {"full_name": "HungGod/site", "name": "site", "private": false, "clone_url": "https://github.com/HungGod/site.git", "default_branch": "main"}])))
+        .mount(&gh_server)
+        .await;
+    let github = wadd::github::GithubService::new(
+        wad_github::Github::with_base(reqwest::Client::new(), &gh_server.uri(), &format!("{}/api", gh_server.uri())),
+        "/nonexistent/github.toml".into(),
+        reqwest::Client::new(),
+        base.clone(),
+        wadd::github::Parts {
+            backend: Arc::new(fake.clone()),
+            secrets: secrets.clone(),
+            projects: projects.clone(),
+            bus: bus.clone(),
+        },
+    );
+    let gh_keep = Arc::new(gh_server);
     let make = {
         let (reg, view, projects, state) = (reg.clone(), view.clone(), projects.clone(), state.clone());
         move || {
@@ -112,13 +138,14 @@ async fn env() -> Env {
                 projects: projects.clone(),
                 secrets: secrets.clone(),
                 launches: launches.clone(),
+                github: github.clone(),
                 bus: bus.clone(),
             };
             CloudRelay::new(settings, http, ends, parts)
         }
     };
     let relay = make();
-    Env { _d: d, state, fb, fake, reg, view, projects, relay, remake: Box::new(make) }
+    Env { _d: d, state, fb, _github: gh_keep, fake, reg, view, projects, relay, remake: Box::new(make) }
 }
 
 async fn linked() -> Env {
@@ -332,4 +359,21 @@ async fn the_account_being_unreachable_is_reported() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("never recovered: {:?}", e.relay.link_state());
+}
+
+#[tokio::test]
+async fn the_repo_list_goes_to_the_account_when_it_changes() {
+    let e = linked().await;
+    assert_eq!(e.relay.sync_repos(false).await.unwrap(), None); // no token: nothing to say
+    e.fake.with(|m| {
+        m.secrets.insert("github_token".into(), b"gho_x".to_vec());
+    });
+    assert_eq!(e.relay.sync_repos(false).await.unwrap(), Some(true));
+    let doc = e.fb.doc("users/u1/github/repos").unwrap();
+    assert_eq!(doc["login"], "HungGod");
+    assert_eq!(doc["repos"][0]["fullName"], "HungGod/notes");
+    assert!(doc["updatedAt"].as_str().unwrap().ends_with('Z'));
+    assert_eq!(e.relay.sync_repos(true).await.unwrap(), Some(false)); // unchanged: not written again
+    let r = e.relay.execute(&json!({"type": "projects-sync"})).await.unwrap();
+    assert_eq!(r["repos"], json!({"written": false}));
 }

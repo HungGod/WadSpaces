@@ -17,6 +17,7 @@ wad-sway.workspace = true
 wad-input.workspace = true
 wad-git.workspace = true
 wad-firebase.workspace = true
+wad-github.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 sha2.workspace = true
