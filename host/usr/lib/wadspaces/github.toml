@@ -1,0 +1,8 @@
+# The WadSpaces OAuth App on GitHub (Settings → Developer settings → OAuth Apps),
+# with Device Flow enabled. Machines sign in to GitHub with the device flow, so
+# there's no client secret; the client ID isn't secret.
+client_id = "Ov23lia8qVymk05q5E4i"
+# What the token may do: clone, pull and push repos (private ones too), push
+# changes to .github/workflows, and read the account's orgs for
+# `gh repo list <org>`.
+scopes = ["repo", "workflow", "read:org"]

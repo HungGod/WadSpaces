@@ -1,0 +1,15 @@
+[package]
+name = "wad-proto"
+description = "The types wadd and Wad Creator share, exported to TypeScript"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+specta.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

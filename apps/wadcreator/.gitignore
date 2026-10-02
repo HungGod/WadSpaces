@@ -14,8 +14,8 @@ infra/backup/
 # Local env files (Firebase project settings, function env) and logs
 functions/.env.*
 *.log
-# Build outputs: per-target Vite builds, Tauri/Rust, generated bindings
+# Build outputs: per-target Vite builds, Tauri/Rust
 dist-*/
 target/
 src-tauri/target/
-src/gen/
+src-tauri/gen/

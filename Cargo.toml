@@ -1,0 +1,41 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/wadcreator/src-tauri", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[workspace.dependencies]
+wad-proto = { path = "crates/wad-proto" }
+wad-github = { path = "crates/wad-github" }
+wad-firebase = { path = "crates/wad-firebase" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Release candidates: pinned exactly, they break between rcs.
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta-typescript = "=0.0.12"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+
+tauri = "2.12"
+tauri-build = "2.7"
+tauri-plugin-single-instance = "2.5"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-fs = "2.6"
+
+wiremock = "0.6"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "debuginfo"

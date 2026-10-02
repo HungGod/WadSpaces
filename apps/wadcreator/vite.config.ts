@@ -7,6 +7,8 @@ const src = fileURLToPath(new URL("./src", import.meta.url));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Keep Tauri's output visible under `tauri dev`.
+  clearScreen: false,
   resolve: {
     alias: {
       "@core": `${src}/core`,
@@ -18,5 +20,5 @@ export default defineConfig({
   server: { host: "localhost", port: 8081, strictPort: true },
   preview: { host: "localhost", port: 8081, strictPort: true },
   // Rules tests need the emulator: npm run test:rules.
-  test: { exclude: [...configDefaults.exclude, "tests/rules/**"] },
+  test: { exclude: [...configDefaults.exclude, "tests/rules/**", "src-tauri/**"] },
 });
