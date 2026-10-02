@@ -1,6 +1,8 @@
 //! A fake machine for wadd's tests: podman, systemd and probes in memory.
 #![allow(dead_code)]
 
+pub mod host;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -26,7 +28,15 @@ pub struct Machine {
     pub free_gb: f64,
     /// Container id -> its wadspaces.id label.
     pub labels: HashMap<String, String>,
+    /// Image -> its labels (an image that's here and not listed has none).
+    pub image_labels: HashMap<String, serde_json::Map<String, serde_json::Value>>,
+    /// Volume -> where its files are.
+    pub volumes: HashMap<String, String>,
+    /// Times the units were written.
+    pub installs: usize,
 }
+
+pub const TOKEN: &str = "ghp_TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT";
 
 #[derive(Clone, Default)]
 pub struct Fake(pub Arc<Mutex<Machine>>);
@@ -94,7 +104,10 @@ impl Backend for Fake {
         Ok(())
     }
     async fn install_units(&self, units: Vec<(String, String)>) -> Result<bool, String> {
-        self.with(|m| m.units = units);
+        self.with(|m| {
+            m.units = units;
+            m.installs += 1;
+        });
         Ok(true)
     }
     async fn http_ok(&self, url: &str) -> bool {
@@ -107,6 +120,16 @@ impl Backend for Fake {
     }
     fn rx_bytes(&self) -> u64 {
         self.0.lock().unwrap().rx
+    }
+    async fn image_labels(&self, image: &str) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
+        let m = self.0.lock().unwrap();
+        Ok(m.images.contains(image).then(|| m.image_labels.get(image).cloned().unwrap_or_default()))
+    }
+    async fn volume_mountpoint(&self, name: &str) -> Option<String> {
+        self.0.lock().unwrap().volumes.get(name).cloned()
+    }
+    async fn github_token(&self) -> Option<String> {
+        Some(TOKEN.into())
     }
     async fn workspace_of(&self, container: &str) -> Option<String> {
         self.0.lock().unwrap().labels.get(container).cloned()

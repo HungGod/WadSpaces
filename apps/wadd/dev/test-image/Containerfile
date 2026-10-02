@@ -2,7 +2,7 @@
 # standing in for a stream's desktop.
 FROM docker.io/library/busybox:latest
 RUN mkdir -p /www && echo '<h1>wadspaces test workspace</h1>' > /www/index.html
-LABEL io.wadspaces.workspace=test
+LABEL io.wadspaces.workspace=test io.wadspaces.projects=1
 # httpd as PID 1 ignores SIGTERM; without this every stop waits 10 s.
 STOPSIGNAL SIGKILL
 CMD ["httpd", "-f", "-p", "3000", "-h", "/www"]

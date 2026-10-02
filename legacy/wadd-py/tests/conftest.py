@@ -6,8 +6,8 @@ REPO = WADD.parents[1]                        # the monorepo root
 sys.path.insert(0, str(WADD))
 # Unit files and their workspace specs, shared with wad-core and the UI.
 FIXTURES = REPO / "fixtures" / "quadlet"
-# Fixtures only these Python tests use.
-PY_FIXTURES = Path(__file__).parent / "fixtures"
+# lsblk output, shared with the Rust wadd's drive tests.
+PY_FIXTURES = REPO / "fixtures" / "drives"
 
 
 import pytest  # noqa: E402

@@ -1,19 +1,16 @@
 [package]
-name = "wad-store"
-description = "wadd's state on disk: reading what the Python wadd kept, and the plan for moving it over"
+name = "wad-git"
+description = "Projects' git for wadd: clone through a .part folder, and fetch + fast-forward only when nothing can be lost"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-wad-core.workspace = true
 wad-proto.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-serde_norway.workspace = true
+nix.workspace = true
 thiserror.workspace = true
-sha2.workspace = true
+tokio = { workspace = true, features = ["process"] }
 tracing.workspace = true
 
 [dev-dependencies]

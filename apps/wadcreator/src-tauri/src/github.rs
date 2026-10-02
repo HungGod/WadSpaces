@@ -29,12 +29,7 @@ pub struct GithubState {
 impl GithubState {
     pub fn new() -> Self {
         let http = reqwest::Client::new();
-        Self {
-            gh: Github::new(http.clone()),
-            http,
-            flow: Mutex::default(),
-            cancel: watch::channel(0).0,
-        }
+        Self { gh: Github::new(http.clone()), http, flow: Mutex::default(), cancel: watch::channel(0).0 }
     }
 }
 

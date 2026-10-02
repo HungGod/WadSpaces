@@ -18,6 +18,9 @@ async fn start(allow_self: bool) -> (tempfile::TempDir, std::path::PathBuf, toki
     cfg.machine.name = "test-machine".into();
     cfg.daemon.state_dir = dir.path().join("state");
     cfg.display.enabled = false; // never a real sway
+    cfg.daemon.projects_dir = dir.path().join("projects");
+    std::fs::create_dir_all(dir.path().join("home/wad/Notes")).unwrap();
+    cfg.daemon.folder_roots = vec![wad_store::folders::realpath(&dir.path().join("home"))];
     std::fs::create_dir_all(&cfg.daemon.state_dir).unwrap();
     let list = vec![workspace("writing")];
     std::fs::write(cfg.daemon.state_dir.join("workspaces.json"), serde_json::to_string(&list).unwrap()).unwrap();
@@ -200,4 +203,73 @@ async fn the_view_and_sessions() {
     let (_, body) = get(&sock, "/v1/keys").await;
     assert!(body.contains(r#""enabled":false"#) && body.contains(r#""grabbing":false"#), "{body}");
     let _ = stop.send(());
+}
+
+#[tokio::test]
+async fn projects() {
+    let (d, sock, stop) = start(true).await;
+    let notes =
+        r#"{"name":"Notes","mountName":"Notes","source":{"kind":"git","url":"https://github.com/o/notes.git"}}"#;
+    let (status, body) = send(&sock, "POST", "/v1/projects", notes).await;
+    assert_eq!(status, 201, "{body}");
+    let made: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let id = made["id"].as_str().unwrap().to_string();
+    assert_eq!(id.len(), 20);
+    assert_eq!(made["source"], serde_json::json!({"kind": "git", "url": "https://github.com/o/notes.git"}));
+    let (status, body) =
+        send(&sock, "PUT", "/v1/projects/x2", &notes.replace(r#""name":"Notes""#, r#""name":"Clash""#)).await;
+    assert_eq!(status, 409, "{body}"); // the same folder name
+    let (status, body) = send(&sock, "PUT", "/v1/projects/x2", r#"{"name":"Bad"}"#).await;
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("mountName"), "{body}");
+    // A folder project: this machine's, symlinks resolved.
+    let home = wad_store::folders::realpath(&d.path().join("home"));
+    let folder = format!(
+        r#"{{"name":"Mine","mountName":"Mine","source":{{"kind":"folder","path":"{}/wad/Notes"}}}}"#,
+        home.display()
+    );
+    let (status, body) = send(&sock, "PUT", "/v1/projects/f1", &folder).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains(r#""machineId":"local""#) && body.contains(r#""machineName":"test-machine""#), "{body}");
+    let (_, body) = get(&sock, "/v1/projects/f1/status").await;
+    assert!(
+        body.contains(r#""existsOnDisk":true"#)
+            && body.contains(r#""available":true"#)
+            && body.contains(r#""git":null"#),
+        "{body}"
+    );
+    let (_, body) = get(&sock, &format!("/v1/projects/{id}/status")).await;
+    assert!(body.contains(r#""existsOnDisk":false"#) && body.contains(r#""available":true"#), "{body}");
+    // Deleting leaves a tombstone; purge removes the folder.
+    std::fs::create_dir_all(d.path().join(format!("projects/{id}"))).unwrap();
+    let (status, body) = request(&sock, "DELETE", &format!("/v1/projects/{id}?purge=true")).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains(r#""deleted":true"#) && body.contains(r#""purged":true"#), "{body}");
+    assert!(!d.path().join(format!("projects/{id}")).exists());
+    let (_, body) = get(&sock, "/v1/projects").await;
+    assert!(!body.contains(&id) && body.contains("f1"), "{body}");
+    let (_, body) = get(&sock, "/v1/projects?deleted=true").await;
+    assert!(body.contains(&id), "{body}");
+    assert_eq!(get(&sock, "/v1/projects/nope").await.0, 404);
+    // The folder picker stays inside the roots.
+    let (status, body) = get(&sock, &format!("/v1/browse?path={}/wad", home.display())).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains(r#""name":"Notes""#), "{body}");
+    assert_eq!(get(&sock, "/v1/browse?path=/etc").await.0, 403);
+    assert_eq!(get(&sock, &format!("/v1/browse?path={}/nope", home.display())).await.0, 404);
+    assert_eq!(get(&sock, "/v1/browse?drive=x%20y").await.0, 400);
+    // Launches: the workspace's machine is offline here, so it fails, and says so.
+    let (status, body) = send(&sock, "POST", "/v1/launches", r#"{"workspace":"writing","projects":["f1"]}"#).await;
+    assert_eq!(status, 201, "{body}");
+    let launch: serde_json::Value = serde_json::from_str(&body).unwrap();
+    for _ in 0..100 {
+        let (_, body) = get(&sock, &format!("/v1/launches/{}", launch["id"].as_str().unwrap())).await;
+        if body.contains(r#""status":"error""#) {
+            assert!(body.contains("no machine in tests"), "{body}");
+            let _ = stop.send(());
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the launch never failed");
 }

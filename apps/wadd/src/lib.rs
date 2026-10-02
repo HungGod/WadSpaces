@@ -7,8 +7,11 @@ pub mod access;
 pub mod api;
 pub mod backend;
 pub mod display;
+pub mod drives;
 pub mod events;
+pub mod launches;
 pub mod logbuf;
+pub mod projects;
 pub mod pull;
 pub mod registry;
 pub mod systemd;
@@ -157,11 +160,43 @@ impl Server {
             Some(s) => s.clone(),
             None => Arc::new(NullDisplay),
         };
-        let view = View::new(registry.clone(), backend, display, bus.clone(), d.state_dir.clone());
+        let view = View::new(registry.clone(), backend.clone(), display, bus.clone(), d.state_dir.clone());
+        // Folder projects say which machine they're on: its linked id, or
+        // "local" until it's linked.
+        let machine: projects::MachineRef = {
+            let (store, name) = (wad_store::State::new(&d.state_dir), config.machine.name.clone());
+            Arc::new(move || {
+                let link = store.cloud();
+                let id = link.machine_id.filter(|_| link.linked).unwrap_or_else(|| wad_store::projects::LOCAL.into());
+                (id, name.clone())
+            })
+        };
+        let drives = Arc::new(drives::Drives::new(d.projects_uid, Arc::new(drives::System), uid == 0));
+        let projects = Arc::new(projects::Projects::new(
+            &d.state_dir,
+            d.projects_dir.clone(),
+            d.folder_roots.clone(),
+            d.projects_uid,
+            machine,
+            drives,
+            Arc::new(wad_git::Git::default()),
+            registry.clone(),
+            bus.clone(),
+        ));
+        let launches = launches::Launches::new(
+            registry.clone(),
+            view.clone(),
+            backend,
+            projects.clone(),
+            bus.clone(),
+            &d.state_dir,
+        );
         let state = Arc::new(AppState {
             bus,
             registry,
             view,
+            projects,
+            launches,
             keys: std::sync::Mutex::new(None),
             keys_enabled: config.keys.enabled,
             logs,

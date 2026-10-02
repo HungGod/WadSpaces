@@ -19,6 +19,7 @@ wad-podman = { path = "crates/wad-podman" }
 wad-systemd = { path = "crates/wad-systemd" }
 wad-sway = { path = "crates/wad-sway" }
 wad-input = { path = "crates/wad-input" }
+wad-git = { path = "crates/wad-git" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -26,6 +27,7 @@ base64 = "0.22"
 thiserror = "2"
 toml = "1"
 serde_norway = "0.9"
+sha2 = "0.10"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "signal", "io-util", "fs"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "form", "query", "rustls"] }

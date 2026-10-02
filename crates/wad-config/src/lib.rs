@@ -155,7 +155,15 @@ pub struct Daemon {
     /// With prefetch, skip an image (not an autostart one) when less than
     /// this is free, so small disks don't fill up.
     pub prefetch_min_free_gb: u64,
+    /// Who owns project folders: the user inside the images (abc). git runs
+    /// as them when wadd is root.
+    pub projects_uid: u32,
+    /// Folder projects and the folder browser stay inside these.
+    pub folder_roots: Vec<PathBuf>,
 }
+
+/// Home folders, and where drives get mounted.
+pub const FOLDER_ROOTS: [&str; 6] = ["/var/home", "/home", "/mnt", "/media", "/run/media", "/run/wadspaces-drives"];
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
@@ -209,6 +217,8 @@ impl Daemon {
                 reconcile_s: 5,
                 prefetch: Prefetch::None,
                 prefetch_min_free_gb: 15,
+                projects_uid: 1000,
+                folder_roots: FOLDER_ROOTS.iter().map(PathBuf::from).collect(),
             },
             Profile::User => Self {
                 socket: runtime_dir().join("wadd/wadd.sock"),
@@ -225,6 +235,8 @@ impl Daemon {
                 reconcile_s: 5,
                 prefetch: Prefetch::None,
                 prefetch_min_free_gb: 15,
+                projects_uid: 1000,
+                folder_roots: FOLDER_ROOTS.iter().map(PathBuf::from).collect(),
             },
         }
     }
@@ -320,6 +332,8 @@ struct RawDaemon {
     reconcile_s: u64,
     prefetch: Prefetch,
     prefetch_min_free_gb: u64,
+    projects_uid: u32,
+    folder_roots: Vec<PathBuf>,
 }
 #[derive(serde::Serialize)]
 struct RawLog {
@@ -346,6 +360,8 @@ impl From<&Config> for Raw {
                 reconcile_s: c.daemon.reconcile_s,
                 prefetch: c.daemon.prefetch,
                 prefetch_min_free_gb: c.daemon.prefetch_min_free_gb,
+                projects_uid: c.daemon.projects_uid,
+                folder_roots: c.daemon.folder_roots.clone(),
             },
             log: RawLog { level: c.log.level.clone(), buffer_lines: c.log.buffer_lines },
             keys: c.keys.clone(),

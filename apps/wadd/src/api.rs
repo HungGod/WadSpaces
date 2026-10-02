@@ -19,8 +19,8 @@ use serde::Deserialize;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::BroadcastStream;
 use wad_proto::v1::{
-    CloudLink, Event, Health, KeysStatus, LogLine, MachineInfo, Project, Run, Session, SessionRequest, ViewState,
-    Workspace, WorkspaceState,
+    Browse, CloudLink, Drive, Event, Health, KeysStatus, Launch, LaunchLog, LaunchRequest, LogLine, MachineInfo,
+    Project, ProjectDeleted, ProjectStatus, Run, Session, SessionRequest, ViewState, Workspace, WorkspaceState,
 };
 use wad_proto::{ApiError, ErrorCode};
 
@@ -34,6 +34,8 @@ pub struct AppState {
     pub bus: Bus,
     pub registry: Arc<Registry>,
     pub view: Arc<View>,
+    pub projects: Arc<crate::projects::Projects>,
+    pub launches: Arc<crate::launches::Launches>,
     /// The keyboard proxy, while it runs.
     pub keys: std::sync::Mutex<Option<wad_input::Proxy>>,
     pub keys_enabled: bool,
@@ -115,7 +117,13 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/view/home", post(home))
         .route("/v1/carousel/{step}", post(carousel))
         .route("/v1/keys", get(keys))
-        .route("/v1/projects", get(projects))
+        .route("/v1/projects", get(projects).post(project_create))
+        .route("/v1/projects/{id}", get(project).put(project_put).delete(project_delete))
+        .route("/v1/projects/{id}/status", get(project_status))
+        .route("/v1/drives", get(drives))
+        .route("/v1/browse", get(browse))
+        .route("/v1/launches", get(launches).post(launch_create))
+        .route("/v1/launches/{id}", get(launch).delete(launch_cancel))
         .route("/v1/runs", get(runs))
         .route("/v1/session", get(session).post(session_begin))
         .route("/v1/session", delete(session_end))
@@ -206,8 +214,131 @@ async fn download(
     Ok((StatusCode::ACCEPTED, state))
 }
 
-async fn projects(State(app): State<Arc<AppState>>) -> Json<Vec<Project>> {
-    Json(app.store.projects())
+#[derive(Deserialize)]
+struct DeletedQuery {
+    #[serde(default)]
+    deleted: bool,
+}
+
+/// ?deleted=true includes tombstones.
+async fn projects(State(app): State<Arc<AppState>>, Query(q): Query<DeletedQuery>) -> Json<Vec<Project>> {
+    Json(app.projects.list(q.deleted))
+}
+
+async fn project(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Project>, Failure> {
+    Ok(Json(app.projects.get(&id)?))
+}
+
+async fn project_create(
+    State(app): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<(StatusCode, Json<Project>), Failure> {
+    let id = wad_store::projects::new_id();
+    Ok((StatusCode::CREATED, Json(app.projects.save(&id, &body)?)))
+}
+
+async fn project_put(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<Project>, Failure> {
+    Ok(Json(app.projects.save(&id, &body)?))
+}
+
+#[derive(Deserialize)]
+struct PurgeQuery {
+    #[serde(default)]
+    purge: bool,
+}
+
+/// Leaves a tombstone (it syncs); ?purge=true also removes the folder.
+async fn project_delete(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(q): Query<PurgeQuery>,
+) -> Result<Json<ProjectDeleted>, Failure> {
+    Ok(Json(app.projects.delete(&id, q.purge)?))
+}
+
+async fn project_status(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ProjectStatus>, Failure> {
+    Ok(Json(app.projects.status(&id).await?))
+}
+
+fn drive_failure(e: crate::drives::DriveError) -> Failure {
+    use crate::drives::DriveError as D;
+    let code = match &e {
+        D::Missing(_) => ErrorCode::Conflict,
+        D::BadId(_) => ErrorCode::BadRequest,
+        D::Failed(_) => ErrorCode::Offline,
+    };
+    Failure(ApiError::new(code, e.to_string()))
+}
+
+/// Filesystems a drive project could be on (not the system's own disk).
+async fn drives(State(app): State<Arc<AppState>>) -> Result<Json<Vec<Drive>>, Failure> {
+    app.projects.drives.list().await.map(Json).map_err(drive_failure)
+}
+
+#[derive(Deserialize)]
+struct BrowseQuery {
+    path: Option<String>,
+    drive: Option<String>,
+}
+
+/// The folders in `path`, inside the folder roots (no path: those roots).
+/// With `drive`, `path` is inside that drive (mounted first if need be).
+async fn browse(State(app): State<Arc<AppState>>, Query(q): Query<BrowseQuery>) -> Result<Json<Browse>, Failure> {
+    use wad_store::folders::{self, FolderError, MAX_DIRS};
+    let r = match q.drive.filter(|d| !d.is_empty()) {
+        Some(drive) => {
+            let mp = app.projects.drives.mount(&drive, "", "").await.map_err(drive_failure)?;
+            let path = q.path.unwrap_or_default();
+            tokio::task::spawn_blocking(move || folders::browse_inside(&mp, &path, MAX_DIRS)).await
+        }
+        None => {
+            let roots = app.projects.store.folder_roots().to_vec();
+            tokio::task::spawn_blocking(move || folders::browse(q.path.as_deref(), &roots, MAX_DIRS)).await
+        }
+    };
+    match r.map_err(|e| Failure(ApiError::new(ErrorCode::Internal, e.to_string())))? {
+        Ok(b) => Ok(Json(b)),
+        Err(e @ FolderError::Outside(_)) => Err(Failure(ApiError::new(ErrorCode::Forbidden, e.to_string()))),
+        Err(e @ FolderError::Missing(_)) => Err(Failure(ApiError::new(ErrorCode::NotFound, e.to_string()))),
+    }
+}
+
+async fn launches(State(app): State<Arc<AppState>>) -> Json<Vec<Launch>> {
+    Json(app.launches.list())
+}
+
+/// Opens a workspace with projects; its progress arrives as launch events.
+async fn launch_create(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<LaunchRequest>,
+) -> Result<(StatusCode, Json<Launch>), Failure> {
+    Ok((StatusCode::CREATED, Json(app.launches.create(&req.workspace, &req.projects, req.restart)?)))
+}
+
+#[derive(Deserialize)]
+struct SinceQuery {
+    #[serde(default)]
+    since: u64,
+}
+
+/// A launch, and its log from line `since`.
+async fn launch(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(q): Query<SinceQuery>,
+) -> Result<Json<LaunchLog>, Failure> {
+    Ok(Json(app.launches.log(&id, q.since)?))
+}
+
+async fn launch_cancel(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Launch>, Failure> {
+    Ok(Json(app.launches.cancel(&id)?))
 }
 
 #[derive(Deserialize)]

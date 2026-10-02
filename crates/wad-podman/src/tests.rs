@@ -37,6 +37,22 @@ async fn fake() -> (tempfile::TempDir, Podman) {
             }),
         )
         .route(
+            "/v5.0.0/libpod/volumes/{name}/json",
+            get(|Path(name): Path<String>| async move {
+                if name == "wad-a-config" { axum::Json(json!({"Mountpoint": "/vol/_data"})).into_response() } else { StatusCode::NOT_FOUND.into_response() }
+            }),
+        )
+        .route(
+            "/v5.0.0/libpod/secrets/{name}/json",
+            get(|Path(name): Path<String>, Query(q): Query<std::collections::HashMap<String, String>>| async move {
+                match (name.as_str(), q.get("showsecret").map(String::as_str)) {
+                    ("github_token", Some("true")) => axum::Json(json!({"Spec": {"Name": "github_token"}, "SecretData": "ghp_x"})).into_response(),
+                    ("github_token", _) => axum::Json(json!({"Spec": {"Name": "github_token"}})).into_response(),
+                    _ => StatusCode::NOT_FOUND.into_response(),
+                }
+            }),
+        )
+        .route(
             "/v5.0.0/libpod/images/pull",
             post(|Query(q): Query<std::collections::HashMap<String, String>>| async move {
                 let r = q.get("reference").cloned().unwrap_or_default();
@@ -63,6 +79,10 @@ async fn images_containers_and_pulls() {
     assert!(p.image_labels("nope").await.unwrap().is_none());
     assert_eq!(p.container_status("wad-up").await.unwrap(), "running");
     assert_eq!(p.container_status("wad-gone").await.unwrap(), "missing");
+    assert_eq!(p.volume_mountpoint("wad-a-config").await.unwrap().as_deref(), Some("/vol/_data"));
+    assert_eq!(p.volume_mountpoint("nope").await.unwrap(), None);
+    assert_eq!(p.secret_value("github_token").await.unwrap().as_deref(), Some("ghp_x"));
+    assert_eq!(p.secret_value("nope").await.unwrap(), None);
     let mut lines = vec![];
     p.pull("ghcr.io/o/ok:1", |l| lines.push(l.to_string())).await.unwrap();
     assert_eq!(lines, ["Trying to pull", "Copying blob sha256:abc"]);

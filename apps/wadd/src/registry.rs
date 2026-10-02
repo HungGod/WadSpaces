@@ -194,6 +194,28 @@ impl Registry {
         self.backend.install_units(units).await.map(drop)
     }
 
+    /// Points a workspace at these projects: saved (workspaces.json), and
+    /// its unit rewritten. It takes effect at its next start.
+    pub async fn set_projects(&self, id: &str, projects: Vec<wad_proto::v1::MountedProject>) -> Result<(), String> {
+        let mut list = self.workspaces();
+        let ws = list.iter_mut().find(|w| w.id == id).ok_or_else(|| format!("no workspace {id:?}"))?;
+        ws.projects = projects;
+        self.save(&list)?;
+        self.load(list).await
+    }
+
+    /// The workspace list, as the Rust wadd's own (it wins over the Python
+    /// wadd's workspaces.yaml from then on).
+    fn save(&self, list: &[Workspace]) -> Result<(), String> {
+        let path = self.settings.state_dir.join("workspaces.json");
+        let tmp = path.with_extension("json.tmp");
+        let text = serde_json::to_string_pretty(list).map_err(|e| e.to_string())? + "\n";
+        std::fs::create_dir_all(&self.settings.state_dir)
+            .and_then(|_| std::fs::write(&tmp, text))
+            .and_then(|_| std::fs::rename(&tmp, &path))
+            .map_err(|e| format!("{}: {e}", path.display()))
+    }
+
     pub fn workspaces(&self) -> Vec<Workspace> {
         self.workspaces.lock().unwrap().clone()
     }

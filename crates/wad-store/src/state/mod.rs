@@ -44,85 +44,9 @@ fn s(v: &Value, k: &str) -> String {
 }
 
 /// `os.path.normpath(p) == p` for an absolute path.
-fn is_normal_abs(p: &str) -> bool {
-    p.starts_with('/')
-        && !p.ends_with('/')
-        && !p.contains("//")
-        && !p.split('/').skip(1).any(|seg| seg == "." || seg == "..")
-}
-
-fn text_ok(v: Option<&Value>, most: usize) -> Option<String> {
-    match v {
-        None | Some(Value::Null) => Some(String::new()),
-        Some(Value::String(t)) if t.chars().count() <= most && !t.contains('\n') => Some(t.clone()),
-        _ => None,
-    }
-}
-
 /// A project's source, if it's one wadd knows today (projects.py check_source).
 pub fn current_source(src: &Value) -> Option<ProjectSource> {
-    match src.get("kind").and_then(Value::as_str)? {
-        "git" => {
-            let url = src
-                .get("url")
-                .filter(|u| !u.is_null())
-                .map(|u| u.as_str().map(String::from).unwrap_or_else(|| u.to_string()))
-                .unwrap_or_default();
-            let url = url.trim().trim_end_matches('/').to_string();
-            if !wad_core::projects::is_github_url(&url) {
-                return None;
-            }
-            let git_ref = match src.get("ref").filter(|r| truthy(r)) {
-                Some(r) => {
-                    let r = r.as_str().map(String::from).unwrap_or_else(|| r.to_string());
-                    let ok = !r.is_empty()
-                        && r.len() <= 200
-                        && r.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-'))
-                        && !r.starts_with('-')
-                        && !r.contains("..");
-                    if !ok {
-                        return None;
-                    }
-                    Some(r)
-                }
-                None => None,
-            };
-            Some(ProjectSource::Git { url, git_ref })
-        }
-        "folder" => {
-            let mid = src.get("machineId").and_then(Value::as_str)?;
-            let mid_ok = (1..=128).contains(&mid.len())
-                && mid.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'));
-            let path = src.get("path").and_then(Value::as_str)?;
-            let path_ok = path != "/" && path.len() <= 4000 && is_normal_abs(path) && crate::legacy::host_path_ok(path);
-            let name = text_ok(src.get("machineName"), 200)?;
-            (mid_ok && path_ok).then(|| ProjectSource::Folder {
-                machine_id: mid.into(),
-                machine_name: name,
-                path: path.into(),
-            })
-        }
-        "drive" => {
-            let uuid = src.get("uuid").and_then(Value::as_str)?;
-            let uuid_ok = (1..=64).contains(&uuid.len()) && uuid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-            let fstype = text_ok(src.get("fstype"), 32)?;
-            let fstype_ok = fstype.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
-            let sub_raw = match src.get("subpath") {
-                None | Some(Value::Null) => String::new(),
-                Some(Value::String(t)) => t.clone(),
-                _ => return None,
-            };
-            let parts: Vec<&str> = sub_raw.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
-            if parts.contains(&"..") {
-                return None;
-            }
-            let subpath = parts.join("/");
-            let sub_ok = crate::legacy::host_path_ok(&subpath) && subpath.len() <= 4000;
-            let label = text_ok(src.get("label"), 200)?;
-            (uuid_ok && fstype_ok && sub_ok).then(|| ProjectSource::Drive { uuid: uuid.into(), label, fstype, subpath })
-        }
-        _ => None,
-    }
+    crate::projects::check_source(src).ok()
 }
 
 /// A stored project document as the API shows it.

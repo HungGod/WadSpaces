@@ -39,7 +39,7 @@ impl Bus {
                 Event::View(_) => l.view = Some(e.clone()),
                 Event::Carousel(_) => l.carousel = Some(e.clone()),
                 Event::Session(_) => l.session = Some(e.clone()),
-                Event::Notice { .. } => {}
+                Event::Notice { .. } | Event::Projects { .. } | Event::Launch(_) => {}
             }
         }
         let _ = self.tx.send(e);

@@ -9,7 +9,7 @@ The software that runs a WadSpaces machine, and the Wad Creator app used to desi
 | `legacy/wadd-py/` | wadd, the machine daemon, in Python. It is frozen while the Rust wadd is written (stage 2), then removed. |
 | `fixtures/quadlet/` | Unit files and workspace specs that every renderer must reproduce byte for byte (wadd's tests and the UI's generator tests read these). |
 | `apps/wadcreator/src-tauri/` | The machine app: Tauri around the same React UI. Its Rust side holds the commands the UI calls (`src/gen/bindings.ts` is generated from them). |
-| `crates/` | Shared Rust crates: `wad-proto` (types shared by wadd, the app and the UI), `wad-core` (designs, generators; also compiled to wasm for the UI), `wad-config`, `wad-store` (wadd's state files), `wad-podman`, `wad-systemd`, `wad-sway`, `wad-input` (the keyboard proxy), `wad-github` (device-flow sign-in), `wad-firebase` (Firestore writes made from Rust). |
+| `crates/` | Shared Rust crates: `wad-proto` (types shared by wadd, the app and the UI), `wad-core` (designs, generators; also compiled to wasm for the UI), `wad-config`, `wad-store` (wadd's state files), `wad-podman`, `wad-systemd`, `wad-sway`, `wad-input` (the keyboard proxy), `wad-git` (project clones and fast-forwards), `wad-github` (device-flow sign-in), `wad-firebase` (Firestore writes made from Rust). |
 | `apps/wadd/` | The Rust wadd (stage 2), not yet on the image. |
 | `apps/hud/` | The HUD: the buttons above every wadspace, and the switcher, Wi-Fi and power overlays. |
 
@@ -53,6 +53,8 @@ The Rust toolchain is pinned in `rust-toolchain.toml`. On Fedora the app also ne
 apps/wadd/dev/try.sh         # workspaces: cold and warm start, stop, restart, download progress
 apps/wadd/dev/try-view.sh    # the screen: a headless sway with the machine's rules and a real lean
                              # workspace's window: switching, Super+Tab, focus sessions
+apps/wadd/dev/try-projects.sh  # projects: a GitHub clone, a folder and a loop-device "stick",
+                               # launched together into a workspace
 sudo target/debug/wadd keys  # the keyboard proxy for 20 s (prints what Super chords would do)
 ```
 

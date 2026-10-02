@@ -16,8 +16,10 @@
 //! (legacy.rs reads it) becomes state, `<state_dir>/workspaces.json`, at the
 //! cutover (migrate.rs plans that).
 
+pub mod folders;
 pub mod legacy;
 pub mod migrate;
+pub mod projects;
 pub mod runs;
 pub mod state;
 

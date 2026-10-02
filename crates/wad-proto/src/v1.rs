@@ -58,6 +58,12 @@ pub enum Event {
     Carousel(Carousel),
     /// A session began, its clock started, its time ran out, or it ended.
     Session(Option<Session>),
+    /// Projects were saved or deleted here.
+    Projects {
+        ids: Vec<String>,
+    },
+    /// A launch moved on: the job, and its log lines since the last event.
+    Launch(LaunchLog),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
@@ -73,6 +79,8 @@ impl Event {
             Event::View(_) => "view",
             Event::Carousel(_) => "carousel",
             Event::Session(_) => "session",
+            Event::Projects { .. } => "projects",
+            Event::Launch(_) => "launch",
             Event::Notice { .. } => "notice",
         }
     }
@@ -329,4 +337,165 @@ pub struct WorkspaceState {
     pub download: Option<Download>,
     /// When the phase last changed (Unix seconds).
     pub since: f64,
+}
+
+/// GET /v1/browse: the folders in a folder (folder projects' picker).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Browse {
+    /// None: the list is the roots themselves. Inside a drive, relative to
+    /// its root ("" is the root).
+    pub path: Option<String>,
+    /// Where "up" goes; None at a root.
+    pub parent: Option<String>,
+    pub dirs: Vec<Dir>,
+    /// There were more than shown.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Dir {
+    pub name: String,
+    pub path: String,
+}
+
+/// A project folder's git state, from the refs already there (no fetch).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatus {
+    /// None: a detached HEAD.
+    pub branch: Option<String>,
+    /// Uncommitted changes, untracked files included.
+    pub dirty: bool,
+    pub ahead: u32,
+    pub behind: u32,
+    /// None: no upstream branch (or one that's gone).
+    pub upstream: Option<String>,
+}
+
+/// GET /v1/drives: a filesystem a drive project could be on (not the
+/// system's own disk).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Drive {
+    pub uuid: String,
+    pub label: String,
+    pub fstype: String,
+    pub size: u64,
+    /// Where it's mounted, if it is.
+    pub mountpoint: Option<String>,
+    pub removable: bool,
+    pub model: Option<String>,
+}
+
+/// GET /v1/projects/{id}/status: where its folder is, whether a launch can
+/// have it, who mounts it, and its git state (no fetch, no mounting).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectStatus {
+    pub exists_on_disk: bool,
+    pub path: Option<String>,
+    /// Workspaces whose unit mounts it.
+    pub mounted_in: Vec<String>,
+    /// None: not a git repository (or git can't tell).
+    pub git: Option<GitStatus>,
+    pub available: bool,
+    /// Why it isn't available.
+    pub reason: Option<String>,
+}
+
+/// DELETE /v1/projects/{id}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDeleted {
+    pub project: Project,
+    /// Its folder was removed too (?purge=true).
+    pub purged: bool,
+}
+
+/// POST /v1/launches: open a workspace with these projects.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchRequest {
+    pub workspace: String,
+    #[serde(default)]
+    pub projects: Vec<String>,
+    /// It may be stopped to change what it mounts (the UI asks first).
+    #[serde(default)]
+    pub restart: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum LaunchStatus {
+    Queued,
+    Running,
+    Done,
+    Error,
+    Cancelled,
+}
+
+impl LaunchStatus {
+    pub fn finished(self) -> bool {
+        matches!(self, Self::Done | Self::Error | Self::Cancelled)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PartState {
+    Waiting,
+    Working,
+    Done,
+    Error,
+}
+
+/// What a launch's first step is getting: the image, or a project.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchPart {
+    /// "image", or the project's id.
+    pub key: String,
+    /// "image" or "project".
+    pub kind: String,
+    pub name: String,
+    pub state: PartState,
+    /// 0..1, when known.
+    pub progress: Option<f64>,
+    pub message: Option<String>,
+}
+
+/// A launch: step 1 gets the image and the projects' folders at once, step
+/// 2 points the workspace at them and brings it up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Launch {
+    pub id: String,
+    pub ws_id: String,
+    pub name: String,
+    pub projects: Vec<String>,
+    pub restart: bool,
+    pub status: LaunchStatus,
+    /// 0..1
+    pub progress: f64,
+    pub phase: String,
+    pub error: Option<String>,
+    pub parts: Vec<LaunchPart>,
+    /// Unix seconds.
+    pub created: f64,
+    pub started: Option<f64>,
+    pub finished: Option<f64>,
+    /// Log lines so far.
+    pub line_count: u64,
+}
+
+/// GET /v1/launches/{id}?since=n, and launch events: the job, and its log
+/// from line `from`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchLog {
+    pub launch: Launch,
+    pub from: u64,
+    pub lines: Vec<String>,
 }

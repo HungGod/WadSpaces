@@ -182,7 +182,22 @@ impl Podman {
         Ok(())
     }
 
+    /// Where a named volume's files are on the host; None if there's no such volume.
+    pub async fn volume_mountpoint(&self, name: &str) -> Result<Option<String>, Error> {
+        let info =
+            self.get_json(&format!("inspect volume {name}"), &format!("/volumes/{}/json", segment(name))).await?;
+        Ok(info.and_then(|i| i.get("Mountpoint").and_then(Value::as_str).filter(|m| !m.is_empty()).map(String::from)))
+    }
+
     // ---------------------------------------------------------- secrets
+    /// A secret's value, for wadd's own use (git's token); never sent out.
+    /// None if there's no such secret.
+    pub async fn secret_value(&self, name: &str) -> Result<Option<String>, Error> {
+        let path = format!("/secrets/{}/json?showsecret=true", segment(name));
+        let info = self.get_json(&format!("read secret {name}"), &path).await?;
+        Ok(info.and_then(|i| i.get("SecretData").and_then(Value::as_str).map(String::from)))
+    }
+
     /// The names of podman's secrets.
     pub async fn secret_names(&self) -> Result<Vec<String>, Error> {
         let list = self.get_json("list secrets", "/secrets/json").await?.unwrap_or(Value::Null);

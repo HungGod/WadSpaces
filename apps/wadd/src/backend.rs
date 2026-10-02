@@ -40,6 +40,18 @@ pub trait Backend: Send + Sync + 'static {
     async fn workspace_of(&self, _container: &str) -> Option<String> {
         None
     }
+    /// An image's labels; None if it isn't here.
+    async fn image_labels(&self, _image: &str) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
+        Err("no podman".into())
+    }
+    /// Where a named volume's files are; None if there's no such volume.
+    async fn volume_mountpoint(&self, _name: &str) -> Option<String> {
+        None
+    }
+    /// The github_token secret (git's credentials for github.com).
+    async fn github_token(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The machine as wadd's config describes it: podman's socket, systemd (the
@@ -100,6 +112,9 @@ impl Backend for Offline {
     }
     async fn free_gb(&self) -> Option<f64> {
         None
+    }
+    async fn image_labels(&self, _: &str) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
+        Err(self.0.clone())
     }
 }
 
@@ -190,6 +205,30 @@ impl Backend for Real {
 
     fn rx_bytes(&self) -> u64 {
         pull::rx_bytes(std::path::Path::new("/sys/class/net"))
+    }
+
+    async fn image_labels(&self, image: &str) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
+        self.podman.image_labels(image).await.map_err(|e| e.to_string())
+    }
+
+    async fn volume_mountpoint(&self, name: &str) -> Option<String> {
+        match self.podman.volume_mountpoint(name).await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::info!("looking in volume {name}: {e}");
+                None
+            }
+        }
+    }
+
+    async fn github_token(&self) -> Option<String> {
+        match self.podman.secret_value("github_token").await {
+            Ok(v) => v.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
+            Err(e) => {
+                tracing::debug!("github_token from podman: {e}");
+                None
+            }
+        }
     }
 
     async fn workspace_of(&self, container: &str) -> Option<String> {
