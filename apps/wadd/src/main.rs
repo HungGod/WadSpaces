@@ -172,7 +172,10 @@ fn serve(user: bool, config: Option<PathBuf>, socket: Option<PathBuf>) -> ExitCo
                 Arc::new(backend::Offline(e))
             }
         };
-        let server = Server::new(&cfg, profile, listen, logs, backend)?;
+        let mut server = Server::new(&cfg, profile, listen, logs, backend)?;
+        let nm = wad_net::NetworkManager::system().await.inspect_err(|e| tracing::warn!("no NetworkManager: {e}")).ok();
+        let power = wad_systemd::Power::system().await.inspect_err(|e| tracing::warn!("no logind: {e}")).ok();
+        server.set_machine(nm, power);
         match &server.bound {
             Some(p) => tracing::info!("wadd {} listening on {}", env!("CARGO_PKG_VERSION"), p.display()),
             None => tracing::info!("wadd {} listening on the socket systemd passed", env!("CARGO_PKG_VERSION")),

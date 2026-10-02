@@ -676,7 +676,7 @@ impl Registry {
     /// Once podman answers (manager.py prefetch_loop): starts the autostart
     /// workspaces and, with Prefetch::All, downloads the other images while
     /// at least `min_free_gb` stays free. Failures are retried every `retry`.
-    // TODO(M8): wait for the network first, as the Python wadd did.
+    /// (The server waits for the network before it starts this.)
     pub async fn prefetch(self: Arc<Self>, mode: Prefetch, min_free_gb: u64, retry: Duration) {
         if mode == Prefetch::None {
             return;

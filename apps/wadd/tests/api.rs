@@ -313,3 +313,21 @@ async fn github_without_a_token() {
     assert!(body.contains("GitHub app settings"), "{body}");
     let _ = stop.send(());
 }
+
+#[tokio::test]
+async fn network_and_power_without_the_system_bus() {
+    let (_d, sock, stop) = start(true).await;
+    let (status, body) = get(&sock, "/v1/network").await;
+    assert_eq!(status, 200);
+    assert!(body.contains(r#""available":false"#), "{body}");
+    assert_eq!(get(&sock, "/v1/network/wifi").await.0, 503);
+    let (status, body) =
+        send(&sock, "POST", "/v1/network/wifi/connect", r#"{"ssid":"Home","password":"correct horse"}"#).await;
+    assert_eq!(status, 503, "{body}");
+    assert!(!body.contains("correct horse"), "{body}");
+    let (status, _) = send(&sock, "POST", "/v1/power", r#"{"action":"reboot"}"#).await;
+    assert_eq!(status, 503); // and nothing was asked of the real logind
+    let (status, _) = send(&sock, "POST", "/v1/power", r#"{"action":"explode"}"#).await;
+    assert_eq!(status, 422);
+    let _ = stop.send(());
+}

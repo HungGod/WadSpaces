@@ -19,12 +19,14 @@ struct Latest {
     carousel: Option<Event>,
     session: Option<Event>,
     cloud: Option<Event>,
+    network: Option<Event>,
     states: Vec<WorkspaceState>,
 }
 
 impl Bus {
     pub fn new(machine: MachineInfo) -> Self {
-        let latest = Latest { machine, view: None, carousel: None, session: None, cloud: None, states: vec![] };
+        let latest =
+            Latest { machine, view: None, carousel: None, session: None, cloud: None, network: None, states: vec![] };
         Self { tx: broadcast::channel(256).0, latest: Arc::new(Mutex::new(latest)) }
     }
 
@@ -41,6 +43,7 @@ impl Bus {
                 Event::Carousel(_) => l.carousel = Some(e.clone()),
                 Event::Session(_) => l.session = Some(e.clone()),
                 Event::Cloud(_) => l.cloud = Some(e.clone()),
+                Event::Network(_) => l.network = Some(e.clone()),
                 Event::Notice { .. }
                 | Event::Projects { .. }
                 | Event::Launch(_)
@@ -67,7 +70,7 @@ impl Bus {
         let rx = self.tx.subscribe();
         let l = self.latest.lock().unwrap();
         let mut now = vec![Event::Machine(l.machine.clone())];
-        now.extend([&l.view, &l.session, &l.carousel, &l.cloud].into_iter().flatten().cloned());
+        now.extend([&l.view, &l.session, &l.carousel, &l.cloud, &l.network].into_iter().flatten().cloned());
         now.extend(l.states.iter().cloned().map(Event::WorkspaceState));
         (now, rx)
     }

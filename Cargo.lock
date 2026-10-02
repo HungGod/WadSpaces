@@ -5589,6 +5589,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wad-net"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "zbus",
+]
+
+[[package]]
 name = "wad-podman"
 version = "0.1.0"
 dependencies = [
@@ -5645,6 +5657,7 @@ name = "wad-systemd"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "zbus",
@@ -5709,6 +5722,7 @@ dependencies = [
  "wad-git",
  "wad-github",
  "wad-input",
+ "wad-net",
  "wad-podman",
  "wad-proto",
  "wad-store",

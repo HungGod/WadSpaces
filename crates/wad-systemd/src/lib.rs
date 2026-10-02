@@ -5,6 +5,9 @@
 
 use std::time::Duration;
 
+mod power;
+pub use power::Power;
+
 use futures_util::StreamExt;
 use zbus::zvariant::OwnedObjectPath;
 

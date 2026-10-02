@@ -20,6 +20,7 @@ wad-systemd = { path = "crates/wad-systemd" }
 wad-sway = { path = "crates/wad-sway" }
 wad-input = { path = "crates/wad-input" }
 wad-git = { path = "crates/wad-git" }
+wad-net = { path = "crates/wad-net" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

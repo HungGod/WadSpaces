@@ -15,6 +15,7 @@ pub mod github;
 pub mod joblog;
 pub mod launches;
 pub mod logbuf;
+pub mod network;
 pub mod projects;
 pub mod pull;
 pub mod registry;
@@ -274,6 +275,8 @@ impl Server {
             )
         });
         let state = Arc::new(AppState {
+            network: network::Network::new(None, bus.clone()),
+            power: None,
             github,
             secrets,
             cloud,
@@ -299,6 +302,14 @@ impl Server {
             sway,
             keys: config.keys.clone(),
         })
+    }
+
+    /// The machine's network and power (NetworkManager and logind over the
+    /// system bus); before serving.
+    pub fn set_machine(&mut self, nm: Option<wad_net::NetworkManager>, power: Option<wad_systemd::Power>) {
+        let st = Arc::get_mut(&mut self.state).expect("set before serving");
+        st.network = network::Network::new(nm, st.bus.clone());
+        st.power = power;
     }
 
     /// The keyboard proxy, its actions handed to the view.
@@ -346,11 +357,19 @@ impl Server {
         tokio::spawn(placeholders(self.state.clone()));
         let relay = self.state.cloud.clone().map(|c| tokio::spawn(c.run()));
         let reconcile = registry.spawn_reconcile(self.reconcile_every);
+        let netwatch = tokio::spawn(self.state.network.clone().run());
         let (mode, min_free_gb) = self.prefetch;
-        let prefetch = tokio::spawn(registry.clone().prefetch(mode, min_free_gb, Duration::from_secs(300)));
+        let (net, reg) = (self.state.network.clone(), registry.clone());
+        let prefetch = tokio::spawn(async move {
+            if mode != wad_config::Prefetch::None {
+                net.wait_online().await;
+            }
+            reg.prefetch(mode, min_free_gb, Duration::from_secs(300)).await
+        });
         let app = api::router(self.state.clone()).into_make_service_with_connect_info::<Peer>();
         let res = axum::serve(self.listener, app).with_graceful_shutdown(shutdown).await;
         reconcile.abort();
+        netwatch.abort();
         prefetch.abort();
         if let Some(r) = relay {
             r.abort();

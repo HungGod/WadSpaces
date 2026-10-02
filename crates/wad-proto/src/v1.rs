@@ -70,6 +70,8 @@ pub enum Event {
     Cloud(CloudLink),
     /// A GitHub device sign-in moved on.
     Github(crate::github::SignIn),
+    /// The network changed (joined, left, connectivity).
+    Network(NetworkStatus),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
@@ -90,6 +92,7 @@ impl Event {
             Event::Build(_) => "build",
             Event::Cloud(_) => "cloud",
             Event::Github(_) => "github",
+            Event::Network(_) => "network",
             Event::Notice { .. } => "notice",
         }
     }
@@ -626,4 +629,61 @@ pub struct SecretsSynced {
     pub updated: Vec<String>,
     pub unchanged: Vec<String>,
     pub removed: Vec<String>,
+}
+
+/// GET /v1/network
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkStatus {
+    /// NetworkManager answers.
+    pub available: bool,
+    /// connected, connecting, disconnected, ...
+    pub state: String,
+    /// full | limited | portal | none | unknown
+    pub connectivity: String,
+    pub wifi_enabled: bool,
+    pub wifi_device: Option<String>,
+    /// The Wi-Fi network joined, and how strong it is (0..100).
+    pub ssid: Option<String>,
+    pub signal: Option<u8>,
+}
+
+/// GET /v1/network/wifi: a network in range.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WifiNetwork {
+    pub ssid: String,
+    pub signal: u8,
+    /// "WPA2", "WPA3", "WPA2 802.1X", "" (open), ...
+    pub security: String,
+    pub secure: bool,
+    /// Can be joined here (not enterprise or WEP).
+    pub supported: bool,
+    pub active: bool,
+    /// Saved: joins without its password.
+    pub known: bool,
+}
+
+/// POST /v1/network/wifi/connect
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WifiJoin {
+    pub ssid: String,
+    /// None: a saved network (its saved password), or an open one.
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PowerAction {
+    Poweroff,
+    Reboot,
+}
+
+/// POST /v1/power
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PowerRequest {
+    pub action: PowerAction,
 }

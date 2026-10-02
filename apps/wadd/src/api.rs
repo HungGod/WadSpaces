@@ -40,6 +40,9 @@ pub struct AppState {
     pub builds: Arc<crate::builds::Builds>,
     pub secrets: Arc<crate::secrets::Secrets>,
     pub github: Arc<crate::github::GithubService>,
+    pub network: Arc<crate::network::Network>,
+    /// Power off and restart (logind); None without the system bus.
+    pub power: Option<wad_systemd::Power>,
     /// The account link; None without cloud settings.
     pub cloud: Option<Arc<crate::cloud::CloudRelay>>,
     /// The keyboard proxy, while it runs.
@@ -144,6 +147,12 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/github", get(github).delete(github_sign_out))
         .route("/v1/github/device", post(github_device).delete(github_device_cancel))
         .route("/v1/github/repos", get(github_repos).post(github_repo_create))
+        .route("/v1/network", get(network))
+        .route("/v1/network/wifi", get(wifi))
+        .route("/v1/network/wifi/connect", post(wifi_connect))
+        .route("/v1/network/wifi/disconnect", post(wifi_disconnect))
+        .route("/v1/network/wifi/forget", post(wifi_forget))
+        .route("/v1/power", post(power))
         .route("/v1/secrets", get(secrets))
         .route("/v1/secrets/{name}", axum::routing::put(secret_put).delete(secret_delete))
         .route("/v1/library/{collection}", get(library))
@@ -545,6 +554,64 @@ async fn github_repo_create(
     Json(req): Json<wad_proto::github::NewRepo>,
 ) -> Result<(StatusCode, Json<Project>), Failure> {
     Ok((StatusCode::CREATED, Json(app.github.create_repo(&req).await?)))
+}
+
+async fn network(State(app): State<Arc<AppState>>) -> Json<wad_proto::v1::NetworkStatus> {
+    Json(app.network.status().await)
+}
+
+#[derive(Deserialize)]
+struct RescanQuery {
+    #[serde(default)]
+    rescan: bool,
+}
+
+/// The networks in range (?rescan=true looks again first).
+async fn wifi(
+    State(app): State<Arc<AppState>>,
+    Query(q): Query<RescanQuery>,
+) -> Result<Json<Vec<wad_proto::v1::WifiNetwork>>, Failure> {
+    Ok(Json(app.network.wifi(q.rescan).await?))
+}
+
+/// Joins a network; the password goes to NetworkManager over D-Bus only.
+async fn wifi_connect(
+    State(app): State<Arc<AppState>>,
+    Json(b): Json<wad_proto::v1::WifiJoin>,
+) -> Result<Json<wad_proto::v1::NetworkStatus>, Failure> {
+    Ok(Json(app.network.connect(&b.ssid, b.password.as_deref()).await?))
+}
+
+async fn wifi_disconnect(State(app): State<Arc<AppState>>) -> Result<Json<wad_proto::v1::NetworkStatus>, Failure> {
+    Ok(Json(app.network.disconnect().await?))
+}
+
+#[derive(Deserialize)]
+struct ForgetBody {
+    ssid: String,
+}
+
+async fn wifi_forget(State(app): State<Arc<AppState>>, Json(b): Json<ForgetBody>) -> Result<StatusCode, Failure> {
+    if app.network.forget(&b.ssid).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(Failure(ApiError::new(ErrorCode::NotFound, format!("no saved network {:?}", b.ssid))))
+    }
+}
+
+/// Powers the machine off or restarts it.
+async fn power(
+    State(app): State<Arc<AppState>>,
+    Json(b): Json<wad_proto::v1::PowerRequest>,
+) -> Result<StatusCode, Failure> {
+    let p = app.power.as_ref().ok_or_else(|| Failure(ApiError::new(ErrorCode::Offline, "logind isn't reachable")))?;
+    tracing::info!("{:?} asked for", b.action);
+    let r = match b.action {
+        wad_proto::v1::PowerAction::Poweroff => p.power_off().await,
+        wad_proto::v1::PowerAction::Reboot => p.reboot().await,
+    };
+    r.map_err(|e| Failure(ApiError::new(ErrorCode::Internal, e.to_string())))?;
+    Ok(StatusCode::ACCEPTED)
 }
 
 /// The secrets' names and where they came from; never their values.

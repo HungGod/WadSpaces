@@ -9,7 +9,7 @@ The software that runs a WadSpaces machine, and the Wad Creator app used to desi
 | `legacy/wadd-py/` | wadd, the machine daemon, in Python. It is frozen while the Rust wadd is written (stage 2), then removed. |
 | `fixtures/quadlet/` | Unit files and workspace specs that every renderer must reproduce byte for byte (wadd's tests and the UI's generator tests read these). |
 | `apps/wadcreator/src-tauri/` | The machine app: Tauri around the same React UI. Its Rust side holds the commands the UI calls (`src/gen/bindings.ts` is generated from them). |
-| `crates/` | Shared Rust crates: `wad-proto` (types shared by wadd, the app and the UI), `wad-core` (designs, generators; also compiled to wasm for the UI), `wad-config`, `wad-store` (wadd's state files), `wad-podman`, `wad-systemd`, `wad-sway`, `wad-input` (the keyboard proxy), `wad-git` (project clones and fast-forwards), `wad-github` (device-flow sign-in), `wad-firebase` (Firestore writes made from Rust). |
+| `crates/` | Shared Rust crates: `wad-proto` (types shared by wadd, the app and the UI), `wad-core` (designs, generators; also compiled to wasm for the UI), `wad-config`, `wad-store` (wadd's state files), `wad-podman`, `wad-systemd`, `wad-sway`, `wad-input` (the keyboard proxy), `wad-git` (project clones and fast-forwards), `wad-net` (Wi-Fi through NetworkManager), `wad-github` (device-flow sign-in), `wad-firebase` (Firestore writes made from Rust). |
 | `apps/wadd/` | The Rust wadd (stage 2), not yet on the image. |
 | `apps/hud/` | The HUD: the buttons above every wadspace, and the switcher, Wi-Fi and power overlays. |
 
@@ -61,6 +61,8 @@ apps/wadd/dev/try-cloud.sh   # the account link, against the Firebase emulators 
                              # enrollMachine): link, heartbeat, commands, project and secret sync
 apps/wadd/dev/try-github.sh  # GitHub for real: whose token podman has, and your repos
                              # (--sign-in: the device sign-in first; it replaces that token)
+apps/wadd/dev/try-network.sh # NetworkManager for real: status and networks in range
+                             # (--join SSID / --forget SSID change things)
 sudo target/debug/wadd keys  # the keyboard proxy for 20 s (prints what Super chords would do)
 ```
 
