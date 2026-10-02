@@ -5,12 +5,11 @@
 //! which the owner's other machines sync), never to JavaScript.
 
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio::sync::watch;
 use wad_firebase::Firestore;
 use wad_github::{AppConfig, DeviceStart, Github, Token};
@@ -25,8 +24,6 @@ pub struct GithubState {
     flow: Mutex<Option<DeviceStart>>,
     /// Bumped to stop a `github_device_wait` in progress.
     cancel: watch::Sender<u64>,
-    /// Chromium on GitHub's sign-in page, when the user signs in on this machine.
-    browser: Mutex<Option<Child>>,
 }
 
 impl GithubState {
@@ -37,56 +34,8 @@ impl GithubState {
             http,
             flow: Mutex::default(),
             cancel: watch::channel(0).0,
-            browser: Mutex::default(),
         }
     }
-
-    /// Closes the sign-in browser, if it's open.
-    fn close_browser(&self) {
-        if let Some(mut child) = self.browser.lock().unwrap().take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
-
-impl Drop for GithubState {
-    fn drop(&mut self) {
-        self.close_browser();
-    }
-}
-
-/// Chromium, as an app window on `url`, with a throwaway profile (nothing is
-/// remembered after the sign-in). On the machine, sway shows it over Wad
-/// Creator; closing it (or the sign-in finishing) brings the app back.
-fn open_browser(url: &str) -> Result<Child, ApiError> {
-    let profile = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("wadcreator-github");
-    let _ = std::fs::remove_dir_all(&profile);
-    let args = [
-        format!("--app={url}"),
-        format!("--user-data-dir={}", profile.display()),
-        "--ozone-platform-hint=auto".into(),
-        "--no-first-run".into(),
-        "--no-default-browser-check".into(),
-        "--noerrdialogs".into(),
-        "--disable-infobars".into(),
-        "--disable-features=TranslateUI".into(),
-        "--password-store=basic".into(),
-    ];
-    let mut last = None;
-    for bin in ["chromium-browser", "chromium"] {
-        match Command::new(bin).args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
-            Ok(child) => return Ok(child),
-            Err(e) => last = Some(e),
-        }
-    }
-    Err(ApiError::new(
-        ErrorCode::Internal,
-        format!("couldn't start Chromium: {}", last.map(|e| e.to_string()).unwrap_or_default()),
-    ))
 }
 
 /// What the sign-in screen shows.
@@ -149,6 +98,7 @@ pub async fn github_device_start(state: State<'_, GithubState>) -> Result<Device
 #[tauri::command]
 #[specta::specta]
 pub async fn github_device_wait(
+    handle: AppHandle,
     state: State<'_, GithubState>,
     wadd: State<'_, Wadd>,
     account: Option<AccountRef>,
@@ -163,13 +113,13 @@ pub async fn github_device_wait(
     let mut cancel = state.cancel.subscribe();
     cancel.mark_unchanged();
     let token = tokio::select! {
-        r = state.gh.device_wait(&app, &start) => r.inspect_err(|_| state.close_browser())?,
+        r = state.gh.device_wait(&app, &start) => r.inspect_err(|_| crate::window::close_github(&handle))?,
         _ = cancel.changed() => {
-            state.close_browser();
+            crate::window::close_github(&handle);
             return Err(ApiError::new(ErrorCode::Cancelled, "GitHub sign-in cancelled"));
         }
     };
-    state.close_browser();
+    crate::window::close_github(&handle);
     state.flow.lock().unwrap().take();
     let account_info = state.gh.user(&token).await?;
     wadd.put_secret("github_token", token.expose())
@@ -194,12 +144,12 @@ async fn save_to_account(http: &reqwest::Client, a: &AccountRef, token: &Token) 
     fs.set_strings(&a.id_token, &format!("users/{}/secrets/github_token", a.uid), &[("value", token.expose())]).await
 }
 
-/// Opens GitHub's code page on this machine (Chromium), for signing in
-/// without a phone. The page copies nothing: the UI puts the code on the
-/// clipboard first, to paste there.
+/// Opens GitHub's code page in a window over the app, for signing in without
+/// a phone. The page copies nothing: the UI puts the code on the clipboard
+/// first, to paste there. The window closes when the sign-in ends.
 #[tauri::command]
 #[specta::specta]
-pub fn github_open_browser(state: State<'_, GithubState>) -> Result<(), ApiError> {
+pub fn github_open_browser(app: AppHandle, state: State<'_, GithubState>) -> Result<(), ApiError> {
     let url = state
         .flow
         .lock()
@@ -207,20 +157,21 @@ pub fn github_open_browser(state: State<'_, GithubState>) -> Result<(), ApiError
         .as_ref()
         .map(|f| f.code.verification_uri.clone())
         .ok_or_else(|| ApiError::new(ErrorCode::BadRequest, "no GitHub sign-in in progress"))?;
-    if !url.starts_with("https://github.com/") {
+    let parsed = tauri::Url::parse(&url).ok().filter(|u| u.scheme() == "https" && u.host_str() == Some("github.com"));
+    let Some(parsed) = parsed else {
         return Err(ApiError::new(ErrorCode::Upstream, format!("unexpected sign-in address {url}")));
-    }
-    state.close_browser();
-    *state.browser.lock().unwrap() = Some(open_browser(&url)?);
-    Ok(())
+    };
+    crate::window::open_github(&app, parsed)
+        .map(drop)
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("couldn't open GitHub's page: {e}")))
 }
 
 /// Stops waiting for a sign-in.
 #[tauri::command]
 #[specta::specta]
-pub fn github_device_cancel(state: State<'_, GithubState>) {
+pub fn github_device_cancel(app: AppHandle, state: State<'_, GithubState>) {
     state.flow.lock().unwrap().take();
-    state.close_browser();
+    crate::window::close_github(&app);
     state.cancel.send_modify(|n| *n += 1);
 }
 

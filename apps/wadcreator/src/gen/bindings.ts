@@ -22,9 +22,9 @@ export const commands = {
 	/**  Stops waiting for a sign-in. */
 	githubDeviceCancel: () => __TAURI_INVOKE<void>("github_device_cancel"),
 	/**
-	 *  Opens GitHub's code page on this machine (Chromium), for signing in
-	 *  without a phone. The page copies nothing: the UI puts the code on the
-	 *  clipboard first, to paste there.
+	 *  Opens GitHub's code page in a window over the app, for signing in without
+	 *  a phone. The page copies nothing: the UI puts the code on the clipboard
+	 *  first, to paste there. The window closes when the sign-in ends.
 	 */
 	githubOpenBrowser: () => __TAURI_INVOKE<null>("github_open_browser"),
 	/**  Tells the HUD which theme the app shows. */

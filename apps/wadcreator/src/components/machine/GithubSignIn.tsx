@@ -100,7 +100,7 @@ export function GithubSignIn({ onDone }: { onDone?: (login: string) => void }) {
 
   const { code, qrSvg } = state.prompt;
   const left = Math.max(0, Math.round((state.expiresAt - now) / 1000));
-  // GitHub's page in Chromium, over the app; the code goes on the clipboard
+  // GitHub's page in a window over the app; the code goes on the clipboard
   // first (during the click, as WebKit wants) to paste there.
   const signInHere = async () => {
     try {

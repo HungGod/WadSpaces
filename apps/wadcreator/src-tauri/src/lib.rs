@@ -65,6 +65,12 @@ fn run(kiosk: bool) {
             let typed = commands.invoke_handler();
             let raw: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![wadd::wadd_build_context];
             move |invoke| match invoke.message.command() {
+                // Only the app's own window: never a web page (the GitHub window).
+                _ if invoke.message.webview_ref().label() != window::MAIN => {
+                    tracing::warn!(window = invoke.message.webview_ref().label(), "refused a command");
+                    invoke.resolver.reject("not allowed");
+                    true
+                }
                 "wadd_build_context" => raw(invoke),
                 _ => typed(invoke),
             }

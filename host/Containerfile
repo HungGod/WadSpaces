@@ -1,11 +1,12 @@
 # WadSpaces host OS: Fedora bootc -> greetd -> sway -> Wad Creator (Tauri),
-# plus wadd (the workspace switcher). Chromium stays for viewing other
-# machines' streams. Build from the repo root:
+# plus wadd (the workspace switcher). No browser: what the machine shows of
+# the web (GitHub's sign-in, later other machines' streams) opens in Wad
+# Creator's own webview windows. Build from the repo root:
 #   host/build.sh image        (or: podman build -f host/Containerfile -t localhost/wadspaces-host .)
 FROM quay.io/fedora/fedora-bootc:43
 
 RUN dnf -y install \
-      sway greetd chromium podman \
+      sway greetd podman \
       webkit2gtk4.1 librsvg2 shared-mime-info \
       python3 python3-fastapi python3-uvicorn python3-websockets python3-pyyaml \
       python3-evdev python3-httpx \
@@ -56,7 +57,7 @@ RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd /usr/bin/wadcreator && \
     find /usr/lib/wadspaces/secrets -type d -exec chmod 700 {} + && \
     find /usr/lib/wadspaces/secrets -type f -exec chmod 600 {} + && \
     chmod 644 /usr/share/wadspaces/ssh/* && \
-    for b in dbus-run-session sway chromium-browser curl nmcli skopeo bootc tailscale; do \
+    for b in dbus-run-session sway curl nmcli skopeo bootc tailscale; do \
       command -v "$b" > /dev/null || { echo "missing $b" >&2; exit 1; }; \
     done && \
     ls /usr/lib/firmware/mrvl/pcie8897_uapsta.bin* /usr/lib64/libgtk4-layer-shell.so.0 > /dev/null && \

@@ -9,7 +9,6 @@ daemon:
   port: 8080
   backend: systemd
   podman_socket: /run/podman/podman.sock
-  cdp_url: http://127.0.0.1:9222
   quadlet_dir: /etc/containers/systemd
   # wadd grabs the keyboards: Super+Tab switches, Super+1..9 jump, Super+0 or
   # Super+Space bring back Wad Creator, and the `block` chords never reach
