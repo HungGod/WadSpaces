@@ -118,14 +118,19 @@ def test_recover_kiosk_returns_to_the_shell(mgr):
     assert len(mgr.kiosk.history) == 2
 
 
-def test_carousel_is_home_only_before_anything_is_picked(mgr):
+def test_carousel_without_a_session_is_home_and_what_runs(mgr):
     async def go():
-        await mgr.switch("a")
-        await settle(mgr)
         assert [i["view"] for i in mgr.carousel_items()] == ["launcher"]
         mgr.carousel_step(1)
         assert mgr.carousel is None  # nothing to switch between
+        await mgr.switch("a")  # Wad Creator opened it
+        await settle(mgr)
+        assert [i["view"] for i in mgr.carousel_items()] == ["workspace:a", "launcher"]
+        mgr.carousel_step(1)
+        assert mgr.carousel["index"] == 1  # back to Wad Creator
+        await mgr.carousel_commit()
     run(go())
+    assert mgr.view == "launcher"
 
 
 def test_carousel_starts_on_the_previous_view_and_commits(mgr):
@@ -377,6 +382,7 @@ def test_session_narrows_the_carousel_and_locks_home(mgr3):
             await mgr.navigate("http://localhost:8081/")
         with pytest.raises(manager_mod.SessionLocked):
             mgr.end_session()
+        assert mgr.session_locked
         await mgr.on_hotkey("launcher")  # swallowed, not raised
         assert mgr.view == "workspace:b"
         mgr.expire_session()
@@ -384,8 +390,22 @@ def test_session_narrows_the_carousel_and_locks_home(mgr3):
         await mgr.show_launcher()  # allowed now; the picks stay until a new session
         assert mgr.view == "launcher" and mgr.session is not None
         mgr.end_session()
-        assert mgr.session is None and carousel_views(mgr) == ["launcher"]
+        # No session: Home and whatever is still running.
+        assert mgr.session is None and sorted(carousel_views(mgr)) == ["launcher", "workspace:a", "workspace:b"]
     run(go())
+
+
+def test_a_focus_session_can_be_ended_early_when_asked(mgr3):
+    async def go():
+        await mgr3.session_begin(["a"], 25)
+        await mgr3.switch("a")
+        await settle(mgr3)
+        assert mgr3.session_locked
+        mgr3.end_session(force=True)
+        assert mgr3.session is None and not mgr3.session_locked
+        await mgr3.show_launcher()
+    run(go())
+    assert mgr3.view == "launcher"
 
 
 def test_skipping_focus_keeps_home_in_reach(mgr3):
@@ -549,7 +569,7 @@ def test_native_window_that_never_comes_is_an_error(native):
     assert native.states["n"].phase == "error" and "did not open a window" in native.states["n"].error
 
 
-def test_carousel_over_a_native_window_brings_the_shell_forward(native):
+def test_carousel_over_a_native_window_leaves_it_on_screen(native):
     async def go():
         native.display.windows.add("n")
         await native.session_begin(["n", "s"], None)
@@ -562,7 +582,7 @@ def test_carousel_over_a_native_window_brings_the_shell_forward(native):
         native.display.calls.clear()
         native.carousel_step(1)
         await asyncio.sleep(0)
-        assert native.display.calls == ["shell"]  # the overlay is drawn by the shell
+        assert native.display.calls == []  # the HUD draws the switcher over it
         native.carousel_cancel()
         await asyncio.sleep(0)
         assert native.display.calls[-1] == "native:n"  # back where it was

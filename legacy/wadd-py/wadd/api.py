@@ -62,6 +62,10 @@ class SessionBody(BaseModel):
     minutes: int | None = None  # None: focus mode skipped
 
 
+class SessionEndBody(BaseModel):
+    force: bool = False  # end a focus session early
+
+
 class HudBody(BaseModel):
     panel: str  # wifi | power
 
@@ -242,10 +246,11 @@ def create_app(manager: WorkspaceManager, background: list | None = None, cloud=
         return {"ok": True}
 
     @app.post("/api/session/end", dependencies=mutate)
-    async def end_session():
-        """Home's "New session": back to picking. Refused during focus time."""
+    async def end_session(body: SessionEndBody | None = None):
+        """Back to picking. Refused during focus time unless {"force": true}
+        (the user chose to end it early)."""
         try:
-            manager.end_session()
+            manager.end_session(force=bool(body and body.force))
         except SessionLocked as e:
             raise HTTPException(409, str(e))
         return {"ok": True}

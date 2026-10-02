@@ -599,12 +599,17 @@ class WorkspaceManager:
     # while a workspace frame is on screen. Items are most recently used
     # first, so the first Tab lands on the view you came from.
     def carousel_items(self) -> list[dict]:
-        # Only what was picked on Home takes part. Before any pick that is
-        # Home alone; during a focus session only the picks, with Home joining
-        # once the time is up; a free session has the picks and Home.
-        home = {"view": "launcher", "name": "Home", "icon": None, "running": True}
+        # During a session only its picks take part: a focus session's alone,
+        # with Home (Wad Creator) joining once the time is up; a free
+        # session's with Home. Without a session (Wad Creator opens wadspaces
+        # one at a time), Home and every workspace that's running.
+        home = {"view": "launcher", "name": "Wad Creator", "icon": None, "running": True}
         entries: dict[str, dict] = {} if self.session_locked else {"launcher": home}
-        picked = set(self.session_workspaces())
+        if self.session:
+            picked = set(self.session_workspaces())
+        else:
+            picked = {ws.id for ws in self.cfg.enabled_workspaces
+                      if self.states[ws.id].container == RUNNING or self.states[ws.id].phase == READY}
         for ws in self.cfg.enabled_workspaces:
             if ws.id not in picked:
                 continue
@@ -631,10 +636,8 @@ class WorkspaceManager:
             items = self.carousel_items()
             if len(items) < 2:
                 return
+            # The HUD draws the switcher above whatever is on screen.
             self.carousel = {"open": True, "items": items, "index": 1 if direction > 0 else len(items) - 1}
-            # The switcher is drawn by the shell: bring it over a native window.
-            if self._native_id(self.view):
-                self._spawn(self.display.show_shell())
         else:
             n = len(self.carousel["items"])
             self.carousel["index"] = (self.carousel["index"] + direction) % n
@@ -792,10 +795,14 @@ class WorkspaceManager:
         self.publish()
         self.bus.publish({"type": "notice", "data": {"text": "Time's up — Home is back in Super+Tab"}})
 
-    def end_session(self) -> None:
-        """Back to picking (Home's "New session"). Not during focus time."""
-        if self.session_locked:
+    def end_session(self, force: bool = False) -> None:
+        """Back to picking (Home's "New session"). Not during focus time,
+        unless `force`: the user chose to end it early (Wad Creator asks after
+        a restart mid-focus)."""
+        if self.session_locked and not force:
             raise SessionLocked()
+        if self.session_locked:
+            log.info("focus session ended early")
         if self._session_task and not self._session_task.done():
             self._session_task.cancel()
         self.session = None

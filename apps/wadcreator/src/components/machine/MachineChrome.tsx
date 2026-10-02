@@ -1,35 +1,88 @@
 // What the machine app draws for wadd, now that it's the shell (the window on
-// sway's "shell" workspace): the HUD's Wi-Fi and power menus, the Super+Tab
-// switcher, wadd's notices, and which wadspace is starting.
+// sway's "shell" workspace): the Wi-Fi menu the HUD asks for, the sidebar's
+// menus, wadd's notices, which wadspace is starting, and (after a restart
+// mid-focus) whether to go back to the focus session. The Super+Tab switcher
+// and the power menu are drawn by the HUD itself (host/.../hud), above
+// whatever is on screen.
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Loader2, Power, Wifi } from "lucide-react";
-import clsx from "clsx";
+import { Loader2, Power, Timer, Wifi } from "lucide-react";
 import { useApp } from "@/lib/store";
-import { wadd } from "@/lib/wadd";
-import { Modal } from "../ui";
+import { wadd, type Session } from "@/lib/wadd";
+import { Button, Modal } from "../ui";
 import { GithubSignInDialog } from "./GithubSignIn";
 import { onMachinePanel, type Panel } from "./panels";
 import { PowerPanel } from "./PowerPanel";
 import { useWaddEvent, useWaddState } from "./useWadd";
 import { WifiPanel } from "./WifiPanel";
 
-interface CarouselItem {
-  view: string;
-  name: string;
-  running: boolean;
-}
-interface Carousel {
-  open: boolean;
-  items?: CarouselItem[];
-  index?: number;
+
+const focusLeft = (s: Session) => {
+  if (s.ends_at == null) return `${s.minutes ?? 25} minutes, from when you open it`;
+  const m = Math.max(1, Math.ceil(((s.remaining_s ?? 0) as number) / 60));
+  return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min left` : `${m} min left`;
+};
+
+/** The machine started (or the app restarted) in the middle of a focus
+ *  session: go back to it, or end it early. Asked once per start. */
+function FocusResume() {
+  const snap = useWaddState();
+  const [asked, setAsked] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const toast = useApp((s) => s.toast);
+
+  useEffect(() => {
+    if (!snap || asked) return;
+    setAsked(true);
+    const s = snap.session;
+    if (s && s.mode === "focus" && !s.expired) setOpen(true);
+  }, [snap, asked]);
+
+  const s = snap?.session;
+  if (!s) return null;
+  const names = s.workspaces.map((id) => snap!.workspaces.find((w) => w.id === id)?.name ?? id);
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await fn();
+      setOpen(false);
+    } catch (e) {
+      toast({ title: "Couldn't do that", body: (e as Error).message, tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open={open}
+      onClose={() => {}}
+      dismissable={false}
+      width={460}
+      title={
+        <span className="flex items-center gap-2">
+          <Timer className="size-5 text-accent" /> You're in a focus session
+        </span>
+      }
+      subtitle={`${names.join(", ")} · ${focusLeft(s)}`}
+    >
+      <p className="text-sm text-muted">The machine restarted while it was running. Pick up where you were, or end it now.</p>
+      <div className="mt-6 flex gap-2">
+        <Button variant="primary" className="flex-1" disabled={busy} onClick={() => act(() => wadd.action(s.workspaces[0], "switch"))}>
+          Back to focus
+        </Button>
+        <Button variant="danger" disabled={busy} onClick={() => act(() => wadd.endSession(true))}>
+          End it early
+        </Button>
+      </div>
+    </Modal>
+  );
 }
 
 export function MachineChrome() {
   const snap = useWaddState();
   const toast = useApp((s) => s.toast);
   const [panel, setPanel] = useState<{ which: Panel; fromHud: boolean } | null>(null);
-  const [carousel, setCarousel] = useState<Carousel>({ open: false });
 
   useEffect(() => onMachinePanel((which) => setPanel({ which, fromHud: false })), []);
 
@@ -37,7 +90,6 @@ export function MachineChrome() {
     useCallback(
       (event: string, data: unknown) => {
         if (event === "panel") setPanel({ which: (data as { panel: Panel }).panel, fromHud: true });
-        else if (event === "carousel") setCarousel(data as Carousel);
         else if (event === "notice") toast({ title: (data as { text: string }).text });
       },
       [toast],
@@ -78,33 +130,8 @@ export function MachineChrome() {
         <PowerPanel />
       </Modal>
       <GithubSignInDialog open={panel?.which === "github"} onClose={close} />
+      <FocusResume />
 
-      <AnimatePresence>
-        {carousel.open && carousel.items && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] grid place-items-center bg-black/60 backdrop-blur-md"
-          >
-            <div className="flex max-w-[90vw] gap-4 overflow-hidden rounded-3xl bg-bg-2/90 p-6 ring-1 ring-line-strong">
-              {carousel.items.map((it, i) => (
-                <div
-                  key={it.view}
-                  className={clsx(
-                    "flex w-36 flex-col items-center gap-3 rounded-2xl p-4 transition",
-                    i === carousel.index ? "bg-accent-soft ring-2 ring-accent" : "opacity-70",
-                  )}
-                >
-                  <span className="grid size-16 place-items-center rounded-2xl bg-surface-3 font-display text-2xl font-bold">{it.name.slice(0, 1).toUpperCase()}</span>
-                  <span className="w-full truncate text-center text-sm font-medium">{it.name}</span>
-                  {!it.running && <span className="text-[11px] text-faint">not running</span>}
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {pending && (

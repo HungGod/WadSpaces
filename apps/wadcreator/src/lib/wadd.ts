@@ -316,6 +316,8 @@ export const wadd = {
   launcher: () => call("POST", "/api/launcher"),
   /** Start a focus session: the machine locks to these workspaces until time's up. */
   session: (workspaces: string[], minutes: number) => call<Session>("POST", "/api/session", { workspaces, minutes }),
+  /** End the session; `force` ends a focus session before its time is up. */
+  endSession: (force = false) => call<{ ok: boolean }>("POST", "/api/session/end", force ? { force: true } : undefined),
   enroll: (code: string) => call<{ ok: boolean; machineId: string }>("POST", "/api/enroll", { code }),
   create: (spec: WaddSpec) => call<WaddSpec>("POST", "/api/workspaces", spec),
   update: (id: string, spec: WaddSpec) =>

@@ -1,21 +1,31 @@
 #!/usr/bin/python3
-"""The Wi-Fi / power / focus-timer buttons, floating above everything.
+"""What floats above every window on a WadSpaces machine: the Home / Wi-Fi /
+power buttons, the focus timer, the power menu and the Super+Tab switcher.
 
-The shell page draws them too, but a native workspace is its own window on
-top of the shell, so here they are a wlr-layer-shell "overlay" surface, which
-sway always stacks above normal and fullscreen windows. Anchored bottom-right,
-never takes the keyboard.
+They are wlr-layer-shell "overlay" surfaces, which sway stacks above normal
+and fullscreen windows, so they show over whatever wadspace is on screen
+without switching away from it. None of them takes the keyboard.
 
-It follows wadd's /api/status. A click asks wadd to bring the shell forward and
-open that menu there (POST /api/hud {"panel": ...}), since the menus live in
-the shell.
+- Buttons, anchored bottom-right: Home brings back Wad Creator (what Super+0
+  does), Wi-Fi opens Wad Creator's Wi-Fi menu (POST /api/hud), power opens
+  the power menu here. During a focus session they give way to a timer icon
+  (hover or click it for the time left).
+- Power menu: a dimmed screen with Restart / Shut down / Cancel.
+- Switcher: wadd's `carousel` events (Super+Tab, wadd/manager.py).
+
+It follows wadd's event stream (/api/events), reconnecting if wadd restarts.
 
 gtk4-layer-shell has to be loaded before libwayland, so this re-executes itself
-with it in LD_PRELOAD (the documented way for Python).
+with it in LD_PRELOAD (the documented way for Python). Without the library
+(developing on a desktop) the surfaces are ordinary windows.
+
+WADSPACES_HUD_SNAPSHOT=<dir> renders each surface to a PNG there and exits
+(for checking the look without a machine).
 """
 import json
 import os
 import sys
+import threading
 import time
 import urllib.request
 
@@ -27,15 +37,19 @@ if os.path.exists(LIB) and LIB not in os.environ.get("LD_PRELOAD", ""):
 import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Gtk4LayerShell", "1.0")
-from gi.repository import Gdk, GLib, Gtk  # noqa: E402
-from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+
+try:
+    gi.require_version("Gtk4LayerShell", "1.0")
+    from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
+except (ValueError, ImportError):
+    LayerShell = None
 
 WADD = os.environ.get("WADD_URL", "http://127.0.0.1:8080")
+SNAPSHOT = os.environ.get("WADSPACES_HUD_SNAPSHOT")
 
 CSS = b"""
 window { background: transparent; }
-.hud { padding: 0; }
 .pill {
   background: #141422; color: #ecebf5; border: 1px solid #26263a;
   border-radius: 999px; padding: 4px 12px; min-height: 0;
@@ -44,101 +58,342 @@ window { background: transparent; }
 .pill:hover { border-color: #3a3a58; }
 .pill.offline { color: #e8c36a; border-color: #5a4a26; }
 .pill.done { color: #8fd18a; border-color: #8fd18a; }
-.timer { background: #141422; }
+.pill.focus { color: #c6ff1f; border-color: #4a5a1a; }
+
+.dim { background: rgba(5, 3, 12, 0.62); border: none; border-radius: 0; }
+.card {
+  background: #120d1f; color: #ecebf5; border: 1px solid #2c2440;
+  border-radius: 24px; padding: 22px;
+}
+.card .title { font: 600 18px "Noto Sans", sans-serif; margin-bottom: 4px; }
+.card .sub { color: #9a93b0; font: 13px "Noto Sans", sans-serif; margin-bottom: 14px; }
+.menu-button {
+  background: #1d1730; color: #ecebf5; border: 1px solid #2c2440; border-radius: 14px;
+  padding: 12px 18px; font: 500 15px "Noto Sans", sans-serif; min-width: 220px;
+}
+.menu-button:hover { background: #261e3d; }
+.menu-button.danger { color: #ff7a9c; border-color: #4a2236; }
+.menu-button.quiet { background: transparent; border-color: transparent; color: #9a93b0; }
+
+.switcher { background: rgba(18, 13, 31, 0.94); border: 1px solid #2c2440; border-radius: 28px; padding: 18px; }
+.item { border-radius: 18px; padding: 14px; min-width: 128px; }
+.item.selected { background: rgba(198, 255, 31, 0.14); border: 2px solid #c6ff1f; }
+.item .icon { background: #261e3d; border-radius: 16px; min-width: 64px; min-height: 64px;
+  font: 700 26px "Noto Sans", sans-serif; color: #ecebf5; }
+.item .name { color: #ecebf5; font: 500 13px "Noto Sans", sans-serif; margin-top: 8px; }
+.item .state { color: #6f6888; font: 11px "Noto Sans", sans-serif; }
 """
 
 
-def fetch(path):
-    with urllib.request.urlopen(WADD + path, timeout=1.5) as r:
-        return json.loads(r.read())
-
-
-def post(path, body):
-    req = urllib.request.Request(WADD + path, data=json.dumps(body).encode(), method="POST",
+# ------------------------------------------------------------------ wadd
+def post(path, body=None):
+    data = json.dumps(body or {}).encode()
+    req = urllib.request.Request(WADD + path, data=data, method="POST",
                                  headers={"Content-Type": "application/json"})
     try:
-        urllib.request.urlopen(req, timeout=3).close()
+        urllib.request.urlopen(req, timeout=5).close()
     except OSError as e:
         print(f"hud: {path}: {e}", file=sys.stderr)
 
 
+def post_async(path, body=None):
+    threading.Thread(target=post, args=(path, body), daemon=True).start()
+
+
+def follow_events(on_event):
+    """wadd's server-sent events, for as long as the HUD runs: on_event(name,
+    data) on the GTK main loop. Reconnects after a drop."""
+    def run():
+        while True:
+            try:
+                with urllib.request.urlopen(WADD + "/api/events", timeout=60) as r:
+                    name, data = None, []
+                    for raw in r:
+                        line = raw.decode("utf-8", "replace").rstrip("\r\n")
+                        if line.startswith("event:"):
+                            name = line[6:].strip()
+                        elif line.startswith("data:"):
+                            data.append(line[5:].lstrip())
+                        elif not line and data:
+                            try:
+                                payload = json.loads("\n".join(data))
+                            except ValueError:
+                                payload = None
+                            GLib.idle_add(on_event, name or "message", payload)
+                            name, data = None, []
+            except OSError:
+                pass
+            GLib.idle_add(on_event, "disconnected", None)
+            time.sleep(2)
+    threading.Thread(target=run, daemon=True).start()
+
+
+icons: dict[str, Gdk.Texture | None] = {}
+
+
+def icon_texture(path):
+    """A workspace's icon (wadd's /api/icons/<id>), fetched once."""
+    if path not in icons:
+        try:
+            with urllib.request.urlopen(WADD + path, timeout=2) as r:
+                icons[path] = Gdk.Texture.new_from_bytes(GLib.Bytes.new(r.read()))
+        except (OSError, GLib.Error):
+            icons[path] = None
+    return icons[path]
+
+
+# ------------------------------------------------------------- text
 def minutes_text(m):
     h, mm = divmod(int(m), 60)
     return f"{h} h {mm} min" if h and mm else f"{h} h" if h else f"{mm} min"
 
 
-def timer_text(session):
-    if not session or session.get("mode") == "free":
-        return None
-    if session.get("expired"):
-        return "Time's up"
+def focus_left(session):
+    """How long a focus session has left, in words."""
     if session.get("ends_at") is None:
-        return f"Focus {minutes_text(session.get('minutes', 0))}"
+        return f"{minutes_text(session.get('minutes', 0))} of focus, starting when you open it"
     left = max(0, int(session["ends_at"] - time.time()))
     if left >= 3600:
-        return f"{left // 3600} h {left % 3600 // 60} min left"
+        return f"{left // 3600} h {left % 3600 // 60} min of focus left"
     if left >= 60:
-        return f"{-(-left // 60)} min left"
-    return f"{left} s left"
+        return f"{-(-left // 60)} min of focus left"
+    return f"{left} s of focus left"
+
+
+def locked(session):
+    return bool(session) and session.get("mode", "focus") == "focus" and not session.get("expired")
+
+
+# ------------------------------------------------------------ surfaces
+def layer(win, namespace, anchors=(), margin=12, fill=False):
+    """Make `win` an overlay surface above every window (when we can)."""
+    if LayerShell is None:
+        return
+    LayerShell.init_for_window(win)
+    LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
+    LayerShell.set_namespace(win, namespace)
+    LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)
+    for edge in anchors:
+        LayerShell.set_anchor(win, edge, True)
+        if not fill:
+            LayerShell.set_margin(win, edge, margin)
+    if fill:
+        LayerShell.set_exclusive_zone(win, -1)
+
+
+def edges(*names):
+    return [getattr(LayerShell.Edge, n) for n in names] if LayerShell else []
+
+
+def button(label, css, on_click, tooltip=None):
+    b = Gtk.Button(label=label)
+    for c in css.split():
+        b.add_css_class(c)
+    if tooltip:
+        b.set_tooltip_text(tooltip)
+    b.connect("clicked", lambda *_: on_click())
+    return b
 
 
 class Hud(Gtk.Application):
     def __init__(self):
         super().__init__(application_id="io.wadspaces.hud")
+        self.state = None
         self.session = None
+        self.show_left = False
 
     def do_activate(self):
         css = Gtk.CssProvider()
         css.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.hold()
+        self.build_bar()
+        self.build_power()
+        self.build_switcher()
+        if SNAPSHOT:
+            return self.snapshot()
+        follow_events(self.on_event)
+        GLib.timeout_add_seconds(1, self.tick)
 
+    # -- the buttons, bottom-right
+    def build_bar(self):
         win = Gtk.Window(application=self, title="wadspaces-hud")
-        LayerShell.init_for_window(win)
-        LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
-        LayerShell.set_namespace(win, "wadspaces-hud")
-        LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)
-        for edge in (LayerShell.Edge.BOTTOM, LayerShell.Edge.RIGHT):
-            LayerShell.set_anchor(win, edge, True)
-            LayerShell.set_margin(win, edge, 12)
-
+        layer(win, "wadspaces-hud", edges("BOTTOM", "RIGHT"))
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        box.add_css_class("hud")
-        self.timer = Gtk.Label(label="")
-        self.timer.add_css_class("pill")
-        self.timer.add_css_class("timer")
-        self.net = Gtk.Button(label="Wi-Fi")
-        self.net.add_css_class("pill")
-        self.net.connect("clicked", lambda *_: post("/api/hud", {"panel": "wifi"}))
-        power = Gtk.Button(label="⏻")
-        power.add_css_class("pill")
-        power.set_tooltip_text("Power")
-        power.connect("clicked", lambda *_: post("/api/hud", {"panel": "power"}))
-        for w in (self.timer, self.net, power):
+        self.done = Gtk.Label(label="Time's up")
+        for c in ("pill", "done"):
+            self.done.add_css_class(c)
+        self.timer = button("⏱", "pill focus", self.toggle_left)
+        self.home = button("Home", "pill", lambda: post_async("/api/keys/action", {"action": "launcher"}),
+                           "Back to Wad Creator (Super+0)")
+        self.net = button("Wi-Fi", "pill", lambda: post_async("/api/hud", {"panel": "wifi"}))
+        self.power_button = button("⏻", "pill", self.open_power, "Power")
+        for w in (self.done, self.timer, self.home, self.net, self.power_button):
             box.append(w)
         win.set_child(box)
+        self.bar = win
+        self.update_bar()
         win.present()
 
-        self.refresh()
-        GLib.timeout_add_seconds(2, self.refresh)
+    def toggle_left(self):
+        self.show_left = not self.show_left
+        self.update_bar()
 
-    def refresh(self):
-        try:
-            s = fetch("/api/status")
-        except (OSError, ValueError):
-            s = {}
-        self.session = s.get("session")
-        text = timer_text(self.session)
-        self.timer.set_visible(bool(text))
-        if text:
-            self.timer.set_label(text)
-            (self.timer.add_css_class if self.session.get("expired") else self.timer.remove_css_class)("done")
-        n = s.get("network") or {}
-        self.net.set_visible(bool(n.get("available")))
+    def update_bar(self):
+        s = self.session
+        focus = locked(s)
+        # During focus time the buttons give way to the timer.
+        self.timer.set_visible(focus)
+        for w in (self.home, self.net, self.power_button):
+            w.set_visible(not focus)
+        self.done.set_visible(bool(s) and bool(s.get("expired")))
+        if focus:
+            text = focus_left(s)
+            self.timer.set_tooltip_text(text)
+            self.timer.set_label(f"⏱  {text}" if self.show_left else "⏱")
+        n = (self.state or {}).get("network") or {}
+        self.net.set_visible(not focus and n.get("available", True))
         online = n.get("connectivity") == "full"
-        self.net.set_label(n.get("ssid") or ("Wired" if online else "Not connected"))
-        (self.net.remove_css_class if online else self.net.add_css_class)("offline")
+        if not n:
+            label = "Wi-Fi"  # not heard from wadd yet
+        else:
+            label = n.get("ssid") or ("Wired" if online else "Not connected")
+        self.net.set_label(label)
+        (self.net.remove_css_class if online or not n else self.net.add_css_class)("offline")
+
+    # -- the power menu, over a dimmed screen
+    def build_power(self):
+        win = Gtk.Window(application=self, title="wadspaces-power")
+        layer(win, "wadspaces-power", edges("TOP", "BOTTOM", "LEFT", "RIGHT"), fill=True)
+        overlay = Gtk.Overlay()
+        dim = Gtk.Button()
+        dim.add_css_class("dim")
+        dim.set_hexpand(True)
+        dim.set_vexpand(True)
+        dim.connect("clicked", lambda *_: self.close_power())
+        overlay.set_child(dim)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card.add_css_class("card")
+        card.set_halign(Gtk.Align.CENTER)
+        card.set_valign(Gtk.Align.CENTER)
+        title = Gtk.Label(label="Power", xalign=0)
+        title.add_css_class("title")
+        sub = Gtk.Label(label="Your wadspaces stop; their files stay.", xalign=0)
+        sub.add_css_class("sub")
+        card.append(title)
+        card.append(sub)
+        card.append(button("↻  Restart", "menu-button", lambda: self.power("reboot")))
+        card.append(button("⏻  Shut down", "menu-button danger", lambda: self.power("poweroff")))
+        card.append(button("Cancel", "menu-button quiet", self.close_power))
+        overlay.add_overlay(card)
+        win.set_child(overlay)
+        if LayerShell is None:
+            win.set_default_size(900, 600)
+        self.power_win = win
+
+    def open_power(self):
+        self.power_win.present()
+
+    def close_power(self):
+        self.power_win.set_visible(False)
+
+    def power(self, action):
+        self.close_power()
+        post_async("/api/power", {"action": action})
+
+    # -- the Super+Tab switcher, centred
+    def build_switcher(self):
+        win = Gtk.Window(application=self, title="wadspaces-switcher")
+        layer(win, "wadspaces-switcher")
+        self.switcher_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.switcher_box.add_css_class("switcher")
+        win.set_child(self.switcher_box)
+        self.switcher = win
+
+    def show_switcher(self, carousel):
+        if not carousel or not carousel.get("open") or not carousel.get("items"):
+            self.switcher.set_visible(False)
+            return
+        while (child := self.switcher_box.get_first_child()) is not None:
+            self.switcher_box.remove(child)
+        for i, item in enumerate(carousel["items"]):
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            box.add_css_class("item")
+            if i == carousel.get("index"):
+                box.add_css_class("selected")
+            tex = icon_texture(item["icon"]) if item.get("icon") else None
+            if tex is not None:
+                pic = Gtk.Picture.new_for_paintable(tex)
+                pic.set_size_request(64, 64)
+                pic.set_content_fit(Gtk.ContentFit.COVER)
+                pic.add_css_class("icon")
+                face = pic
+            else:
+                face = Gtk.Label(label=(item.get("name") or "?")[:1].upper())
+                face.add_css_class("icon")
+            face.set_halign(Gtk.Align.CENTER)
+            box.append(face)
+            name = Gtk.Label(label=item.get("name", ""), max_width_chars=16, ellipsize=Pango.EllipsizeMode.END)
+            name.add_css_class("name")
+            box.append(name)
+            if not item.get("running", True):
+                state = Gtk.Label(label="not running")
+                state.add_css_class("state")
+                box.append(state)
+            self.switcher_box.append(box)
+        self.switcher.present()
+
+    # -- wadd's events
+    def on_event(self, name, data):
+        if name == "state" and isinstance(data, dict):
+            self.state = data
+            self.session = data.get("session")
+            if not locked(self.session):
+                self.show_left = False
+            self.update_bar()
+        elif name == "carousel":
+            self.show_switcher(data)
+        elif name == "disconnected":
+            self.show_switcher(None)
+        return False
+
+    def tick(self):
+        if locked(self.session):
+            self.update_bar()
         return True
+
+    # -- WADSPACES_HUD_SNAPSHOT
+    def snapshot(self):
+        self.state = {"network": {"available": True, "connectivity": "full", "ssid": "Home Network"}}
+        self.update_bar()
+        self.open_power()
+        self.show_switcher({"open": True, "index": 1, "items": [
+            {"view": "workspace:writing", "name": "Writing", "running": True},
+            {"view": "launcher", "name": "Wad Creator", "running": True},
+            {"view": "workspace:iq-dev", "name": "IntelligenceQuest Dev", "running": False}]})
+
+        def save():
+            os.makedirs(SNAPSHOT, exist_ok=True)
+            for win, name in ((self.bar, "bar"), (self.power_win, "power"), (self.switcher, "switcher")):
+                save_png(win, os.path.join(SNAPSHOT, f"{name}.png"))
+            # and the bar during focus time
+            self.session = {"mode": "focus", "minutes": 25, "ends_at": time.time() + 1500, "expired": False}
+            self.show_left = True
+            self.update_bar()
+            GLib.timeout_add(300, lambda: (save_png(self.bar, os.path.join(SNAPSHOT, "bar-focus.png")), self.quit()))
+            return False
+        GLib.timeout_add(800, save)
+
+
+def save_png(widget, path):
+    w, h = widget.get_width(), widget.get_height()
+    snap = Gtk.Snapshot()
+    Gtk.WidgetPaintable.new(widget).snapshot(snap, w, h)
+    node = snap.to_node()
+    if node is not None:
+        widget.get_native().get_renderer().render_texture(node, None).save_to_png(path)
+        print(f"hud: wrote {path}")
 
 
 if __name__ == "__main__":

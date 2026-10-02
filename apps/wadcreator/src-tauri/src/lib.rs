@@ -33,6 +33,7 @@ fn commands() -> tauri_specta::Builder<tauri::Wry> {
             github::github_device_start,
             github::github_device_wait,
             github::github_device_cancel,
+            github::github_open_browser,
             wadd::wadd_request,
             wadd::wadd_last_state,
         ])

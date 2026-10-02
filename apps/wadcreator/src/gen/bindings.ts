@@ -21,6 +21,12 @@ export const commands = {
 } | null) => __TAURI_INVOKE<GithubSignedIn>("github_device_wait", { account }),
 	/**  Stops waiting for a sign-in. */
 	githubDeviceCancel: () => __TAURI_INVOKE<void>("github_device_cancel"),
+	/**
+	 *  Opens GitHub's code page on this machine (Chromium), for signing in
+	 *  without a phone. The page copies nothing: the UI puts the code on the
+	 *  clipboard first, to paste there.
+	 */
+	githubOpenBrowser: () => __TAURI_INVOKE<null>("github_open_browser"),
 	/**  Calls wadd's HTTP API: `path` is like `/api/projects?x=1`. */
 	waddRequest: (method: Method, path: string, body: unknown | null) => __TAURI_INVOKE<Json>("wadd_request", { method, path, body }),
 	/**  The last `state` event (wadd's snapshot), if one has arrived. */

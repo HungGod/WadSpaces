@@ -3,10 +3,11 @@
 // comes here. Once it's in, this machine's git and `gh` work, the repo list
 // loads, and your other machines fetch the same token from your account.
 import { useEffect, useRef, useState } from "react";
-import { Check, FolderGit2, Loader2, RefreshCw } from "lucide-react";
+import { Check, ClipboardCheck, FolderGit2, Loader2, Monitor, RefreshCw } from "lucide-react";
 import { backend } from "@/data";
 import type { MachineBackend } from "@/data/machine";
 import { commands, type DevicePrompt } from "@/gen/bindings";
+import { copyText } from "@/lib/clipboard";
 import { Button, Modal } from "../ui";
 
 type State =
@@ -29,6 +30,7 @@ const errorText = (e: unknown) => (e as { message?: string })?.message ?? String
 export function GithubSignIn({ onDone }: { onDone?: (login: string) => void }) {
   const [state, setState] = useState<State>({ kind: "starting" });
   const [now, setNow] = useState(Date.now());
+  const [here, setHere] = useState<"idle" | "open" | { error: string }>("idle");
   const run = useRef(0);
 
   const start = async () => {
@@ -98,11 +100,32 @@ export function GithubSignIn({ onDone }: { onDone?: (login: string) => void }) {
 
   const { code, qrSvg } = state.prompt;
   const left = Math.max(0, Math.round((state.expiresAt - now) / 1000));
+  // GitHub's page in Chromium, over the app; the code goes on the clipboard
+  // first (during the click, as WebKit wants) to paste there.
+  const signInHere = async () => {
+    try {
+      await copyText(code.userCode).catch(() => {});
+      await commands.githubOpenBrowser();
+      setHere("open");
+    } catch (e) {
+      setHere({ error: errorText(e) });
+    }
+  };
   return (
     <div className="grid items-center gap-6 sm:grid-cols-[1fr_auto]">
       <div className="space-y-4">
+        <Button variant="primary" className="w-full" onClick={signInHere}>
+          <Monitor className="size-4" /> Sign in on this machine
+        </Button>
+        {here === "open" && (
+          <p className="flex items-start gap-2 text-sm text-muted">
+            <ClipboardCheck className="mt-0.5 size-4 shrink-0 text-accent" />
+            <span>The code is copied. On GitHub's page, paste it with Ctrl+V, then sign in. The page closes when you're done (or close it with Ctrl+W).</span>
+          </p>
+        )}
+        {typeof here === "object" && <p className="text-sm text-danger">{here.error}</p>}
         <p className="text-sm text-muted">
-          On your phone or computer, go to <span className="font-mono text-fg">{code.verificationUri.replace(/^https:\/\//, "")}</span> (or scan the code) and enter:
+          Or on your phone or computer: go to <span className="font-mono text-fg">{code.verificationUri.replace(/^https:\/\//, "")}</span> (or scan the code) and enter:
         </p>
         <div className="select-all rounded-2xl bg-surface-2 px-5 py-4 text-center font-mono text-4xl font-bold tracking-[0.2em] ring-1 ring-line-strong">{code.userCode}</div>
         <p className="flex items-center gap-2 text-xs text-faint">
