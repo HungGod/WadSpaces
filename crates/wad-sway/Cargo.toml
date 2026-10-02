@@ -1,0 +1,15 @@
+[package]
+name = "wad-sway"
+description = "sway's IPC for wadd (commands, the tree, window events) and which workspace container a window belongs to"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

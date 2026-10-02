@@ -6,11 +6,13 @@
 pub mod access;
 pub mod api;
 pub mod backend;
+pub mod display;
 pub mod events;
 pub mod logbuf;
 pub mod pull;
 pub mod registry;
 pub mod systemd;
+pub mod view;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -24,9 +26,11 @@ use wad_proto::v1::{self, MachineInfo, Workspace};
 use crate::access::{Peer, Policy};
 use crate::api::AppState;
 use crate::backend::Backend;
+use crate::display::{Display, NullDisplay, SwayDisplay, WindowSink};
 use crate::events::Bus;
 use crate::logbuf::LogBuffer;
 use crate::registry::{Registry, Settings};
+use crate::view::View;
 
 /// Where the API listens.
 pub enum Listen {
@@ -45,6 +49,8 @@ pub struct Server {
     workspaces: Vec<Workspace>,
     reconcile_every: Duration,
     prefetch: (wad_config::Prefetch, u64),
+    sway: Option<Arc<SwayDisplay>>,
+    keys: wad_config::Keys,
 }
 
 /// The machine's workspaces: `workspaces.json` in the state directory (the
@@ -124,7 +130,7 @@ impl Server {
         let bus = Bus::new(machine);
         let uid = nix::unistd::getuid().as_raw();
         let registry = Registry::new(
-            backend,
+            backend.clone(),
             bus.clone(),
             Settings {
                 ready_timeout: Duration::from_secs(d.ready_timeout_s),
@@ -140,8 +146,28 @@ impl Server {
             tracing::error!("no workspaces: {e}");
             vec![]
         });
-        let state =
-            Arc::new(AppState { bus, registry, logs, policy, store: wad_store::State::new(&config.daemon.state_dir) });
+        let sway = config.display.enabled.then(|| {
+            let at = match &config.display.socket {
+                Some(s) => wad_sway::Locate::Socket(s.clone()),
+                None => wad_sway::Locate::RuntimeDir(config.display.runtime_dir.clone()),
+            };
+            Arc::new(SwayDisplay::new(wad_sway::Sway::new(at), registry.windows()))
+        });
+        let display: Arc<dyn Display> = match &sway {
+            Some(s) => s.clone(),
+            None => Arc::new(NullDisplay),
+        };
+        let view = View::new(registry.clone(), backend, display, bus.clone(), d.state_dir.clone());
+        let state = Arc::new(AppState {
+            bus,
+            registry,
+            view,
+            keys: std::sync::Mutex::new(None),
+            keys_enabled: config.keys.enabled,
+            logs,
+            policy,
+            store: wad_store::State::new(&config.daemon.state_dir),
+        });
         Ok(Self {
             listener,
             bound,
@@ -149,15 +175,44 @@ impl Server {
             workspaces,
             reconcile_every: Duration::from_secs(d.reconcile_s.max(1)),
             prefetch: (d.prefetch, d.prefetch_min_free_gb),
+            sway,
+            keys: config.keys.clone(),
         })
     }
 
+    /// The keyboard proxy, its actions handed to the view.
+    fn start_keys(&self) -> Option<wad_input::Proxy> {
+        if !self.keys.enabled {
+            return None;
+        }
+        let view = self.state.view.clone();
+        let block = self
+            .keys
+            .block
+            .iter()
+            .filter_map(|c| wad_input::Chord::parse(c).inspect_err(|e| tracing::warn!("keys.block: {e}")).ok())
+            .collect();
+        let router = wad_input::KeyRouter::new(view.bindings(&self.keys.home), block, self.keys.pass_super);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(action) = rx.recv().await {
+                view.on_key(action);
+            }
+        });
+        Some(wad_input::Proxy::start(router, self.keys.grab, move |a| {
+            let _ = tx.send(a);
+        }))
+    }
+
     /// Serves until `shutdown` resolves.
-    pub async fn run(self, shutdown: impl Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
+    pub async fn run(mut self, shutdown: impl Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
         let registry = self.state.registry.clone();
-        if let Err(e) = registry.load(self.workspaces).await {
+        if let Err(e) = registry.load(std::mem::take(&mut self.workspaces)).await {
             tracing::warn!("workspace units: {e}");
         }
+        self.state.view.restore_session();
+        let watcher = self.sway.clone().map(|d| tokio::spawn(d.run(self.state.view.clone() as Arc<dyn WindowSink>)));
+        *self.state.keys.lock().unwrap() = self.start_keys();
         let reconcile = registry.spawn_reconcile(self.reconcile_every);
         let (mode, min_free_gb) = self.prefetch;
         let prefetch = tokio::spawn(registry.clone().prefetch(mode, min_free_gb, Duration::from_secs(300)));
@@ -165,6 +220,14 @@ impl Server {
         let res = axum::serve(self.listener, app).with_graceful_shutdown(shutdown).await;
         reconcile.abort();
         prefetch.abort();
+        if let Some(w) = watcher {
+            w.abort();
+        }
+        // Lets every key go and ungrabs (the thread notices within 0.5 s).
+        let keys = self.state.keys.lock().unwrap().take();
+        if let Some(k) = keys {
+            let _ = tokio::task::spawn_blocking(move || drop(k)).await;
+        }
         if let Some(p) = &self.bound {
             let _ = std::fs::remove_file(p);
         }

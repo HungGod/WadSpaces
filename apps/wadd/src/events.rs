@@ -10,46 +10,59 @@ use wad_proto::v1::{Event, MachineInfo, WorkspaceState};
 #[derive(Clone)]
 pub struct Bus {
     tx: broadcast::Sender<Event>,
-    machine: Arc<Mutex<MachineInfo>>,
-    states: Arc<Mutex<Vec<WorkspaceState>>>,
+    latest: Arc<Mutex<Latest>>,
+}
+
+struct Latest {
+    machine: MachineInfo,
+    view: Option<Event>,
+    carousel: Option<Event>,
+    session: Option<Event>,
+    states: Vec<WorkspaceState>,
 }
 
 impl Bus {
     pub fn new(machine: MachineInfo) -> Self {
-        Self { tx: broadcast::channel(256).0, machine: Arc::new(Mutex::new(machine)), states: Arc::default() }
+        let latest = Latest { machine, view: None, carousel: None, session: None, states: vec![] };
+        Self { tx: broadcast::channel(256).0, latest: Arc::new(Mutex::new(latest)) }
     }
 
     pub fn publish(&self, e: Event) {
-        match &e {
-            Event::Machine(m) => *self.machine.lock().unwrap() = m.clone(),
-            Event::WorkspaceState(st) => {
-                let mut states = self.states.lock().unwrap();
-                match states.iter_mut().find(|s| s.id == st.id) {
+        {
+            let mut l = self.latest.lock().unwrap();
+            match &e {
+                Event::Machine(m) => l.machine = m.clone(),
+                Event::WorkspaceState(st) => match l.states.iter_mut().find(|s| s.id == st.id) {
                     Some(s) => *s = st.clone(),
-                    None => states.push(st.clone()),
-                }
+                    None => l.states.push(st.clone()),
+                },
+                Event::View(_) => l.view = Some(e.clone()),
+                Event::Carousel(_) => l.carousel = Some(e.clone()),
+                Event::Session(_) => l.session = Some(e.clone()),
+                Event::Notice { .. } => {}
             }
-            Event::Notice { .. } => {}
         }
         let _ = self.tx.send(e);
     }
 
     pub fn machine(&self) -> MachineInfo {
-        self.machine.lock().unwrap().clone()
+        self.latest.lock().unwrap().machine.clone()
     }
 
     /// The workspaces there are now, in order (a new list replaces the old,
     /// without an event for each).
     pub fn set_states(&self, states: Vec<WorkspaceState>) {
-        *self.states.lock().unwrap() = states;
+        self.latest.lock().unwrap().states = states;
     }
 
-    /// The current state (the machine, then each workspace's), then whatever
-    /// happens next.
+    /// The current state (the machine, what's on screen, the session, each
+    /// workspace's), then whatever happens next.
     pub fn subscribe(&self) -> (Vec<Event>, broadcast::Receiver<Event>) {
         let rx = self.tx.subscribe();
-        let mut now = vec![Event::Machine(self.machine())];
-        now.extend(self.states.lock().unwrap().iter().cloned().map(Event::WorkspaceState));
+        let l = self.latest.lock().unwrap();
+        let mut now = vec![Event::Machine(l.machine.clone())];
+        now.extend([&l.view, &l.session, &l.carousel].into_iter().flatten().cloned());
+        now.extend(l.states.iter().cloned().map(Event::WorkspaceState));
         (now, rx)
     }
 }

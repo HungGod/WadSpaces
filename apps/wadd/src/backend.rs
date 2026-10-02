@@ -36,6 +36,10 @@ pub trait Backend: Send + Sync + 'static {
     fn rx_bytes(&self) -> u64;
     /// Free space where images are kept, in GB (None: unknown).
     async fn free_gb(&self) -> Option<f64>;
+    /// The workspace a container belongs to (its wadspaces.id label).
+    async fn workspace_of(&self, _container: &str) -> Option<String> {
+        None
+    }
 }
 
 /// The machine as wadd's config describes it: podman's socket, systemd (the
@@ -186,6 +190,11 @@ impl Backend for Real {
 
     fn rx_bytes(&self) -> u64 {
         pull::rx_bytes(std::path::Path::new("/sys/class/net"))
+    }
+
+    async fn workspace_of(&self, container: &str) -> Option<String> {
+        let info = self.podman.inspect_container(container).await.ok()??;
+        info.pointer("/Config/Labels/wadspaces.id").and_then(|v| v.as_str()).map(String::from)
     }
 
     async fn free_gb(&self) -> Option<f64> {

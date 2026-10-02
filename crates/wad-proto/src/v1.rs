@@ -52,6 +52,12 @@ pub enum Event {
     Machine(MachineInfo),
     /// A workspace's state changed.
     WorkspaceState(WorkspaceState),
+    /// What's on screen changed (or what's about to be).
+    View(ViewState),
+    /// The Super+Tab switcher opened, moved or closed.
+    Carousel(Carousel),
+    /// A session began, its clock started, its time ran out, or it ended.
+    Session(Option<Session>),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
@@ -64,9 +70,73 @@ impl Event {
         match self {
             Event::Machine(_) => "machine",
             Event::WorkspaceState(_) => "workspaceState",
+            Event::View(_) => "view",
+            Event::Carousel(_) => "carousel",
+            Event::Session(_) => "session",
             Event::Notice { .. } => "notice",
         }
     }
+}
+
+/// What the machine shows: Wad Creator (the app's own window, "home"), or a
+/// workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", content = "id", rename_all = "camelCase")]
+pub enum View {
+    Home,
+    Workspace(String),
+}
+
+/// GET /v1/view
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewState {
+    pub view: View,
+    /// A workspace that's coming up and is shown once it's ready (until
+    /// then the screen stays where it is).
+    pub pending: Option<String>,
+    /// There's a compositor to show native workspaces in.
+    pub native_display: bool,
+}
+
+/// The Super+Tab switcher, most recently used first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Carousel {
+    pub open: bool,
+    pub items: Vec<CarouselItem>,
+    /// The selected item.
+    pub index: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CarouselItem {
+    pub view: View,
+    pub name: String,
+    /// The workspace's icon (a /v1 path), if it has one.
+    pub icon: Option<String>,
+    pub running: bool,
+}
+
+/// POST /v1/session
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRequest {
+    pub workspaces: Vec<String>,
+    /// A focus session's length; none: no timer (a free session).
+    pub minutes: Option<u32>,
+}
+
+/// GET /v1/keys: the keyboard proxy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct KeysStatus {
+    pub enabled: bool,
+    /// The keyboards are grabbed (Super never reaches a workspace), not just watched.
+    pub grabbing: bool,
+    pub keyboards: Vec<String>,
+    pub note: Option<String>,
 }
 
 /// How a workspace is shown on its machine.

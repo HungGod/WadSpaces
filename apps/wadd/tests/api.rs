@@ -17,6 +17,7 @@ async fn start(allow_self: bool) -> (tempfile::TempDir, std::path::PathBuf, toki
     let mut cfg = Config::defaults(Profile::User);
     cfg.machine.name = "test-machine".into();
     cfg.daemon.state_dir = dir.path().join("state");
+    cfg.display.enabled = false; // never a real sway
     std::fs::create_dir_all(&cfg.daemon.state_dir).unwrap();
     let list = vec![workspace("writing")];
     std::fs::write(cfg.daemon.state_dir.join("workspaces.json"), serde_json::to_string(&list).unwrap()).unwrap();
@@ -60,8 +61,15 @@ fn workspace(id: &str) -> Workspace {
 
 /// One HTTP/1.1 request over the socket; the status and body.
 async fn request(sock: &std::path::Path, method: &str, path: &str) -> (u16, String) {
+    send(sock, method, path, "").await
+}
+
+async fn send(sock: &std::path::Path, method: &str, path: &str, body: &str) -> (u16, String) {
     let mut s = UnixStream::connect(sock).await.unwrap();
-    let req = format!("{method} {path} HTTP/1.1\r\nHost: wadd\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    let req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: wadd\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
     s.write_all(req.as_bytes()).await.unwrap();
     let mut buf = String::new();
     s.read_to_string(&mut buf).await.unwrap();
@@ -162,4 +170,34 @@ async fn the_socket_is_private_on_a_laptop_and_removed_on_exit() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     panic!("socket left behind");
+}
+
+#[tokio::test]
+async fn the_view_and_sessions() {
+    let (_d, sock, stop) = start(true).await;
+    let (status, body) = get(&sock, "/v1/view").await;
+    assert_eq!(status, 200);
+    assert!(body.contains(r#""view":{"kind":"home"}"#) && body.contains(r#""pending":null"#), "{body}");
+    let (status, body) = send(&sock, "POST", "/v1/session", r#"{"workspaces":["writing"],"minutes":25}"#).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains(r#""mode":"focus""#), "{body}");
+    // Locked: Wad Creator waits, and ending needs ?force.
+    let (status, body) = request(&sock, "POST", "/v1/view/home").await;
+    assert_eq!(status, 409, "{body}");
+    let (status, _) = request(&sock, "DELETE", "/v1/session").await;
+    assert_eq!(status, 409);
+    let (status, _) = request(&sock, "DELETE", "/v1/session?force=true").await;
+    assert_eq!(status, 204);
+    let (_, body) = get(&sock, "/v1/session").await;
+    assert_eq!(body, "null");
+    let (status, body) = send(&sock, "POST", "/v1/session", r#"{"workspaces":[],"minutes":null}"#).await;
+    assert_eq!(status, 400, "{body}");
+    let (status, _) = request(&sock, "POST", "/v1/carousel/next").await;
+    assert_eq!(status, 204);
+    let (status, _) = request(&sock, "POST", "/v1/carousel/sideways").await;
+    assert_eq!(status, 404);
+    // On a laptop the keyboard stays yours.
+    let (_, body) = get(&sock, "/v1/keys").await;
+    assert!(body.contains(r#""enabled":false"#) && body.contains(r#""grabbing":false"#), "{body}");
+    let _ = stop.send(());
 }

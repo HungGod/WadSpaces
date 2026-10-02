@@ -17,6 +17,8 @@ wad-config = { path = "crates/wad-config" }
 wad-store = { path = "crates/wad-store" }
 wad-podman = { path = "crates/wad-podman" }
 wad-systemd = { path = "crates/wad-systemd" }
+wad-sway = { path = "crates/wad-sway" }
+wad-input = { path = "crates/wad-input" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -44,7 +46,9 @@ tauri-plugin-fs = "2.6"
 wiremock = "0.6"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "tower-log"] }
 clap = { version = "4", features = ["derive"] }
-nix = { version = "0.31", features = ["user", "fs"] }
+nix = { version = "0.31", features = ["user", "fs", "ioctl", "poll"] }
+evdev = "0.13"
+libc = "0.2"
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tempfile = "3"

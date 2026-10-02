@@ -44,6 +44,76 @@ pub struct Config {
     pub machine: Machine,
     pub daemon: Daemon,
     pub log: Log,
+    pub keys: Keys,
+    pub display: Display,
+}
+
+/// The keyboard proxy: wadd grabs the keyboards and keeps Super for itself
+/// (Super+Tab switcher, Super+1..9 workspaces, Super+`home` Wad Creator).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Keys {
+    /// Off on a laptop: your keyboard stays yours.
+    pub enabled: bool,
+    /// False: only watch for chords, filter nothing.
+    pub grab: bool,
+    /// With Super: back to Wad Creator.
+    /// (The Python wadd called it `launcher`; that's read too.)
+    pub home: Vec<String>,
+    /// Chords dropped before they reach a workspace (modifiers must match exactly).
+    pub block: Vec<String>,
+    /// Also send other Super chords on to the workspace.
+    pub pass_super: bool,
+}
+
+/// Where the screen is: the kiosk session's sway.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Display {
+    pub enabled: bool,
+    /// Where sway's IPC socket is looked for (the newest live one).
+    pub runtime_dir: PathBuf,
+    /// A fixed socket instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub socket: Option<PathBuf>,
+}
+
+impl Keys {
+    pub fn for_profile(profile: Profile) -> Self {
+        Self {
+            enabled: profile == Profile::System,
+            grab: true,
+            home: vec!["KEY_0".into(), "KEY_SPACE".into()],
+            block: vec!["alt+f4".into(), "ctrl+shift+q".into(), "ctrl+alt+backspace".into()],
+            pass_super: false,
+        }
+    }
+}
+
+impl Default for Keys {
+    fn default() -> Self {
+        Self::for_profile(Profile::System)
+    }
+}
+
+impl Display {
+    pub fn for_profile(profile: Profile) -> Self {
+        Self {
+            enabled: true,
+            // The kiosk user (uid 1000, host/etc/sysusers.d); on a laptop, yours.
+            runtime_dir: match profile {
+                Profile::System => "/run/user/1000".into(),
+                Profile::User => runtime_dir(),
+            },
+            socket: None,
+        }
+    }
+}
+
+impl Default for Display {
+    fn default() -> Self {
+        Self::for_profile(Profile::System)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -162,7 +232,13 @@ impl Daemon {
 
 impl Config {
     pub fn defaults(profile: Profile) -> Self {
-        Self { machine: Machine::default(), daemon: Daemon::for_profile(profile), log: Log::default() }
+        Self {
+            machine: Machine::default(),
+            daemon: Daemon::for_profile(profile),
+            log: Log::default(),
+            keys: Keys::for_profile(profile),
+            display: Display::for_profile(profile),
+        }
     }
 
     /// The files read for a profile, in order (missing ones are skipped).
@@ -190,7 +266,12 @@ impl Config {
     }
 
     /// Defaults overlaid with a (merged) table.
-    pub fn from_table(profile: Profile, table: toml::Table) -> Result<Self, toml::de::Error> {
+    pub fn from_table(profile: Profile, mut table: toml::Table) -> Result<Self, toml::de::Error> {
+        if let Some(toml::Value::Table(keys)) = table.get_mut("keys")
+            && let Some(old) = keys.remove("launcher")
+        {
+            keys.entry("home").or_insert(old);
+        }
         let defaults = Self::defaults(profile);
         let mut base = toml::Table::try_from(Raw::from(&defaults)).expect("defaults serialize");
         merge(&mut base, table);
@@ -216,6 +297,8 @@ struct Raw {
     machine: RawMachine,
     daemon: RawDaemon,
     log: RawLog,
+    keys: Keys,
+    display: Display,
 }
 #[derive(serde::Serialize)]
 struct RawMachine {
@@ -265,6 +348,8 @@ impl From<&Config> for Raw {
                 prefetch_min_free_gb: c.daemon.prefetch_min_free_gb,
             },
             log: RawLog { level: c.log.level.clone(), buffer_lines: c.log.buffer_lines },
+            keys: c.keys.clone(),
+            display: c.display.clone(),
         }
     }
 }
@@ -340,6 +425,12 @@ mod tests {
         assert_eq!(c.log.buffer_lines, 10);
         assert_eq!(c.daemon.state_dir, PathBuf::from("/var/lib/wadspaces"));
         assert_eq!(c.daemon.prefetch, Prefetch::None);
+        assert!(c.keys.enabled && c.keys.home == ["KEY_0", "KEY_SPACE"]);
+        assert!(!Config::load(Profile::User, &[]).unwrap().keys.enabled);
+        let old = write(d.path(), "old.toml", "[keys]\nlauncher = [\"KEY_HOME\"]\n[display]\nsocket = \"/tmp/s\"\n");
+        let c = Config::load(Profile::System, &[old]).unwrap();
+        assert_eq!((c.keys.home, c.keys.grab), (vec!["KEY_HOME".to_string()], true));
+        assert_eq!(c.display.socket, Some(PathBuf::from("/tmp/s")));
         let all = write(d.path(), "all.toml", "[daemon]\nprefetch = \"all\"\n");
         assert_eq!(Config::load(Profile::System, &[all]).unwrap().daemon.prefetch, Prefetch::All);
         let bad = write(d.path(), "some.toml", "[daemon]\nprefetch = \"some\"\n");

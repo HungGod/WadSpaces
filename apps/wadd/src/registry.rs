@@ -56,8 +56,46 @@ pub struct Registry {
     tracking: Mutex<bool>,
     runs: Mutex<RunLog>,
     epoch: Instant,
+    /// Native workspaces' windows (the display keeps this up to date).
+    windows: Arc<Windows>,
+    /// Told when a bring-up finishes (the view shows a pending switch).
+    on_ready: Mutex<Option<ReadyHook>>,
     /// Itself, for the tasks it starts.
     me: std::sync::Weak<Registry>,
+}
+
+type ReadyHook = Box<dyn Fn(&str) + Send + Sync>;
+
+/// Which native workspaces have a window on screen, and whether there's a
+/// compositor to have one in at all.
+#[derive(Default)]
+pub struct Windows {
+    available: std::sync::atomic::AtomicBool,
+    present: tokio::sync::watch::Sender<std::collections::HashSet<String>>,
+}
+
+impl Windows {
+    pub fn available(&self) -> bool {
+        self.available.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set_available(&self, yes: bool) {
+        self.available.store(yes, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn has(&self, id: &str) -> bool {
+        self.present.borrow().contains(id)
+    }
+
+    fn set(&self, id: &str, present: bool) {
+        self.present.send_modify(|p| {
+            if present {
+                p.insert(id.into());
+            } else {
+                p.remove(id);
+            }
+        });
+    }
 }
 
 fn wall() -> f64 {
@@ -115,6 +153,8 @@ impl Registry {
             tracking: Mutex::new(false),
             runs: Mutex::new(runs),
             epoch: Instant::now(),
+            windows: Arc::default(),
+            on_ready: Mutex::new(None),
         })
     }
 
@@ -168,7 +208,17 @@ impl Registry {
         self.states.lock().unwrap().get(id).cloned()
     }
 
-    fn workspace(&self, id: &str) -> Result<Workspace, ApiError> {
+    pub fn windows(&self) -> Arc<Windows> {
+        self.windows.clone()
+    }
+
+    /// Calls `f` with a workspace's id each time one finishes coming up.
+    pub fn on_ready(&self, f: impl Fn(&str) + Send + Sync + 'static) {
+        *self.on_ready.lock().unwrap() = Some(Box::new(f));
+    }
+
+    /// An enabled workspace.
+    pub fn workspace(&self, id: &str) -> Result<Workspace, ApiError> {
         self.workspaces.lock().unwrap().iter().find(|w| w.id == id && w.enabled).cloned().ok_or_else(|| not_found(id))
     }
 
@@ -269,6 +319,45 @@ impl Registry {
                 st.phase = Phase::Error;
                 st.error = Some(e);
             });
+            return;
+        }
+        drop(_held);
+        if let Some(f) = self.on_ready.lock().unwrap().as_ref() {
+            f(&ws.id);
+        }
+    }
+
+    /// A native workspace's window came or went (from the display).
+    pub fn window(&self, id: &str, present: bool) {
+        self.windows.set(id, present);
+        let Ok(ws) = self.workspace(id) else { return };
+        let busy = self.lock_for(id).try_lock().is_err();
+        self.update(&ws, |st| {
+            if present && matches!(st.phase, Phase::Idle | Phase::Waiting) && !busy {
+                st.phase = Phase::Ready;
+                st.container = RUNNING.into();
+            } else if !present && st.phase == Phase::Ready {
+                st.phase = Phase::Waiting;
+                st.message = Some("the desktop closed; waiting for it to come back".into());
+            }
+        });
+    }
+
+    /// A native workspace is ready when its desktop's window appears.
+    async fn wait_window(&self, ws: &Workspace) -> Result<(), String> {
+        if !self.windows.available() {
+            tracing::warn!("{} draws on the machine's screen, but there's no sway to show it in", ws.id);
+            return Ok(());
+        }
+        let mut rx = self.windows.present.subscribe();
+        let wait = rx.wait_for(|p| p.contains(&ws.id));
+        match tokio::time::timeout(self.settings.ready_timeout, wait).await {
+            Ok(_) => Ok(()),
+            Err(_) => Err(format!(
+                "{}'s desktop didn't open a window within {} s",
+                ws.name,
+                self.settings.ready_timeout.as_secs()
+            )),
         }
     }
 
@@ -286,10 +375,10 @@ impl Registry {
             st.container = RUNNING.into();
             st.message = Some("waiting for the desktop".into());
         });
-        // A native workspace is ready when its window appears: that's the
-        // display's to say (M3); until then, once it runs.
-        if let Some(url) = stream_url(ws) {
-            self.wait_http(ws, &url).await?;
+        match stream_url(ws) {
+            Some(url) => self.wait_http(ws, &url).await?,
+            None if ws.display == Display::Host => self.wait_window(ws).await?,
+            None => {}
         }
         self.update(ws, |st| st.phase = Phase::Ready);
         tracing::info!("{} ready", ws.id);

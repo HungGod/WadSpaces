@@ -1,139 +1,15 @@
 //! The workspace lifecycle against a fake machine, with time paused.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+mod common;
+
+use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
+use common::{Fake, ws};
 use wad_config::Prefetch;
 use wad_proto::v1::{Display, Event, Phase, Workspace};
-use wadd::backend::{Backend, OnLine};
 use wadd::events::Bus;
 use wadd::registry::{Registry, Settings};
-
-#[derive(Default)]
-struct Machine {
-    images: HashSet<String>,
-    containers: HashMap<String, String>,
-    calls: Vec<String>,
-    units: Vec<(String, String)>,
-    /// URLs that answer.
-    answering: HashSet<String>,
-    /// Polls before a URL answers.
-    answer_after: usize,
-    polls: usize,
-    pull_fails: Option<String>,
-    start_fails: Option<String>,
-    rx: u64,
-    free_gb: f64,
-}
-
-#[derive(Clone, Default)]
-struct Fake(Arc<Mutex<Machine>>);
-
-impl Fake {
-    fn with(&self, f: impl FnOnce(&mut Machine)) {
-        f(&mut self.0.lock().unwrap());
-    }
-    fn calls(&self) -> Vec<String> {
-        self.0.lock().unwrap().calls.clone()
-    }
-}
-
-#[async_trait]
-impl Backend for Fake {
-    async fn available(&self) -> bool {
-        true
-    }
-    async fn container(&self, name: &str) -> Result<String, String> {
-        Ok(self.0.lock().unwrap().containers.get(name).cloned().unwrap_or_else(|| "missing".into()))
-    }
-    async fn image_exists(&self, image: &str) -> Result<bool, String> {
-        Ok(self.0.lock().unwrap().images.contains(image))
-    }
-    async fn pull(&self, image: &str, mut on_line: OnLine) -> Result<(), String> {
-        self.with(|m| m.calls.push(format!("pull {image}")));
-        on_line("Copying blob sha256:abc");
-        for _ in 0..3 {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            self.with(|m| m.rx += 300);
-        }
-        let fail = self.0.lock().unwrap().pull_fails.clone();
-        if let Some(e) = fail {
-            return Err(e);
-        }
-        self.with(|m| {
-            m.images.insert(image.into());
-        });
-        Ok(())
-    }
-    async fn start(&self, unit: &str) -> Result<(), String> {
-        let fail = self.0.lock().unwrap().start_fails.clone();
-        self.with(|m| m.calls.push(format!("start {unit}")));
-        if let Some(e) = fail {
-            return Err(e);
-        }
-        let name = unit.trim_end_matches(".service").to_string();
-        self.with(|m| {
-            m.containers.insert(name, "running".into());
-        });
-        Ok(())
-    }
-    async fn stop(&self, unit: &str) -> Result<(), String> {
-        self.with(|m| {
-            m.calls.push(format!("stop {unit}"));
-            m.containers.remove(unit.trim_end_matches(".service"));
-        });
-        Ok(())
-    }
-    async fn restart(&self, unit: &str) -> Result<(), String> {
-        self.with(|m| {
-            m.calls.push(format!("restart {unit}"));
-            m.containers.insert(unit.trim_end_matches(".service").into(), "running".into());
-        });
-        Ok(())
-    }
-    async fn install_units(&self, units: Vec<(String, String)>) -> Result<bool, String> {
-        self.with(|m| m.units = units);
-        Ok(true)
-    }
-    async fn http_ok(&self, url: &str) -> bool {
-        let mut m = self.0.lock().unwrap();
-        m.polls += 1;
-        m.answering.contains(url) && m.polls > m.answer_after
-    }
-    async fn download_size(&self, image: &str) -> Option<(u64, u32)> {
-        (!self.0.lock().unwrap().images.contains(image)).then_some((1000, 2))
-    }
-    fn rx_bytes(&self) -> u64 {
-        self.0.lock().unwrap().rx
-    }
-    async fn free_gb(&self) -> Option<f64> {
-        Some(self.0.lock().unwrap().free_gb)
-    }
-}
-
-fn ws(id: &str, image: &str, display: Display, port: Option<u16>) -> Workspace {
-    Workspace {
-        id: id.into(),
-        name: id.to_uppercase(),
-        image: image.into(),
-        display,
-        port,
-        hotkey: None,
-        icon: None,
-        enabled: true,
-        autostart: false,
-        container_name: format!("wad-{id}"),
-        container_port: 3000,
-        env: vec![("PUID".into(), "1000".into())],
-        secrets: vec![],
-        volumes: vec![],
-        devices: vec![],
-        shm_size: Some("1g".into()),
-        projects: vec![],
-    }
-}
 
 struct Setup {
     reg: Arc<Registry>,

@@ -12,23 +12,31 @@ use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures_util::stream::{self, Stream, StreamExt};
 use serde::Deserialize;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::BroadcastStream;
-use wad_proto::v1::{CloudLink, Event, Health, LogLine, MachineInfo, Project, Run, Session, Workspace, WorkspaceState};
+use wad_proto::v1::{
+    CloudLink, Event, Health, KeysStatus, LogLine, MachineInfo, Project, Run, Session, SessionRequest, ViewState,
+    Workspace, WorkspaceState,
+};
 use wad_proto::{ApiError, ErrorCode};
 
 use crate::access::{Peer, Policy};
 use crate::events::Bus;
 use crate::logbuf::LogBuffer;
 use crate::registry::Registry;
+use crate::view::View;
 
 pub struct AppState {
     pub bus: Bus,
     pub registry: Arc<Registry>,
+    pub view: Arc<View>,
+    /// The keyboard proxy, while it runs.
+    pub keys: std::sync::Mutex<Option<wad_input::Proxy>>,
+    pub keys_enabled: bool,
     pub logs: LogBuffer,
     pub policy: Policy,
     /// What's on disk (the Python wadd's formats).
@@ -101,10 +109,16 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/workspaces/{id}/stop", post(stop))
         .route("/v1/workspaces/{id}/restart", post(restart))
         .route("/v1/workspaces/{id}/download", post(download))
+        .route("/v1/workspaces/{id}/switch", post(switch))
         .route("/v1/states", get(states))
+        .route("/v1/view", get(view))
+        .route("/v1/view/home", post(home))
+        .route("/v1/carousel/{step}", post(carousel))
+        .route("/v1/keys", get(keys))
         .route("/v1/projects", get(projects))
         .route("/v1/runs", get(runs))
-        .route("/v1/session", get(session))
+        .route("/v1/session", get(session).post(session_begin))
+        .route("/v1/session", delete(session_end))
         .route("/v1/cloud", get(cloud))
         .route("/v1/library/{collection}", get(library))
         .fallback(|| async { Failure(ApiError::new(ErrorCode::NotFound, "no such endpoint")) })
@@ -162,8 +176,10 @@ async fn start(
     Ok((StatusCode::ACCEPTED, state_of(&app, &id)?))
 }
 
+/// Stops a workspace; if it was on screen, the next session pick (or Wad
+/// Creator) is shown.
 async fn stop(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<WorkspaceState>, Failure> {
-    app.registry.stop(&id).await?;
+    app.view.stop(&id).await?;
     state_of(&app, &id)
 }
 
@@ -171,7 +187,7 @@ async fn restart(
     State(app): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<(StatusCode, Json<WorkspaceState>), Failure> {
-    app.registry.restart(&id).await?;
+    app.view.restart(&id).await?;
     Ok((StatusCode::ACCEPTED, state_of(&app, &id)?))
 }
 
@@ -204,9 +220,66 @@ async fn runs(State(app): State<Arc<AppState>>, Query(q): Query<RunsQuery>) -> J
     Json(app.store.runs(q.workspace.as_deref(), q.limit.unwrap_or(200).clamp(1, 2000)))
 }
 
+async fn view(State(app): State<Arc<AppState>>) -> Json<ViewState> {
+    Json(app.view.state())
+}
+
+/// Shows a workspace: now if it's ready, else once it is.
+async fn switch(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<ViewState>, Failure> {
+    app.view.switch(&id)?;
+    Ok(Json(app.view.state()))
+}
+
+/// Wad Creator (refused during a focus session's time).
+async fn home(State(app): State<Arc<AppState>>) -> Result<Json<ViewState>, Failure> {
+    app.view.home(false)?;
+    Ok(Json(app.view.state()))
+}
+
+/// The Super+Tab switcher, by hand: next, prev, commit or cancel.
+async fn carousel(State(app): State<Arc<AppState>>, Path(step): Path<String>) -> Result<StatusCode, Failure> {
+    match step.as_str() {
+        "next" => app.view.carousel_step(true),
+        "prev" => app.view.carousel_step(false),
+        "commit" => app.view.carousel_commit(),
+        "cancel" => app.view.carousel_cancel(),
+        _ => return Err(Failure(ApiError::new(ErrorCode::NotFound, "next, prev, commit or cancel"))),
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn keys(State(app): State<Arc<AppState>>) -> Json<KeysStatus> {
+    let status = app.keys.lock().unwrap().as_ref().map(|k| k.status()).unwrap_or_default();
+    Json(KeysStatus {
+        enabled: app.keys_enabled,
+        grabbing: status.grabbing,
+        keyboards: status.keyboards,
+        note: status.note,
+    })
+}
+
 async fn session(State(app): State<Arc<AppState>>) -> Json<Option<Session>> {
-    let known: Vec<String> = app.registry.workspaces().into_iter().map(|w| w.id).collect();
-    Json(app.store.session(&known))
+    Json(app.view.session())
+}
+
+async fn session_begin(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<SessionRequest>,
+) -> Result<Json<Session>, Failure> {
+    Ok(Json(app.view.session_begin(&req.workspaces, req.minutes)?))
+}
+
+#[derive(Deserialize)]
+struct EndQuery {
+    #[serde(default)]
+    force: bool,
+}
+
+/// Ends the session; during a focus session's time only with ?force=true
+/// (the user chose to end it early).
+async fn session_end(State(app): State<Arc<AppState>>, Query(q): Query<EndQuery>) -> Result<StatusCode, Failure> {
+    app.view.session_end(q.force)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn cloud(State(app): State<Arc<AppState>>) -> Json<CloudLink> {

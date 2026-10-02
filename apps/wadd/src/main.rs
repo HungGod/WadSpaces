@@ -2,6 +2,7 @@
 //!
 //!   wadd serve            as a machine's system service (wadd.service)
 //!   wadd serve --user     on a laptop, as you (rootless)
+//!   wadd keys             try the keyboard proxy for a while (as root)
 //!   wadd version
 
 use std::path::PathBuf;
@@ -53,6 +54,17 @@ enum Cmd {
         #[arg(long)]
         user: bool,
     },
+    /// Try the keyboard proxy for a while: grabs the keyboards (as root),
+    /// passes typing on, and prints what Super chords would do. Every key is
+    /// let go when it ends (and the kernel drops the grab if it dies).
+    Keys {
+        /// How long, in seconds (at most 120).
+        #[arg(long, default_value_t = 20)]
+        seconds: u64,
+        /// Only watch for chords; filter nothing.
+        #[arg(long)]
+        no_grab: bool,
+    },
     /// Print the version.
     Version,
 }
@@ -65,7 +77,39 @@ fn main() -> ExitCode {
         }
         Cmd::Serve { user, config, socket } => serve(user, config, socket),
         Cmd::Migrate { dry_run, json, from, user } => migrate(dry_run, json, from, user),
+        Cmd::Keys { seconds, no_grab } => keys(seconds.min(120), !no_grab),
     }
+}
+
+fn keys(seconds: u64, grab: bool) -> ExitCode {
+    tracing_subscriber::fmt().with_env_filter(EnvFilter::new("info")).init();
+    let cfg = wad_config::Keys::for_profile(Profile::System);
+    let mut bindings = std::collections::HashMap::new();
+    for k in &cfg.home {
+        if let Ok(c) = wad_input::keys::code(k) {
+            bindings.insert(c, "home".to_string());
+        }
+    }
+    for n in 1..=9u8 {
+        bindings
+            .insert(wad_input::keys::code(&n.to_string()).expect("digits are keys"), format!("switch:<hotkey {n}>"));
+    }
+    let block = cfg.block.iter().filter_map(|c| wad_input::Chord::parse(c).ok()).collect();
+    let router = wad_input::KeyRouter::new(bindings, block, false);
+    println!("For {seconds} s: try Super+Tab (hold Super), Super+1..9, Super+0, Alt+F4. Typing still works.");
+    let proxy = wad_input::Proxy::start(router, grab, |a| println!("  -> {a:?}"));
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    let st = proxy.status();
+    println!(
+        "grabbing: {}, keyboards: {:?}{}",
+        st.grabbing,
+        st.keyboards,
+        st.note.map(|n| format!(" ({n})")).unwrap_or_default()
+    );
+    std::thread::sleep(std::time::Duration::from_secs(seconds.saturating_sub(2)));
+    drop(proxy);
+    println!("done: keyboards released");
+    ExitCode::SUCCESS
 }
 
 fn migrate(dry_run: bool, json: bool, from: Option<PathBuf>, user: bool) -> ExitCode {

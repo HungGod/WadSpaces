@@ -9,8 +9,9 @@ The software that runs a WadSpaces machine, and the Wad Creator app used to desi
 | `legacy/wadd-py/` | wadd, the machine daemon, in Python. It is frozen while the Rust wadd is written (stage 2), then removed. |
 | `fixtures/quadlet/` | Unit files and workspace specs that every renderer must reproduce byte for byte (wadd's tests and the UI's generator tests read these). |
 | `apps/wadcreator/src-tauri/` | The machine app: Tauri around the same React UI. Its Rust side holds the commands the UI calls (`src/gen/bindings.ts` is generated from them). |
-| `crates/` | Shared Rust crates: `wad-proto` (types shared by wadd, the app and the UI), `wad-github` (device-flow sign-in), `wad-firebase` (Firestore writes made from Rust). |
-| `apps/wadd/` | The Rust wadd (stage 2). |
+| `crates/` | Shared Rust crates: `wad-proto` (types shared by wadd, the app and the UI), `wad-core` (designs, generators; also compiled to wasm for the UI), `wad-config`, `wad-store` (wadd's state files), `wad-podman`, `wad-systemd`, `wad-sway`, `wad-input` (the keyboard proxy), `wad-github` (device-flow sign-in), `wad-firebase` (Firestore writes made from Rust). |
+| `apps/wadd/` | The Rust wadd (stage 2), not yet on the image. |
+| `apps/hud/` | The HUD: the buttons above every wadspace, and the switcher, Wi-Fi and power overlays. |
 
 The container images themselves are in the separate `Wadspaces-David` checkout, next to this one (`../Wadspaces-David`).
 
@@ -43,6 +44,19 @@ npm run build:app    # release build at target/release/wadcreator (--kiosk for f
 ```
 
 The Rust toolchain is pinned in `rust-toolchain.toml`. On Fedora the app also needs `webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel librsvg2-devel` (and `binaryen` for the wasm build).
+
+## The Rust wadd
+
+`wadd serve --user` runs it as you, on a laptop: rootless podman, your systemd, a socket at `$XDG_RUNTIME_DIR/wadd/wadd.sock` (`curl --unix-socket … http://wadd/v1/states`). Two trial scripts use their own state under `.build/`:
+
+```bash
+apps/wadd/dev/try.sh         # workspaces: cold and warm start, stop, restart, download progress
+apps/wadd/dev/try-view.sh    # the screen: a headless sway with the machine's rules and a real lean
+                             # workspace's window: switching, Super+Tab, focus sessions
+sudo target/debug/wadd keys  # the keyboard proxy for 20 s (prints what Super chords would do)
+```
+
+`try-view.sh` needs sway; unpacked under `.build/sway` is enough (the script says how).
 
 ## History
 
