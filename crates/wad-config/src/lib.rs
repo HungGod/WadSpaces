@@ -46,6 +46,41 @@ pub struct Config {
     pub log: Log,
     pub keys: Keys,
     pub display: Display,
+    pub cloud: Cloud,
+}
+
+/// The account link (the cloud relay). An empty project_id takes the image's
+/// cloud.yaml (the Python wadd's) until the cutover moves it here.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Cloud {
+    pub enabled: bool,
+    pub project_id: String,
+    /// Where enrollMachine runs.
+    pub functions_region: String,
+    /// The web API key (linking hands one over too).
+    pub api_key: String,
+    pub heartbeat_s: u64,
+    /// How often pending commands are looked for.
+    pub poll_s: u64,
+    /// Use the Firebase emulators on this host (firebase.json's ports)
+    /// instead of Google's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emulator: Option<String>,
+}
+
+impl Default for Cloud {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            project_id: String::new(),
+            functions_region: "australia-southeast2".into(),
+            api_key: String::new(),
+            heartbeat_s: 30,
+            poll_s: 3,
+            emulator: None,
+        }
+    }
 }
 
 /// The keyboard proxy: wadd grabs the keyboards and keeps Super for itself
@@ -254,6 +289,7 @@ impl Config {
             log: Log::default(),
             keys: Keys::for_profile(profile),
             display: Display::for_profile(profile),
+            cloud: Cloud::default(),
         }
     }
 
@@ -315,6 +351,7 @@ struct Raw {
     log: RawLog,
     keys: Keys,
     display: Display,
+    cloud: Cloud,
 }
 #[derive(serde::Serialize)]
 struct RawMachine {
@@ -372,6 +409,7 @@ impl From<&Config> for Raw {
             log: RawLog { level: c.log.level.clone(), buffer_lines: c.log.buffer_lines },
             keys: c.keys.clone(),
             display: c.display.clone(),
+            cloud: c.cloud.clone(),
         }
     }
 }

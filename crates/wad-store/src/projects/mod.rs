@@ -293,6 +293,11 @@ impl ProjectStore {
         self.changes.load(Ordering::Relaxed)
     }
 
+    /// Where the documents are (a new owner's link moves it aside).
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn folder_roots(&self) -> &[PathBuf] {
         &self.folder_roots
     }

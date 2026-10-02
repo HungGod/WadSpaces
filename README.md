@@ -57,6 +57,8 @@ apps/wadd/dev/try-projects.sh  # projects: a GitHub clone, a folder and a loop-d
                                # launched together into a workspace
 apps/wadd/dev/try-build.sh   # builds: a design built on the lean base, installed, and opened
                              # in the headless sway
+apps/wadd/dev/try-cloud.sh   # the account link, against the Firebase emulators (real rules and
+                             # enrollMachine): link, heartbeat, commands, project and secret sync
 sudo target/debug/wadd keys  # the keyboard proxy for 20 s (prints what Super chords would do)
 ```
 

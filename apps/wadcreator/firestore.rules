@@ -140,15 +140,25 @@ service cloud.firestore {
         allow read, delete: if isOwner(uid);
         allow update: if isOwner(uid) && onlyChanges(["name"]);
         // Every machine of the owner's reads its siblings (tailnet addresses,
-        // stream links, the projects mounted there); each writes only its own.
+        // stream links, the projects mounted there); each writes only its own,
+        // with the types the apps read.
+        function heartbeatTypes(d) {
+          return (!("lastSeen" in changed()) || d.lastSeen is timestamp)
+            && (!("workspaces" in d) || d.workspaces is list)
+            && (!("mountedProjects" in d) || d.mountedProjects is list)
+            && (!("view" in d) || d.view == null || d.view is string);
+        }
         allow read: if isOwnersMachine(uid);
-        allow update: if isMachine(uid, mid) && onlyChanges(["lastSeen", "hostname", "daemonVersion", "view", "workspaces", "metrics", "installed", "allowRemote", "streams", "tailnet", "mountedProjects"]);
+        allow update: if isMachine(uid, mid)
+          && onlyChanges(["lastSeen", "hostname", "daemonVersion", "view", "workspaces", "metrics", "installed", "allowRemote", "streams", "tailnet", "mountedProjects"])
+          && heartbeatTypes(request.resource.data);
 
         match /commands/{cmdId} {
           allow read, delete: if isOwner(uid);
           allow create: if isOwner(uid)
             && request.resource.data.status == "pending"
-            && request.resource.data.type in ["switch", "start", "stop", "restart", "launcher", "navigate", "refresh", "sync-secrets", "projects-sync", "launch"];
+            // "launcher" and "navigate" are the Python wadd's; the Rust one says "home".
+            && request.resource.data.type in ["switch", "start", "stop", "restart", "home", "launcher", "navigate", "refresh", "sync-secrets", "projects-sync", "launch"];
           allow read: if isMachine(uid, mid);
           allow update: if isMachine(uid, mid) && onlyChanges(["status", "result", "startedAt", "finishedAt", "progress"]);
         }

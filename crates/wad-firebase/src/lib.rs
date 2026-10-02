@@ -1,9 +1,19 @@
-//! The few Firebase REST calls WadSpaces makes from Rust. The UI uses the
-//! Firebase JS SDK for everything else; these are the writes whose values must
-//! not pass through JavaScript (a GitHub token), made with the signed-in
-//! user's ID token, so Firestore's rules apply exactly as they do to the SDK.
+//! Firebase over its REST APIs, from Rust: Firestore (values.rs has the
+//! typed values), Auth sign-in (identity.rs) and callable functions
+//! (functions.rs). The app writes the values that mustn't pass through
+//! JavaScript (a GitHub token) with the user's ID token; wadd's cloud relay
+//! signs in as its machine. Either way Firestore's rules apply exactly as they
+//! do to the JS SDK.
 
+pub mod functions;
+pub mod identity;
+pub mod values;
+
+use serde_json::{Map, Value};
 use wad_proto::{ApiError, ErrorCode};
+
+pub use functions::Functions;
+pub use identity::{Identity, Tokens};
 
 const FIRESTORE: &str = "https://firestore.googleapis.com";
 
@@ -21,6 +31,10 @@ pub enum Error {
     Network(#[source] reqwest::Error),
     #[error("Firestore answered {status}: {message}")]
     Upstream { status: u16, message: String },
+    #[error("sign-in refused ({status}): {message}")]
+    Auth { status: u16, message: String },
+    #[error("{message}")]
+    Callable { status: String, message: String },
 }
 
 impl From<Error> for ApiError {
@@ -30,7 +44,8 @@ impl From<Error> for ApiError {
             Error::Unauthenticated => ErrorCode::Unauthorized,
             Error::Denied => ErrorCode::Forbidden,
             Error::Network(_) => ErrorCode::Offline,
-            Error::Upstream { .. } => ErrorCode::Upstream,
+            Error::Upstream { .. } | Error::Callable { .. } => ErrorCode::Upstream,
+            Error::Auth { .. } => ErrorCode::Unauthorized,
         };
         ApiError::new(code, e.to_string())
     }
@@ -63,26 +78,24 @@ impl Firestore {
     /// Writes a document whose fields are all strings, replacing what was
     /// there. `path` is like `users/<uid>/secrets/github_token`.
     pub async fn set_strings(&self, id_token: &str, path: &str, fields: &[(&str, &str)]) -> Result<(), Error> {
-        let segments: Vec<&str> = path.split('/').collect();
-        let ok = segments.len().is_multiple_of(2)
-            && segments.iter().all(|s| {
-                !s.is_empty()
-                    && s.len() <= 128
-                    && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-            });
-        if !ok {
-            return Err(Error::BadPath(path.into()));
-        }
+        check_path(path, true)?;
         let body = serde_json::json!({
             "fields": fields
                 .iter()
                 .map(|(k, v)| (k.to_string(), serde_json::json!({ "stringValue": v })))
                 .collect::<serde_json::Map<_, _>>(),
         });
-        let url = format!("{}/v1/projects/{}/databases/(default)/documents/{path}", self.base, self.project);
-        let res = self.http.patch(url).bearer_auth(id_token).json(&body).send().await.map_err(Error::Network)?;
+        self.send(self.http.patch(self.url(path)).bearer_auth(id_token).json(&body)).await.map(drop)
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}/v1/projects/{}/databases/(default)/documents/{path}", self.base, self.project)
+    }
+
+    async fn send(&self, req: reqwest::RequestBuilder) -> Result<Value, Error> {
+        let res = req.send().await.map_err(Error::Network)?;
         match res.status().as_u16() {
-            200..=299 => Ok(()),
+            200..=299 => Ok(res.json().await.unwrap_or(Value::Null)),
             401 => Err(Error::Unauthenticated),
             403 => Err(Error::Denied),
             status => {
@@ -91,6 +104,81 @@ impl Firestore {
             }
         }
     }
+
+    /// A document (REST form); None if there's none.
+    pub async fn get(&self, id_token: &str, path: &str) -> Result<Option<Value>, Error> {
+        check_path(path, true)?;
+        match self.send(self.http.get(self.url(path)).bearer_auth(id_token)).await {
+            Ok(d) => Ok(Some(d)),
+            Err(Error::Upstream { status: 404, .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Every document of a collection (REST form), page by page.
+    pub async fn list(&self, id_token: &str, collection: &str) -> Result<Vec<Value>, Error> {
+        check_path(collection, false)?;
+        let mut docs = vec![];
+        let mut page: Option<String> = None;
+        loop {
+            let mut q: Vec<(&str, String)> = vec![("pageSize", "300".into())];
+            if let Some(p) = &page {
+                q.push(("pageToken", p.clone()));
+            }
+            let body = self.send(self.http.get(self.url(collection)).bearer_auth(id_token).query(&q)).await?;
+            docs.extend(body.get("documents").and_then(Value::as_array).cloned().unwrap_or_default());
+            page = body.get("nextPageToken").and_then(Value::as_str).map(String::from);
+            if page.is_none() {
+                return Ok(docs);
+            }
+        }
+    }
+
+    /// Sets these fields (and removes the `remove` ones), leaving the rest;
+    /// creates the document if need be.
+    pub async fn patch(
+        &self,
+        id_token: &str,
+        path: &str,
+        data: &Map<String, Value>,
+        remove: &[&str],
+    ) -> Result<(), Error> {
+        check_path(path, true)?;
+        let mask: Vec<(&str, &str)> = data
+            .keys()
+            .map(String::as_str)
+            .chain(remove.iter().copied())
+            .map(|k| ("updateMask.fieldPaths", k))
+            .collect();
+        let body = serde_json::json!({ "fields": values::to_fields(data) });
+        self.send(self.http.patch(self.url(path)).bearer_auth(id_token).query(&mask).json(&body)).await.map(drop)
+    }
+
+    pub async fn delete(&self, id_token: &str, path: &str) -> Result<(), Error> {
+        check_path(path, true)?;
+        self.send(self.http.delete(self.url(path)).bearer_auth(id_token)).await.map(drop)
+    }
+
+    /// Runs a structured query on a document's subcollections: the documents.
+    pub async fn query(&self, id_token: &str, parent: &str, structured: Value) -> Result<Vec<Value>, Error> {
+        check_path(parent, true)?;
+        let body = serde_json::json!({ "structuredQuery": structured });
+        let rows = self
+            .send(self.http.post(format!("{}:runQuery", self.url(parent))).bearer_auth(id_token).json(&body))
+            .await?;
+        Ok(rows.as_array().into_iter().flatten().filter_map(|r| r.get("document").cloned()).collect())
+    }
+}
+
+/// A document path (`document`: an even number of segments) or a
+/// collection's (odd), made of ids Firestore and WadSpaces use.
+fn check_path(path: &str, document: bool) -> Result<(), Error> {
+    let segments: Vec<&str> = path.split('/').collect();
+    let ok = segments.len().is_multiple_of(2) == document
+        && segments.iter().all(|s| {
+            !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        });
+    if ok { Ok(()) } else { Err(Error::BadPath(path.into())) }
 }
 
 #[cfg(test)]

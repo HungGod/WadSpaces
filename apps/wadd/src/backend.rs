@@ -52,6 +52,18 @@ pub trait Backend: Send + Sync + 'static {
     async fn github_token(&self) -> Option<String> {
         None
     }
+    /// The names of podman's secrets.
+    async fn secret_names(&self) -> Result<Vec<String>, String> {
+        Err("no podman".into())
+    }
+    /// Creates (replacing) a secret. Its value only ever goes to podman.
+    async fn create_secret(&self, _name: &str, _value: &[u8]) -> Result<(), String> {
+        Err("no podman".into())
+    }
+    /// False if there was none.
+    async fn delete_secret(&self, _name: &str) -> Result<bool, String> {
+        Err("no podman".into())
+    }
     /// Builds an image from a tar build context on `base` (its BASE_IMAGE
     /// build argument). Dropping the future stops the build.
     async fn build(&self, _context: Vec<u8>, _tag: &str, _base: &str, _on_line: OnLine) -> Result<(), String> {
@@ -119,6 +131,15 @@ impl Backend for Offline {
         None
     }
     async fn image_labels(&self, _: &str) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
+        Err(self.0.clone())
+    }
+    async fn secret_names(&self) -> Result<Vec<String>, String> {
+        Err(self.0.clone())
+    }
+    async fn create_secret(&self, _: &str, _: &[u8]) -> Result<(), String> {
+        Err(self.0.clone())
+    }
+    async fn delete_secret(&self, _: &str) -> Result<bool, String> {
         Err(self.0.clone())
     }
 }
@@ -224,6 +245,18 @@ impl Backend for Real {
                 None
             }
         }
+    }
+
+    async fn secret_names(&self) -> Result<Vec<String>, String> {
+        self.podman.secret_names().await.map_err(|e| e.to_string())
+    }
+
+    async fn create_secret(&self, name: &str, value: &[u8]) -> Result<(), String> {
+        self.podman.create_secret(name, value).await.map_err(|e| e.to_string())
+    }
+
+    async fn delete_secret(&self, name: &str) -> Result<bool, String> {
+        self.podman.delete_secret(name).await.map_err(|e| e.to_string())
     }
 
     async fn build(&self, context: Vec<u8>, tag: &str, base: &str, mut on_line: OnLine) -> Result<(), String> {

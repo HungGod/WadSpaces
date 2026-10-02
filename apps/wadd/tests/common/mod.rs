@@ -1,6 +1,7 @@
 //! A fake machine for wadd's tests: podman, systemd and probes in memory.
 #![allow(dead_code)]
 
+pub mod firebase;
 pub mod host;
 
 use std::collections::{HashMap, HashSet};
@@ -38,6 +39,8 @@ pub struct Machine {
     pub builds: Vec<(String, String, Vec<u8>)>,
     pub build_fails: Option<String>,
     pub build_slow: bool,
+    /// podman's secrets: name -> value.
+    pub secrets: HashMap<String, Vec<u8>>,
 }
 
 pub const TOKEN: &str = "ghp_TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT";
@@ -134,6 +137,23 @@ impl Backend for Fake {
     }
     async fn github_token(&self) -> Option<String> {
         Some(TOKEN.into())
+    }
+    async fn secret_names(&self) -> Result<Vec<String>, String> {
+        let mut n: Vec<String> = self.0.lock().unwrap().secrets.keys().cloned().collect();
+        n.sort();
+        Ok(n)
+    }
+    async fn create_secret(&self, name: &str, value: &[u8]) -> Result<(), String> {
+        if value.is_empty() {
+            return Err("secret data must be larger than 0".into()); // as podman says
+        }
+        self.with(|m| {
+            m.secrets.insert(name.into(), value.to_vec());
+        });
+        Ok(())
+    }
+    async fn delete_secret(&self, name: &str) -> Result<bool, String> {
+        Ok(self.0.lock().unwrap().secrets.remove(name).is_some())
     }
     async fn build(&self, context: Vec<u8>, tag: &str, base: &str, mut on_line: OnLine) -> Result<(), String> {
         let (fails, slow) = {

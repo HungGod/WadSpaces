@@ -191,6 +191,20 @@ describe("machines and the relay", () => {
     await assertFails(updateDoc(doc(machine("alice", "m2"), "users/alice/machines/m1"), { mountedProjects: [] }));
   });
 
+  it("the heartbeat's fields have the types the apps read", async () => {
+    const m1 = () => doc(machine("alice", "m1"), "users/alice/machines/m1");
+    await assertSucceeds(updateDoc(m1(), { lastSeen: new Date(), view: "workspace:w1", workspaces: [{ id: "w1", phase: "ready" }], mountedProjects: [] }));
+    await assertSucceeds(updateDoc(m1(), { view: null }));
+    await assertFails(updateDoc(m1(), { lastSeen: "yesterday" }));
+    await assertFails(updateDoc(m1(), { workspaces: "w1" }));
+    await assertFails(updateDoc(m1(), { mountedProjects: { p1: true } }));
+    await assertFails(updateDoc(m1(), { view: 3 }));
+  });
+
+  it("owners can send the Rust wadd home", async () => {
+    await assertSucceeds(addDoc(collection(alice(), "users/alice/machines/m1/commands"), { type: "home", status: "pending" }));
+  });
+
   it("owners can ask for a projects sync or a launch", async () => {
     const cmds = "users/alice/machines/m1/commands";
     await assertSucceeds(addDoc(collection(alice(), cmds), { type: "projects-sync", status: "pending" }));

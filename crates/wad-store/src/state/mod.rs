@@ -83,6 +83,8 @@ impl State {
             owner_uid: opt("owner_uid"),
             project_id: opt("project_id"),
             linked_at: opt("enrolled_at"),
+            last_heartbeat: None,
+            last_error: None,
         }
     }
 

@@ -66,6 +66,8 @@ pub enum Event {
     Launch(LaunchLog),
     /// A build moved on: the job, and its log lines since the last event.
     Build(BuildLog),
+    /// The account link changed (linked, unlinked, a heartbeat, an error).
+    Cloud(CloudLink),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
@@ -84,6 +86,7 @@ impl Event {
             Event::Projects { .. } => "projects",
             Event::Launch(_) => "launch",
             Event::Build(_) => "build",
+            Event::Cloud(_) => "cloud",
             Event::Notice { .. } => "notice",
         }
     }
@@ -283,6 +286,12 @@ pub struct CloudLink {
     pub owner_uid: Option<String>,
     pub project_id: Option<String>,
     pub linked_at: Option<String>,
+    /// The last heartbeat the account took (Unix seconds).
+    #[serde(default)]
+    pub last_heartbeat: Option<u64>,
+    /// Why the relay is stuck, if it is.
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 /// Where a workspace is in its life.
@@ -584,4 +593,34 @@ pub struct BuildLog {
     pub build: Build,
     pub from: u64,
     pub lines: Vec<String>,
+}
+
+/// Where a secret on the machine came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum SecretOrigin {
+    /// The owner's account (synced).
+    Account,
+    /// Set on this machine.
+    Local,
+    /// Made so a workspace that names it can start; it has no value yet.
+    Placeholder,
+}
+
+/// GET /v1/secrets: the names (never the values).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretInfo {
+    pub name: String,
+    pub origin: SecretOrigin,
+}
+
+/// What a sync of the account's secrets did.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretsSynced {
+    pub added: Vec<String>,
+    pub updated: Vec<String>,
+    pub unchanged: Vec<String>,
+    pub removed: Vec<String>,
 }

@@ -7,6 +7,7 @@ pub mod access;
 pub mod api;
 pub mod backend;
 pub mod builds;
+pub mod cloud;
 pub mod display;
 pub mod drives;
 pub mod events;
@@ -16,6 +17,7 @@ pub mod logbuf;
 pub mod projects;
 pub mod pull;
 pub mod registry;
+pub mod secrets;
 pub mod systemd;
 pub mod view;
 
@@ -56,6 +58,53 @@ pub struct Server {
     prefetch: (wad_config::Prefetch, u64),
     sway: Option<Arc<SwayDisplay>>,
     keys: wad_config::Keys,
+}
+
+/// Placeholders for the secrets the workspaces name that aren't here, so
+/// their containers can start.
+async fn placeholders(app: Arc<AppState>) {
+    let mut needed: Vec<String> =
+        app.registry.workspaces().into_iter().filter(|w| w.enabled).flat_map(|w| w.secrets).collect();
+    needed.sort();
+    needed.dedup();
+    if let Err(e) = app.secrets.ensure(&needed).await {
+        tracing::debug!("placeholder secrets: {e}");
+    }
+}
+
+/// The relay's settings: `[cloud]`, else the image's cloud.yaml (the Python
+/// wadd's). None: no account to link to.
+fn cloud_settings(config: &Config) -> Option<(cloud::Settings, cloud::Endpoints)> {
+    let c = &config.cloud;
+    if !c.enabled {
+        return None;
+    }
+    let (mut project, mut region, mut api_key) = (c.project_id.clone(), c.functions_region.clone(), c.api_key.clone());
+    if project.is_empty() {
+        let legacy = wad_store::legacy::read(&config.daemon.legacy_config, Some(&config.daemon.vendor_cloud))
+            .ok()
+            .and_then(|l| l.cloud);
+        let get = |k: &str| {
+            legacy.as_ref().and_then(|m| m.get(k)).and_then(|v| v.as_str()).map(String::from).filter(|v| !v.is_empty())
+        };
+        project = get("project_id")?;
+        region = get("functions_region").unwrap_or(region);
+        api_key = get("api_key").unwrap_or(api_key);
+    }
+    let http = reqwest::Client::new();
+    let ends = match &c.emulator {
+        Some(host) => cloud::Endpoints::emulator(http, host, &project, &region),
+        None => cloud::Endpoints::google(http, &project, &region),
+    };
+    let settings = cloud::Settings {
+        project_id: project,
+        api_key,
+        heartbeat: Duration::from_secs(c.heartbeat_s.max(5)),
+        poll: Duration::from_secs(c.poll_s.max(1)),
+        machine_name: config.machine.name.clone(),
+        state_dir: config.daemon.state_dir.clone(),
+    };
+    Some((settings, ends))
 }
 
 /// The machine's workspaces: `workspaces.json` in the state directory (the
@@ -193,8 +242,27 @@ impl Server {
             bus.clone(),
             &d.state_dir,
         );
-        let builds = builds::Builds::new(registry.clone(), backend, bus.clone(), &d.state_dir, d.build_min_free_gb);
+        let builds =
+            builds::Builds::new(registry.clone(), backend.clone(), bus.clone(), &d.state_dir, d.build_min_free_gb);
+        let secrets = Arc::new(secrets::Secrets::new(backend, &d.state_dir));
+        let cloud = cloud_settings(config).map(|(cs, ends)| {
+            cloud::CloudRelay::new(
+                cs,
+                reqwest::Client::new(),
+                ends,
+                cloud::Parts {
+                    registry: registry.clone(),
+                    view: view.clone(),
+                    projects: projects.clone(),
+                    secrets: secrets.clone(),
+                    launches: launches.clone(),
+                    bus: bus.clone(),
+                },
+            )
+        });
         let state = Arc::new(AppState {
+            secrets,
+            cloud,
             bus,
             registry,
             view,
@@ -252,15 +320,17 @@ impl Server {
         self.state.view.restore_session();
         let watcher = self.sway.clone().map(|d| tokio::spawn(d.run(self.state.view.clone() as Arc<dyn WindowSink>)));
         *self.state.keys.lock().unwrap() = self.start_keys();
-        // A build can add a workspace (and its hotkey).
+        // A build can add a workspace (its hotkey, the secrets it names).
         let (app, home) = (Arc::downgrade(&self.state), self.keys.home.clone());
         registry.on_list_change(move || {
             let Some(app) = app.upgrade() else { return };
-            let keys = app.keys.lock().unwrap();
-            if let Some(proxy) = keys.as_ref() {
+            if let Some(proxy) = app.keys.lock().unwrap().as_ref() {
                 proxy.router().lock().unwrap().set_bindings(app.view.bindings(&home));
             }
+            tokio::spawn(placeholders(app));
         });
+        tokio::spawn(placeholders(self.state.clone()));
+        let relay = self.state.cloud.clone().map(|c| tokio::spawn(c.run()));
         let reconcile = registry.spawn_reconcile(self.reconcile_every);
         let (mode, min_free_gb) = self.prefetch;
         let prefetch = tokio::spawn(registry.clone().prefetch(mode, min_free_gb, Duration::from_secs(300)));
@@ -268,6 +338,9 @@ impl Server {
         let res = axum::serve(self.listener, app).with_graceful_shutdown(shutdown).await;
         reconcile.abort();
         prefetch.abort();
+        if let Some(r) = relay {
+            r.abort();
+        }
         if let Some(w) = watcher {
             w.abort();
         }

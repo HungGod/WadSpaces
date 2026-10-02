@@ -89,8 +89,18 @@ struct Job {
     log: Lines,
 }
 
+/// Where else a project is open: the owner's other machines (the cloud
+/// relay knows them).
+#[async_trait::async_trait]
+pub trait Elsewhere: Send + Sync + 'static {
+    /// For each project open in a running workspace on another machine
+    /// that's on: its id and those machines' names.
+    async fn open_elsewhere(&self, pids: &[String]) -> Vec<(String, Vec<String>)>;
+}
+
 pub struct Launches {
     me: Weak<Launches>,
+    elsewhere: Mutex<Option<Weak<dyn Elsewhere>>>,
     registry: Arc<Registry>,
     view: Arc<View>,
     backend: Arc<dyn Backend>,
@@ -118,6 +128,7 @@ impl Launches {
     ) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
+            elsewhere: Mutex::default(),
             registry,
             view,
             backend,
@@ -131,6 +142,11 @@ impl Launches {
             last_publish: Mutex::default(),
             stopping: Mutex::default(),
         })
+    }
+
+    /// Who to ask where else projects are open (the cloud relay).
+    pub fn set_elsewhere(&self, e: Weak<dyn Elsewhere>) {
+        *self.elsewhere.lock().unwrap() = Some(e);
     }
 
     // ------------------------------------------------------------- jobs
@@ -376,8 +392,18 @@ impl Launches {
             format!(" with {}", docs.iter().map(|d| text(d, "name")).collect::<Vec<_>>().join(", "))
         };
         self.line(id, &format!("» launching {}{with}", ws.name));
-        // TODO(M6): warn when a project is open in a running workspace on
-        // another of the owner's machines (the cloud relay knows).
+        // Open on another machine too: two copies edited at once end in git
+        // conflicts. A warning, not a refusal.
+        let elsewhere = self.elsewhere.lock().unwrap().as_ref().and_then(Weak::upgrade);
+        if let Some(e) = elsewhere {
+            for (pid, machines) in e.open_elsewhere(&pids).await {
+                let mount = docs.iter().find(|d| text(d, "id") == pid).map(|d| text(d, "mountName")).unwrap_or(pid);
+                self.line(
+                    id,
+                    &format!("⚠ {mount} is open on {}: stop it there first to avoid conflicts", machines.join(", ")),
+                );
+            }
+        }
         let paths: Mutex<HashMap<String, String>> = Mutex::default();
         let mut step1: Vec<BoxFuture<'_, Result<(), String>>> = vec![self.image(id, &ws, !docs.is_empty()).boxed()];
         for d in &docs {

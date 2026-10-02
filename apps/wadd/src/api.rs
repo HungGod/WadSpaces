@@ -38,6 +38,9 @@ pub struct AppState {
     pub projects: Arc<crate::projects::Projects>,
     pub launches: Arc<crate::launches::Launches>,
     pub builds: Arc<crate::builds::Builds>,
+    pub secrets: Arc<crate::secrets::Secrets>,
+    /// The account link; None without cloud settings.
+    pub cloud: Option<Arc<crate::cloud::CloudRelay>>,
     /// The keyboard proxy, while it runs.
     pub keys: std::sync::Mutex<Option<wad_input::Proxy>>,
     pub keys_enabled: bool,
@@ -135,7 +138,10 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/runs", get(runs))
         .route("/v1/session", get(session).post(session_begin))
         .route("/v1/session", delete(session_end))
-        .route("/v1/cloud", get(cloud))
+        .route("/v1/cloud", get(cloud).delete(cloud_unlink))
+        .route("/v1/cloud/link", post(cloud_link))
+        .route("/v1/secrets", get(secrets))
+        .route("/v1/secrets/{name}", axum::routing::put(secret_put).delete(secret_delete))
         .route("/v1/library/{collection}", get(library))
         .fallback(|| async { Failure(ApiError::new(ErrorCode::NotFound, "no such endpoint")) })
         .layer(middleware::from_fn_with_state(app.clone(), check_peer))
@@ -448,7 +454,55 @@ async fn session_end(State(app): State<Arc<AppState>>, Query(q): Query<EndQuery>
 }
 
 async fn cloud(State(app): State<Arc<AppState>>) -> Json<CloudLink> {
-    Json(app.store.cloud())
+    Json(app.cloud.as_ref().map(|c| c.link_state()).unwrap_or_else(|| app.store.cloud()))
+}
+
+fn relay(app: &AppState) -> Result<&Arc<crate::cloud::CloudRelay>, Failure> {
+    app.cloud
+        .as_ref()
+        .ok_or_else(|| Failure(ApiError::new(ErrorCode::Conflict, "this machine has no account settings to link with")))
+}
+
+#[derive(Deserialize)]
+struct LinkBody {
+    code: String,
+}
+
+/// Links this machine to the account that made the code.
+async fn cloud_link(State(app): State<Arc<AppState>>, Json(b): Json<LinkBody>) -> Result<Json<CloudLink>, Failure> {
+    Ok(Json(relay(&app)?.link(&b.code).await?))
+}
+
+async fn cloud_unlink(State(app): State<Arc<AppState>>) -> Result<StatusCode, Failure> {
+    relay(&app)?.unlink().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The secrets' names and where they came from; never their values.
+async fn secrets(State(app): State<Arc<AppState>>) -> Result<Json<Vec<wad_proto::v1::SecretInfo>>, Failure> {
+    Ok(Json(app.secrets.list().await?))
+}
+
+#[derive(Deserialize)]
+struct SecretBody {
+    value: String,
+}
+
+async fn secret_put(
+    State(app): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(b): Json<SecretBody>,
+) -> Result<StatusCode, Failure> {
+    app.secrets.set(&name, b.value.as_bytes()).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn secret_delete(State(app): State<Arc<AppState>>, Path(name): Path<String>) -> Result<StatusCode, Failure> {
+    if app.secrets.delete(&name).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(Failure(ApiError::new(ErrorCode::NotFound, format!("no secret {name:?}"))))
+    }
 }
 
 async fn library(

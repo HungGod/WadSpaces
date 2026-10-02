@@ -19,3 +19,5 @@ dist-*/
 target/
 src-tauri/target/
 src-tauri/gen/
+# The emulators' secrets (apps/wadd/dev/try-cloud.sh makes a dummy one)
+functions/.secret.local

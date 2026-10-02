@@ -48,7 +48,7 @@ tauri-plugin-fs = "2.6"
 wiremock = "0.6"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "tower-log"] }
 clap = { version = "4", features = ["derive"] }
-nix = { version = "0.31", features = ["user", "fs", "ioctl", "poll"] }
+nix = { version = "0.31", features = ["user", "fs", "ioctl", "poll", "hostname"] }
 evdev = "0.13"
 libc = "0.2"
 futures-util = "0.3"
