@@ -1,0 +1,3 @@
+# Generated: cargo xtask bindings / cargo xtask wasm
+apps/wadcreator/src/gen/** linguist-generated=true
+*.wasm binary

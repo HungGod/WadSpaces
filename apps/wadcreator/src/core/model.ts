@@ -1,7 +1,8 @@
 // A wadspace as the Builder edits it and as it is stored: offline in wadd's
-// library on the machine, online in Firestore. Shared by the app and the
-// Cloud Functions, so: no React, no DOM, no import.meta.env.
+// library on the machine, online in Firestore. The functions are wad-core's
+// (crates/wad-core/src/model.rs), run as WebAssembly.
 import type { Display, FeatureId, KaleResource } from "./spec";
+import { call } from "./wasm";
 
 export type Visibility = "private" | "shared";
 
@@ -96,48 +97,22 @@ export interface WadspaceSpec {
   dockerfile?: string;
 }
 
-export function defaultAdvanced(tz = "Etc/UTC"): Advanced {
-  return {
-    display: "host",
-    port: null,
-    hotkey: null,
-    tools: ["git"],
-    projects: [],
-    kaleResources: [],
-    env: { PUID: "1000", PGID: "1000", TZ: tz },
-    secrets: [],
-    devices: ["/dev/dri"],
-    shmSize: "1g",
-    persistConfig: true,
-    autostart: false,
-  };
+export function defaultAdvanced(tz?: string): Advanced {
+  return call("defaultAdvanced", ...(tz ? [tz] : []));
 }
 
 /** Lowercase `slug-xxxxxx`: valid as a wadd id, a container name and an image path. */
 export function newWadspaceId(name: string, rand: () => number = Math.random): string {
-  const slug =
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "wadspace";
-  const tail = Array.from({ length: 6 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(rand() * 36)]).join("");
-  return `${slug}-${tail}`;
+  return call("newWadspaceId", name, Array.from({ length: 6 }, rand));
 }
 
 /** Desktops saved with cloud-file shortcuts (`kind: "file"`, removed with
  *  cloud files) lose them when they're loaded. */
 export function dropFileIcons(layout: Layout): Layout {
-  const icons = layout.icons.filter((i) => (i as { kind?: string }).kind !== "file");
-  return icons.length === layout.icons.length ? layout : { ...layout, icons };
+  return call("dropFileIcons", layout);
 }
 
 /** Icons in desktop order: by grid cell (column-major), else top-to-bottom, left-to-right. */
 export function orderedIcons(layout: Layout): LayoutIcon[] {
-  const key = (i: LayoutIcon) => (layout.grid && i.cell ? [i.cell.col, i.cell.row] : [Math.round(i.x * 20), i.y]);
-  return [...layout.icons].sort((a, b) => {
-    const [a0, a1] = key(a);
-    const [b0, b1] = key(b);
-    return a0 - b0 || a1 - b1;
-  });
+  return call("orderedIcons", layout);
 }

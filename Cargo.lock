@@ -3473,6 +3473,7 @@ version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
+ "indexmap 2.14.2",
  "itoa",
  "memchr",
  "serde",
@@ -4726,6 +4727,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wad-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "wad-firebase"
 version = "0.1.0"
 dependencies = [
@@ -4760,6 +4770,15 @@ dependencies = [
  "serde_json",
  "specta",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "wad-wasm"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "wad-core",
+ "wasm-bindgen",
 ]
 
 [[package]]

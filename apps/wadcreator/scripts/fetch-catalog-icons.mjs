@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const catalogPath = resolve(root, "src/core/catalog/apps.json");
+const catalogPath = resolve(root, "../../crates/wad-core/data/apps.json");
 const outDir = resolve(root, "public/catalog");
 mkdirSync(outDir, { recursive: true });
 

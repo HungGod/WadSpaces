@@ -34,7 +34,7 @@ import {
   type Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
-import catalog from "@core/catalog/apps.json";
+import catalog from "@core-data/apps.json";
 import { defaultAdvanced, dropFileIcons, newWadspaceId } from "@core/model";
 import { cleanDraft, toProjectDoc, validateProject, type GithubRepo, type Project, type ProjectDraft } from "@core/projects";
 import { presetProjects, presetWadspace } from "@core/presets";

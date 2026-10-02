@@ -21,6 +21,9 @@
       "node"
     ],
     "paths": {
+      "@core-data/*": [
+        "../../crates/wad-core/data/*"
+      ],
       "@core/*": [
         "./src/core/*"
       ],

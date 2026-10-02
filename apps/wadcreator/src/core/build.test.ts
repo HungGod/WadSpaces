@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import apps from "./catalog/apps.json";
-import { PACKAGE_RE, RECIPES, recipeFor } from "./catalog/recipes";
+import apps from "@core-data/apps.json";
+import { recipeFor } from "./catalog/recipes";
 import { layoutJson, toBuildSpec } from "./build";
 import { dockerfile } from "./generator";
 import { defaultAdvanced, newWadspaceId, orderedIcons, type LayoutIcon, type WadspaceSpec } from "./model";
 import { validateProject } from "./projects";
-import { PRESETS, presetProjects, presetWadspace } from "./presets";
+import { presets, presetProjects, presetWadspace } from "./presets";
 import { ID_RE } from "./spec";
 
 const icon = (appId: string, row: number, extra: Partial<LayoutIcon> = {}): LayoutIcon => ({
@@ -28,16 +28,9 @@ const ws = (icons: LayoutIcon[]): WadspaceSpec => ({
   advanced: defaultAdvanced("Pacific/Fiji"),
 });
 
+// Every catalog app has a recipe, with plain Debian package names: wad-core's
+// recipes tests check that (crates/wad-core/src/recipes.rs).
 describe("catalog", () => {
-  it("every app has an explicit recipe", () => {
-    const missing = apps.filter((a) => !RECIPES[a.id]).map((a) => a.id);
-    expect(missing).toEqual([]);
-  });
-
-  it("apt package names are plain Debian names", () => {
-    for (const r of Object.values(RECIPES)) if (r.kind === "apt") for (const p of r.packages) expect(p).toMatch(PACKAGE_RE);
-  });
-
   it("an unknown app with a site is a web app", () => {
     expect(recipeFor("custom-x1", "example.com/app")).toEqual({ kind: "webapp", url: "https://example.com/app" });
     expect(recipeFor("custom-x1").kind).toBe("soon");
@@ -109,7 +102,7 @@ describe("model", () => {
 
 describe("presets as Builder wadspaces", () => {
   it("every preset has a desktop and keeps its run settings", () => {
-    for (const p of PRESETS) {
+    for (const p of presets()) {
       const w = presetWadspace(p.id)!;
       expect(w.layout.icons.length).toBeGreaterThan(0);
       expect(w.advanced.hotkey).toBe(p.hotkey);

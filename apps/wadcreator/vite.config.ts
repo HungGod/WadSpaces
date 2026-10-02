@@ -4,6 +4,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 const src = fileURLToPath(new URL("./src", import.meta.url));
+// Data the Rust core (crates/wad-core) and the UI share: the app catalog and
+// the preset desktops.
+const coreData = fileURLToPath(new URL("../../crates/wad-core/data", import.meta.url));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -11,6 +14,7 @@ export default defineConfig({
   clearScreen: false,
   resolve: {
     alias: {
+      "@core-data": coreData,
       "@core": `${src}/core`,
       "@": src,
     },
@@ -20,5 +24,5 @@ export default defineConfig({
   server: { host: "localhost", port: 8081, strictPort: true },
   preview: { host: "localhost", port: 8081, strictPort: true },
   // Rules tests need the emulator: npm run test:rules.
-  test: { exclude: [...configDefaults.exclude, "tests/rules/**", "src-tauri/**"] },
+  test: { exclude: [...configDefaults.exclude, "tests/rules/**", "src-tauri/**"], setupFiles: ["src/test-setup.ts"] },
 });

@@ -6,7 +6,7 @@
 //
 // A case is a function name and its arguments as JSON. Bytes (tar archives,
 // wallpapers) are {"$bytes": base64}. A function that throws gives {"err"}.
-import { PRESETS, presetWadspace } from "./presets";
+import { presets, presetWadspace } from "./presets";
 import { defaultAdvanced, type Layout, type LayoutIcon, type WadspaceSpec } from "./model";
 import { newSpec, type CreatorSpec, type WaddSpec } from "./spec";
 import type { Project, ProjectDraft } from "./projects";
@@ -123,7 +123,7 @@ const CREATOR: CreatorSpec[] = [
   newSpec({ id: "wall", name: "Wall", wallpaper: { fileName: "wallpaper.png", mode: "center", color: "#0b0b14" } }),
   newSpec({ id: "Bad ID", name: " ", image: " ", display: "stream", port: 8080, hotkey: 12, webapps: [{ name: "x", url: "not a url" }], kaleResources: [{ app_name: "y", app_url: "" }] }),
   newSpec({ id: "lowport", name: "Low", display: "stream", port: 80, hotkey: 0 }),
-  ...PRESETS,
+  ...presets(),
 ];
 
 const WADD: WaddSpec[] = [
@@ -208,7 +208,7 @@ export function cases(): Case[] {
 
   // build
   for (const w of WADSPACES) for (const o of BUILD_OPTS) add("toBuildSpec", w, o);
-  for (const p of PRESETS) add("toBuildSpec", presetWadspace(p.id), { projects: PROJECTS });
+  for (const p of presets()) add("toBuildSpec", presetWadspace(p.id), { projects: PROJECTS });
   for (const n of ["Claude", "  My App_Name  ", "Open Router", "Ünï Cødé", "a--b__c  d", ""]) add("kaleDesktop", n);
 
   // recipes and icons

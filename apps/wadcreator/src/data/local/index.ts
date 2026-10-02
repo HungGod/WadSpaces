@@ -11,7 +11,7 @@
 // machine's github_token (/api/github) and mounts the clones when it launches
 // a wadspace (/api/launches). Tailscale is wadd's as well (/api/tailnet).
 import { toBuildSpec } from "@core/build";
-import catalog from "@core/catalog/apps.json";
+import catalog from "@core-data/apps.json";
 import { defaultAdvanced, newWadspaceId, type WadspaceSpec } from "@core/model";
 import { cleanDraft, toProjectDoc, type Project, type ProjectDraft } from "@core/projects";
 import { presetProjects, presetWadspace } from "@core/presets";

@@ -6,6 +6,7 @@ import "@fontsource/space-grotesk/500.css";
 import "@fontsource/space-grotesk/600.css";
 import "@fontsource/space-grotesk/700.css";
 import "./styles/globals.css";
+import { initCore } from "./core/wasm";
 import { initBackend } from "./data";
 
 // Apply the saved theme before the first paint so there's no flash.
@@ -15,8 +16,9 @@ try {
   document.documentElement.dataset.theme = "dark";
 }
 
-// The backend (wadd offline, Firebase online) is ready before anything renders.
-initBackend().then(async () => {
+// The core (WebAssembly) and the backend (wadd offline, Firebase online) are
+// ready before anything renders.
+initCore().then(initBackend).then(async () => {
   const { default: App } = await import("./App");
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

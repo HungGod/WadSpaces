@@ -1,8 +1,10 @@
 // A workspace as the generator sees it: what goes into the image (build) and
 // how the machine runs it (run). The run half maps 1:1 onto wadd's
 // workspaces.yaml entries; the build half onto Wadspaces-David/<dir>/.
-// The Builder's model (model.ts) becomes one of these through build.ts.
-// Shared with the Cloud Functions: no import.meta.env here.
+// The Builder's model (model.ts) becomes one of these through build.ts. The
+// functions are wad-core's (crates/wad-core/src/spec.rs), run as WebAssembly.
+
+import { call } from "./wasm";
 
 export type FeatureId =
   | "git"
@@ -28,7 +30,8 @@ export interface Feature {
   hidden?: boolean; // pulled in automatically, not offered in the picker
 }
 
-// Order here is the order they are installed in; keep in sync with
+// Order here is the order they are installed in, as wad-core's FEATURES has
+// them (a test checks); keep in sync with
 // Wadspaces-David/_common/root/usr/local/lib/wadspaces/features/.
 export const FEATURES: Feature[] = [
   { id: "git", label: "Git", description: "git and git-lfs" },
@@ -153,105 +156,38 @@ export interface WaddSpec {
 
 export const DEFAULT_BASE_IMAGE = "localhost/wadspaces-base:trixie";
 export const SELKIES_BASE_IMAGE = "localhost/wadspaces-selkies:trixie";
-export const baseImageFor = (d: Display) => (d === "host" ? DEFAULT_BASE_IMAGE : SELKIES_BASE_IMAGE);
-export const displayOf = (spec: Pick<CreatorSpec, "display">): Display => spec.display ?? "stream";
+export const baseImageFor = (d: Display): string => call("baseImageFor", d);
 export const DEFAULT_IMAGE_PREFIX = "localhost/wadspaces-";
 export const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 export function newSpec(partial: Partial<CreatorSpec> = {}): CreatorSpec {
-  const id = partial.id ?? "";
-  const display = partial.display ?? "host";
-  return {
-    id,
-    name: "",
-    display,
-    baseImage: baseImageFor(display),
-    features: ["git", "vscode", "claude-code"],
-    webapps: [],
-    kaleResources: [],
-    image: id ? `${DEFAULT_IMAGE_PREFIX}${id}:latest` : "",
-    port: 3160,
-    hotkey: null,
-    env: { PUID: "1000", PGID: "1000", TZ: "Pacific/Fiji" },
-    secrets: ["github_token"],
-    persistConfig: true,
-    devices: ["/dev/dri"],
-    shmSize: "1g",
-    autostart: false,
-    ...partial,
-  };
+  return call("newSpec", partial);
 }
 
 export function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 63);
+  return call("slugify", s);
 }
 
 /** Features in install order. Web apps imply chrome and Kale Browser apps imply
  *  kalebrowser; other dependencies are installed by the feature scripts
  *  themselves (`need nodejs`), so they are not listed. */
 export function resolveFeatures(spec: Pick<CreatorSpec, "features" | "webapps" | "kaleResources">): FeatureId[] {
-  const want = new Set<FeatureId>(spec.features);
-  if (spec.webapps.length) want.add("chrome");
-  if (spec.kaleResources.length) want.add("kalebrowser");
-  return FEATURES.map((f) => f.id).filter((id) => want.has(id));
+  return call("resolveFeatures", spec);
 }
 
 export function volumesFor(spec: Pick<CreatorSpec, "id" | "persistConfig">): string[] {
-  return spec.persistConfig ? [`wad-${spec.id}-config:/config:z`] : [];
+  return call("volumesFor", spec);
 }
 
 export function toWaddSpec(spec: CreatorSpec): WaddSpec {
-  const w: WaddSpec = { id: spec.id, name: spec.name, image: spec.image };
-  if (displayOf(spec) === "host") w.display = "host";
-  else w.port = spec.port;
-  w.enabled = true;
-  if (spec.hotkey) w.hotkey = spec.hotkey;
-  if (Object.keys(spec.env).length) w.env = spec.env;
-  if (spec.secrets.length) w.secrets = spec.secrets;
-  const vols = volumesFor(spec);
-  if (vols.length) w.volumes = vols;
-  if (spec.devices.length) w.devices = spec.devices;
-  w.shm_size = spec.shmSize || null;
-  if (spec.autostart) w.autostart = true;
-  return w;
+  return call("toWaddSpec", spec);
 }
 
 /** Merge a machine's runtime spec into a creator spec (for editing). */
 export function fromWaddSpec(w: WaddSpec, base?: CreatorSpec): CreatorSpec {
-  const s = base ? { ...base } : newSpec({ id: w.id, features: [] });
-  return {
-    ...s,
-    id: w.id,
-    name: w.name,
-    image: w.image,
-    display: w.display ?? "stream",
-    port: w.port ?? s.port,
-    hotkey: w.hotkey ?? null,
-    env: w.env ?? {},
-    secrets: w.secrets ?? [],
-    persistConfig: (w.volumes ?? []).some((v) => v.startsWith(`wad-${w.id}-config:/config`)),
-    devices: w.devices ?? [],
-    shmSize: w.shm_size ?? "",
-    autostart: w.autostart ?? false,
-  };
+  return call("fromWaddSpec", w, ...(base ? [base] : []));
 }
 
 export function validate(spec: CreatorSpec): string[] {
-  const errs: string[] = [];
-  if (!ID_RE.test(spec.id)) errs.push("ID must be lowercase letters, digits and dashes.");
-  if (!spec.name.trim()) errs.push("Name is required.");
-  if (!spec.image.trim()) errs.push("Image is required.");
-  if (displayOf(spec) === "stream") {
-    if (!(spec.port >= 1024 && spec.port <= 65535)) errs.push("Port must be between 1024 and 65535.");
-    if ([8080, 8081, 9222].includes(spec.port)) errs.push("Ports 8080, 8081 and 9222 are used by the host.");
-  }
-  if (spec.hotkey != null && !(spec.hotkey >= 1 && spec.hotkey <= 9)) errs.push("Hotkey must be 1 to 9.");
-  for (const a of [...spec.webapps.map((w) => w.url), ...spec.kaleResources.map((k) => k.app_url)]) {
-    if (!/^https?:\/\/\S+$/.test(a)) errs.push(`Not a URL: ${a || "(empty)"}`);
-  }
-  return errs;
+  return call("validate", spec);
 }

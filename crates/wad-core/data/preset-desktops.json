@@ -1,10 +1,4 @@
-// The desktops of the six hand-written workspaces (Wadspaces-David), as the
-// Builder shows them. Generated once from the UI mockup's seed data; the
-// icons match what's on screen in each image. Web icons in the Kale workspaces
-// open as Kale Browser apps, as the images do.
-import type { Layout } from "./model";
-
-export const PRESET_DESKTOPS: Record<string, { description: string; layout: Layout }> = {
+{
   "writing": {
     "description": "writing",
     "layout": {
@@ -542,4 +536,4 @@ export const PRESET_DESKTOPS: Record<string, { description: string; layout: Layo
       "grid": true
     }
   }
-};
+}

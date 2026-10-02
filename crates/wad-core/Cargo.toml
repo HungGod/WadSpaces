@@ -1,0 +1,12 @@
+[package]
+name = "wad-core"
+description = "WadSpaces' core logic: designs to build specs, generated files, projects, presets. Native (wadd) and WebAssembly (the UI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
