@@ -6,6 +6,7 @@
 mod github;
 #[cfg(feature = "spike")]
 mod spike;
+mod wadd;
 mod window;
 
 use specta_typescript::Typescript;
@@ -25,12 +26,17 @@ fn app_version() -> String {
 }
 
 fn commands() -> tauri_specta::Builder<tauri::Wry> {
-    tauri_specta::Builder::<tauri::Wry>::new().error_handling(ErrorHandlingMode::Throw).commands(collect_commands![
-        app_version,
-        github::github_device_start,
-        github::github_device_wait,
-        github::github_device_cancel,
-    ])
+    tauri_specta::Builder::<tauri::Wry>::new()
+        .error_handling(ErrorHandlingMode::Throw)
+        .commands(collect_commands![
+            app_version,
+            github::github_device_start,
+            github::github_device_wait,
+            github::github_device_cancel,
+            wadd::wadd_request,
+            wadd::wadd_last_state,
+        ])
+        .events(tauri_specta::collect_events![wadd::WaddEvent])
 }
 
 fn export_bindings(path: &std::path::Path) -> Result<(), String> {
@@ -50,9 +56,19 @@ fn run(kiosk: bool) {
             }
         }))
         .manage(github::GithubState::new())
-        .invoke_handler(commands.invoke_handler())
+        .manage(wadd::Wadd::new())
+        .invoke_handler({
+            // Commands with a raw body aren't in the bindings; the rest are.
+            let typed = commands.invoke_handler();
+            let raw: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![wadd::wadd_build_context];
+            move |invoke| match invoke.message.command() {
+                "wadd_build_context" => raw(invoke),
+                _ => typed(invoke),
+            }
+        })
         .setup(move |app| {
             commands.mount_events(app);
+            wadd::follow_events(app.handle().clone());
             let _main = window::open_main(app.handle(), kiosk)?;
             #[cfg(feature = "spike")]
             spike::start(app.handle().clone(), _main);

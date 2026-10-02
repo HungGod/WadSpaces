@@ -1,9 +1,12 @@
 // Client for wadd, the daemon on this machine (legacy/wadd-py/wadd/api.py).
-// The offline app talks to it directly on 127.0.0.1:8080. The online app
-// never does: it reaches machines through the cloud relay (relay.ts).
+// In the machine app (Tauri) every call goes through the app's Rust side
+// (src-tauri/src/wadd.rs); in a browser (offline dev against a dev wadd) it's
+// fetch to 127.0.0.1:8080. The online app never calls wadd: it reaches
+// machines through the cloud relay (relay.ts).
 
 import type { GithubRepo, Project, ProjectDraft } from "@core/projects";
 import type { WaddSpec } from "@core/spec";
+import { inTauri } from "./shell";
 import type { TailnetStatus } from "./types";
 
 export const WADD_URL: string = import.meta.env.VITE_WADD_URL || "http://127.0.0.1:8080";
@@ -244,7 +247,30 @@ export class WaddError extends Error {
   }
 }
 
-async function call<T>(method: string, path: string, body?: unknown, raw?: { data: Uint8Array; type: string }): Promise<T> {
+type Method = "GET" | "POST" | "PUT" | "DELETE";
+
+/** Through the app's Rust side; it rejects with { status, message }. */
+async function callApp<T>(method: Method, path: string, body?: unknown, raw?: { data: Uint8Array; type: string }): Promise<T> {
+  const { commands } = await import("@/gen/bindings");
+  const { invoke } = await import("@tauri-apps/api/core");
+  try {
+    if (raw) {
+      // Only the build folder goes up raw (PUT /api/builds/{id}/context).
+      const id = decodeURIComponent(path.split("/")[3] ?? "");
+      return await invoke<T>("wadd_build_context", raw.data, { headers: { "x-build-id": id } });
+    }
+    return (await commands.waddRequest(method, path, body ?? null)) as T;
+  } catch (e) {
+    const f = e as { status?: number; message?: string };
+    const message = f.message ?? String(e);
+    const status = f.status ?? 0;
+    recordFailure({ time: Date.now(), method, path, status, message });
+    throw new WaddError(message, status);
+  }
+}
+
+async function call<T>(method: Method, path: string, body?: unknown, raw?: { data: Uint8Array; type: string }): Promise<T> {
+  if (inTauri) return callApp<T>(method, path, body, raw);
   let r: Response;
   try {
     r = await fetch(`${WADD_URL}${path}`, {
@@ -329,23 +355,19 @@ export const wadd = {
     call<RunRecord[]>("GET", `/api/runs?limit=${limit}${workspace ? `&workspace=${encodeURIComponent(workspace)}` : ""}`),
   /** Which of the newer endpoints this wadd has (older ones on a stick predate builds). */
   features: async () => {
-    const has = async (path: string) => {
-      try {
-        const r = await fetch(`${WADD_URL}${path}`);
-        return r.ok;
-      } catch {
-        return false;
+    // Probes, so they stay out of the failures list (call() would record them).
+    const get = async (path: string): Promise<unknown> => {
+      if (inTauri) {
+        const { commands } = await import("@/gen/bindings");
+        return commands.waddRequest("GET", path, null);
       }
+      const r = await fetch(`${WADD_URL}${path}`);
+      if (!r.ok) throw new Error(r.statusText);
+      return r.json();
     };
+    const has = (path: string) => get(path).then(() => true, () => false);
     // Tailscale's status too: whether it's installed decides the Tailnet card.
-    const tailnet = async (): Promise<TailnetStatus | null> => {
-      try {
-        const r = await fetch(`${WADD_URL}/api/tailnet`);
-        return r.ok ? ((await r.json()) as TailnetStatus) : null;
-      } catch {
-        return null;
-      }
-    };
+    const tailnet = () => get("/api/tailnet").then((t) => t as TailnetStatus, () => null);
     const [builds, library, runs, projects, tailnetStatus] = await Promise.all([
       has("/api/builds"),
       has("/api/library/drafts"),
@@ -361,6 +383,49 @@ export const wadd = {
   workspaceLog: (id: string, lines = 200) =>
     call<{ text: string }>("GET", `/api/logs/workspace/${encodeURIComponent(id)}?lines=${lines}`),
 };
+
+/** wadd's event stream (`state`, `build`, `launch`, …): `on(event, data)` for
+ *  each one, `onDrop()` when the stream drops (it reconnects by itself).
+ *  Returns a function that stops listening. */
+export function waddEvents(on: (event: string, data: unknown) => void, onDrop: () => void): () => void {
+  if (inTauri) {
+    let stop: (() => void) | null = null;
+    let stopped = false;
+    void (async () => {
+      const { commands, events } = await import("@/gen/bindings");
+      const unlisten = await events.waddEvent.listen(({ payload }) =>
+        payload.event === "disconnected" ? onDrop() : on(payload.event, payload.data),
+      );
+      if (stopped) return unlisten();
+      stop = unlisten;
+      // The app has been following the stream since it started: catch up.
+      const last = await commands.waddLastState();
+      if (last != null) on("state", last);
+    })();
+    return () => {
+      stopped = true;
+      stop?.();
+    };
+  }
+  let es: EventSource | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const open = () => {
+    es = new EventSource(`${WADD_URL}/api/events`);
+    for (const name of ["state", "build", "launch", "projects", "tailnet"]) {
+      es.addEventListener(name, (e) => on(name, JSON.parse((e as MessageEvent).data)));
+    }
+    es.onerror = () => {
+      es?.close();
+      onDrop();
+      timer = setTimeout(open, 3000);
+    };
+  };
+  open();
+  return () => {
+    clearTimeout(timer);
+    es?.close();
+  };
+}
 
 // ------------------------------------------------------------ formatting
 export function formatBytes(n: number): string {

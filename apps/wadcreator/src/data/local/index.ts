@@ -19,7 +19,7 @@ import { toWaddSpec, type WaddSpec } from "@core/spec";
 import { imageDataUrl } from "@/lib/images";
 import type { App, Container, ContainerRun, Draft, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
 import {
-  WADD_URL,
+  waddEvents,
   WaddError,
   downloadLabel,
   wadd,
@@ -162,49 +162,55 @@ export class LocalBackend implements Backend {
   }
 
   private connect() {
-    const es = new EventSource(`${WADD_URL}/api/events`);
-    es.addEventListener("state", (e) => {
-      const snap = JSON.parse((e as MessageEvent).data) as Snapshot;
-      this.snap = snap;
-      this.connected = true;
-      this.gotFirstSnap();
-      this.emit("machines");
-      this.emit("focus");
-      // The set of installed workspaces (or whether their images are here) changed.
-      const key = snap.workspaces.map((w) => `${w.id}:${w.enabled}:${w.state.image_present}:${w.image}`).join(",");
-      if (key !== this.specsKey) {
-        this.specsKey = key;
-        this.refreshSpecs().then(() => this.emit("wadspaces"));
-      }
-    });
-    es.addEventListener("build", (e) => {
-      const b = toProgress(JSON.parse((e as MessageEvent).data) as BuildUpdate);
-      this.buildListeners.forEach((fn) => fn(b));
-    });
-    es.addEventListener("launch", (e) => {
-      const l = toLaunchProgress(JSON.parse((e as MessageEvent).data) as LaunchUpdate);
-      this.launchListeners.forEach((fn) => fn(l));
-    });
-    // A project changed (here, or synced from the account): presets name theirs by id.
-    es.addEventListener("projects", () => {
-      this.refreshProjects().then(() => {
-        this.emit("projects");
-        this.emit("wadspaces");
-      });
-    });
-    // Tailscale's state changed (signed in, out, online): the event has no
-    // stream links, so ask for the whole status.
-    es.addEventListener("tailnet", () => {
-      this.freshTailnet(true).then(() => this.emit("machines"));
-    });
-    es.onerror = () => {
-      es.close();
-      if (this.connected) {
-        this.connected = false;
-        this.emit("machines");
-      }
-      setTimeout(() => this.connect(), 3000);
-    };
+    waddEvents(
+      (event, data) => {
+        switch (event) {
+          case "state": {
+            const snap = data as Snapshot;
+            this.snap = snap;
+            this.connected = true;
+            this.gotFirstSnap();
+            this.emit("machines");
+            this.emit("focus");
+            // The set of installed workspaces (or whether their images are here) changed.
+            const key = snap.workspaces.map((w) => `${w.id}:${w.enabled}:${w.state.image_present}:${w.image}`).join(",");
+            if (key !== this.specsKey) {
+              this.specsKey = key;
+              this.refreshSpecs().then(() => this.emit("wadspaces"));
+            }
+            break;
+          }
+          case "build": {
+            const b = toProgress(data as BuildUpdate);
+            this.buildListeners.forEach((fn) => fn(b));
+            break;
+          }
+          case "launch": {
+            const l = toLaunchProgress(data as LaunchUpdate);
+            this.launchListeners.forEach((fn) => fn(l));
+            break;
+          }
+          // A project changed (here, or synced from the account): presets name theirs by id.
+          case "projects":
+            this.refreshProjects().then(() => {
+              this.emit("projects");
+              this.emit("wadspaces");
+            });
+            break;
+          // Tailscale's state changed (signed in, out, online): the event has no
+          // stream links, so ask for the whole status.
+          case "tailnet":
+            this.freshTailnet(true).then(() => this.emit("machines"));
+            break;
+        }
+      },
+      () => {
+        if (this.connected) {
+          this.connected = false;
+          this.emit("machines");
+        }
+      },
+    );
   }
 
   private async refreshProjects() {

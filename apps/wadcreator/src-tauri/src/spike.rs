@@ -56,6 +56,21 @@ const LOGIN: &str = r#"(() => {
 
 const AFTER: &str = r#"window.__report("page", { href: location.href, text: document.body.innerText.slice(0, 300), watch: window.__spike });"#;
 
+/// Calls to wadd through the app (src/wadd.rs): a read, a 404, a refused
+/// secret, a raw upload, and whether the event stream has delivered a state.
+const WADD: &str = r#"(async () => {
+  const inv = window.__TAURI_INTERNALS__.invoke;
+  const r = {};
+  const t = async (k, f) => { try { r[k] = { ok: await f() }; } catch (e) { r[k] = { err: e }; } };
+  await t("specs", async () => (await inv("wadd_request", { method: "GET", path: "/api/specs", body: null })).map((s) => s.id));
+  await t("missing", () => inv("wadd_request", { method: "GET", path: "/api/workspaces/nope", body: null }));
+  await t("secret", () => inv("wadd_request", { method: "PUT", path: "/api/secrets/github_token", body: { value: "x" } }));
+  await t("traversal", () => inv("wadd_request", { method: "GET", path: "/api/../etc", body: null }));
+  await t("upload", () => inv("wadd_build_context", new Uint8Array(1024), { headers: { "x-build-id": "nope" } }));
+  await t("lastState", async () => (await inv("wadd_last_state"))?.machine);
+  window.__report("wadd", r);
+})();"#;
+
 /// A deep route, reloaded: does the asset protocol serve the app for it?
 const RELOAD: &str = r#"history.pushState({}, "", "/signup"); location.reload();"#;
 
@@ -115,6 +130,8 @@ pub fn start(app: AppHandle, w: WebviewWindow) {
         println!("SPIKE started {:?}", t0.elapsed());
         snapshot(&w, dir.join("1-start.png"));
         let _ = w.eval(ENV);
+        wait(3);
+        let _ = w.eval(WADD);
         wait(3);
         let _ = w.eval(LOGIN);
         wait(8);
