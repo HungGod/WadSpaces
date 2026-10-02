@@ -44,6 +44,8 @@ COPY host/usr/ /usr/
 # under /usr/lib/wadcreator: wadd adopts windows from that old Electron path
 # as a workspace, and this one is the shell.
 COPY .build/wadcreator-app/wadcreator /usr/bin/wadcreator
+# The HUD (apps/hud, Rust + GTK4 layer-shell), built by host/build.sh.
+COPY .build/hud/hud /usr/libexec/wadspaces/hud
 # Staged by host/build.sh from host/secrets/. wadd seeds podman secrets from
 # here; the admin hash is applied by wadspaces-admin-password.service.
 COPY .build/secrets/ /usr/lib/wadspaces/secrets/

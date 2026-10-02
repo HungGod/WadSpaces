@@ -24,6 +24,10 @@
 # needs Rust (rustup), Node, the WebKitGTK dev packages, and the Firebase web
 # config in WADCREATOR_DIR/.env.local.
 #
+# The HUD (apps/hud: the bar, power and Wi-Fi menus and the switcher above
+# every window) is built here too, into /usr/libexec/wadspaces/hud. It needs
+# gtk4-devel and gtk4-layer-shell-devel.
+#
 # Baked-in secrets come from host/secrets/ (gitignored, never in the build
 # context directly):
 #   admin_password_hash    crypt hash for `admin` (default: the one in bib-config.toml)
@@ -73,6 +77,14 @@ stage_wadcreator() {
     echo ">> building Wad Creator (Tauri) in ${WADCREATOR_DIR}"
     (cd "${WADCREATOR_DIR}" && npm ci --no-audit --no-fund && npm run build:app)
     install -m 755 "${ROOT}/target/release/wadcreator" "${out}/wadcreator"
+}
+
+stage_hud() {
+    local out="${ROOT}/.build/hud"
+    rm -rf "${out}" && mkdir -p "${out}"
+    echo ">> building the HUD (apps/hud)"
+    (cd "${ROOT}" && cargo build --release --quiet -p wadspaces-hud)
+    install -m 755 "${ROOT}/target/release/wadspaces-hud" "${out}/hud"
 }
 
 # admin's password hash or SSH key from bib-config.toml ("password" / "key").
@@ -250,6 +262,7 @@ case "${TARGET}" in
 esac
 
 stage_wadcreator
+stage_hud
 stage_secrets
 echo ">> building ${IMAGE}"
 podman build -f "${ROOT}/host/Containerfile" -t "${IMAGE}" "${ROOT}"

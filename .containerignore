@@ -8,6 +8,7 @@
 !host/usr
 !legacy/wadd-py/wadd
 !.build/wadcreator-app
+!.build/hud
 !.build/secrets
 !.build/ssh
 **/__pycache__
