@@ -331,3 +331,48 @@ async fn network_and_power_without_the_system_bus() {
     assert_eq!(status, 422);
     let _ = stop.send(());
 }
+
+#[tokio::test]
+async fn editing_workspaces_the_library_and_diagnostics() {
+    let (_d, sock, stop) = start(true).await;
+    let mut w = workspace("notes");
+    w.name = "Notes".into();
+    w.hotkey = Some(3);
+    let (status, body) = send(&sock, "POST", "/v1/workspaces", &serde_json::to_string(&w).unwrap()).await;
+    assert_eq!(status, 201, "{body}");
+    let (status, _) = send(&sock, "POST", "/v1/workspaces", &serde_json::to_string(&w).unwrap()).await;
+    assert_eq!(status, 409); // it exists
+    w.name = "Notes 2".into();
+    let (status, body) = send(&sock, "PUT", "/v1/workspaces/notes", &serde_json::to_string(&w).unwrap()).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains(r#""name":"Notes 2""#) && body.contains(r#""restartRequired":false"#), "{body}");
+    // Checked with the rest: writing has no hotkey 3, but two workspaces can't share a container name.
+    let mut clash = workspace("other");
+    clash.container_name = "wad-notes".into();
+    let (status, body) = send(&sock, "POST", "/v1/workspaces", &serde_json::to_string(&clash).unwrap()).await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(request(&sock, "DELETE", "/v1/workspaces/notes").await.0, 204);
+    assert_eq!(request(&sock, "DELETE", "/v1/workspaces/notes").await.0, 404);
+    // The library.
+    let (status, _) = send(&sock, "PUT", "/v1/library/drafts/d1", r#"{"name":"Draft"}"#).await;
+    assert_eq!(status, 200);
+    assert!(get(&sock, "/v1/library/drafts/d1").await.1.contains("Draft"));
+    assert!(get(&sock, "/v1/library/drafts").await.1.contains("Draft"));
+    assert_eq!(send(&sock, "PUT", "/v1/library/secrets/x", "{}").await.0, 404);
+    assert_eq!(send(&sock, "PUT", "/v1/library/drafts/..", "{}").await.0, 400);
+    assert_eq!(request(&sock, "DELETE", "/v1/library/drafts/d1").await.0, 204);
+    // Load, diagnostics, logs.
+    let (status, body) = get(&sock, "/v1/metrics").await;
+    assert_eq!(status, 200);
+    assert!(body.contains(r#""memTotal""#), "{body}");
+    let (status, body) = get(&sock, "/v1/diagnostics").await;
+    assert_eq!(status, 200);
+    assert!(
+        body.contains(r#""logUnits":["wadd","greetd","wad-writing"]"#) && body.contains("no machine in tests"),
+        "{body}"
+    );
+    assert_eq!(get(&sock, "/v1/logs/unit/sshd").await.0, 404); // not on the list
+    let (status, body) = get(&sock, "/v1/logs/workspace/writing").await;
+    assert_eq!(status, 503, "{body}");
+    let _ = stop.send(());
+}

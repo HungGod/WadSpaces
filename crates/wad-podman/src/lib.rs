@@ -38,6 +38,25 @@ pub struct Podman {
 }
 
 /// Percent-encodes one path segment (an image reference has / : @ in it).
+/// A container's output without a terminal comes in frames: a stream byte,
+/// three zero bytes, a big-endian u32 length, then that much output. Anything
+/// else (a terminal's raw output) is taken as it is.
+pub fn demux(b: &[u8]) -> String {
+    let framed = b.len() >= 8 && matches!(b[0], 0..=2) && b[1..4] == [0, 0, 0];
+    if !framed {
+        return String::from_utf8_lossy(b).into_owned();
+    }
+    let mut out = Vec::with_capacity(b.len());
+    let mut at = 0;
+    while at + 8 <= b.len() {
+        let n = u32::from_be_bytes([b[at + 4], b[at + 5], b[at + 6], b[at + 7]]) as usize;
+        let end = (at + 8 + n).min(b.len());
+        out.extend_from_slice(&b[at + 8..end]);
+        at = end;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 pub fn segment(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -103,6 +122,23 @@ impl Podman {
         }
     }
 
+    /// podman's own description (`podman info`).
+    pub async fn info(&self) -> Result<Value, Error> {
+        Ok(self.get_json("info", "/info").await?.unwrap_or(Value::Null))
+    }
+
+    /// A container's last `tail` lines of output (stdout and stderr). None if
+    /// there's no such container.
+    pub async fn container_logs(&self, name: &str, tail: usize) -> Result<Option<String>, Error> {
+        let path = format!("/containers/{}/logs?stdout=true&stderr=true&tail={tail}", segment(name));
+        let res = self.send(Method::GET, &path, None).await?;
+        match res.status() {
+            StatusCode::NOT_FOUND => Ok(None),
+            s if s.is_success() => Ok(Some(demux(&Self::body(res).await?))),
+            _ => Err(Self::status_error(&format!("logs {name}"), res).await),
+        }
+    }
+
     /// Whether podman answers (within 3 s).
     pub async fn ping(&self) -> bool {
         matches!(
@@ -113,7 +149,7 @@ impl Podman {
 
     /// Where podman keeps its images (to see which layers it has).
     pub async fn graph_root(&self) -> Result<Option<String>, Error> {
-        let info = self.get_json("info", "/info").await?.unwrap_or(Value::Null);
+        let info = self.info().await?;
         Ok(info.pointer("/store/graphRoot").and_then(Value::as_str).map(String::from))
     }
 

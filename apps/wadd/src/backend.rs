@@ -56,6 +56,14 @@ pub trait Backend: Send + Sync + 'static {
     async fn secret_names(&self) -> Result<Vec<String>, String> {
         Err("no podman".into())
     }
+    /// podman's own description.
+    async fn podman_info(&self) -> Result<serde_json::Value, String> {
+        Err("no podman".into())
+    }
+    /// A container's last lines of output; None if there's no container.
+    async fn container_logs(&self, _name: &str, _lines: usize) -> Result<Option<String>, String> {
+        Err("no podman".into())
+    }
     /// Creates (replacing) a secret. Its value only ever goes to podman.
     async fn create_secret(&self, _name: &str, _value: &[u8]) -> Result<(), String> {
         Err("no podman".into())
@@ -140,6 +148,12 @@ impl Backend for Offline {
         Err(self.0.clone())
     }
     async fn delete_secret(&self, _: &str) -> Result<bool, String> {
+        Err(self.0.clone())
+    }
+    async fn podman_info(&self) -> Result<serde_json::Value, String> {
+        Err(self.0.clone())
+    }
+    async fn container_logs(&self, _: &str, _: usize) -> Result<Option<String>, String> {
         Err(self.0.clone())
     }
 }
@@ -249,6 +263,14 @@ impl Backend for Real {
 
     async fn secret_names(&self) -> Result<Vec<String>, String> {
         self.podman.secret_names().await.map_err(|e| e.to_string())
+    }
+
+    async fn podman_info(&self) -> Result<serde_json::Value, String> {
+        self.podman.info().await.map_err(|e| e.to_string())
+    }
+
+    async fn container_logs(&self, name: &str, lines: usize) -> Result<Option<String>, String> {
+        self.podman.container_logs(name, lines).await.map_err(|e| e.to_string())
     }
 
     async fn create_secret(&self, name: &str, value: &[u8]) -> Result<(), String> {

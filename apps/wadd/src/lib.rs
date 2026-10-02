@@ -8,6 +8,7 @@ pub mod api;
 pub mod backend;
 pub mod builds;
 pub mod cloud;
+pub mod diagnostics;
 pub mod display;
 pub mod drives;
 pub mod events;
@@ -15,6 +16,7 @@ pub mod github;
 pub mod joblog;
 pub mod launches;
 pub mod logbuf;
+pub mod metrics;
 pub mod network;
 pub mod projects;
 pub mod pull;
@@ -247,6 +249,7 @@ impl Server {
         let builds =
             builds::Builds::new(registry.clone(), backend.clone(), bus.clone(), &d.state_dir, d.build_min_free_gb);
         let secrets = Arc::new(secrets::Secrets::new(backend.clone(), &d.state_dir));
+        let registry_backend = backend.clone();
         let cloud_cfg = cloud_settings(config);
         let github = github::GithubService::new(
             wad_github::Github::new(reqwest::Client::new()),
@@ -275,6 +278,8 @@ impl Server {
             )
         });
         let state = Arc::new(AppState {
+            registry_backend,
+            meter: metrics::Meter::default(),
             network: network::Network::new(None, bus.clone()),
             power: None,
             github,

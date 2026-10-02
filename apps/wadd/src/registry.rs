@@ -191,8 +191,9 @@ impl Registry {
                 });
             }
         }
-        *self.workspaces.lock().unwrap() = list;
+        *self.workspaces.lock().unwrap() = list.clone();
         self.bus.set_states(self.states());
+        self.bus.publish(Event::Workspaces(list));
         self.backend.install_units(units).await.map(drop)
     }
 
@@ -207,13 +208,52 @@ impl Registry {
 
     /// A new workspace list (a build added or changed one): saved, units
     /// rewritten, and whoever follows the list told.
+    /// The list is what counts: units that can't be written now (podman or
+    /// systemd down) are logged, and starting the workspace says why.
     pub async fn set_workspaces(&self, list: Vec<Workspace>) -> Result<(), String> {
         self.save(&list)?;
-        let r = self.load(list).await;
+        if let Err(e) = self.load(list).await {
+            tracing::warn!("workspace units: {e}");
+        }
         if let Some(f) = self.on_list.lock().unwrap().as_ref() {
             f();
         }
-        r
+        Ok(())
+    }
+
+    /// Adds a workspace, or replaces the one with its id (which keeps its
+    /// projects: those are a launch's business). The list is checked whole.
+    /// Whether it's running with the old settings.
+    pub async fn put_workspace(&self, mut ws: Workspace) -> Result<bool, ApiError> {
+        let bad = |e: String| ApiError::new(ErrorCode::BadRequest, e);
+        let mut list = self.workspaces();
+        let old = list.iter().position(|w| w.id == ws.id);
+        if let Some(i) = old
+            && ws.projects.is_empty()
+        {
+            ws.projects = list[i].projects.clone();
+        }
+        let changed = old.is_none_or(|i| list[i] != ws);
+        match old {
+            Some(i) => list[i] = ws.clone(),
+            None => list.push(ws.clone()),
+        }
+        let checked = wad_store::legacy::check_workspaces(list.iter().map(wad_store::legacy::to_yaml).collect())
+            .map_err(|e| bad(e.to_string()))?;
+        let running = self.state(&ws.id).is_some_and(|s| s.container == RUNNING);
+        self.set_workspaces(checked).await.map_err(|e| ApiError::new(ErrorCode::Internal, e))?;
+        Ok(old.is_some() && changed && running)
+    }
+
+    /// Removes a workspace from the list (stop it first).
+    pub async fn remove_workspace(&self, id: &str) -> Result<(), ApiError> {
+        let mut list = self.workspaces();
+        let before = list.len();
+        list.retain(|w| w.id != id);
+        if list.len() == before {
+            return Err(not_found(id));
+        }
+        self.set_workspaces(list).await.map_err(|e| ApiError::new(ErrorCode::Internal, e))
     }
 
     /// Calls `f` whenever set_workspaces changes the list (hotkeys follow it).

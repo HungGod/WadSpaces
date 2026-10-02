@@ -11,6 +11,7 @@ tauri-build.workspace = true
 
 [dependencies]
 wad-proto.workspace = true
+wad-store.workspace = true
 wad-github.workspace = true
 wad-firebase.workspace = true
 reqwest.workspace = true
@@ -36,3 +37,10 @@ custom-protocol = ["tauri/custom-protocol"]
 # A scripted run that checks WebKitGTK and Firebase behave (stage 1a, S3) and
 # saves screenshots: WADCREATOR_SPIKE_DIR=<dir> wadcreator. Never in the image.
 spike = ["dep:webkit2gtk", "dep:cairo-rs"]
+
+[dev-dependencies]
+# The parity tests run the Rust wadd itself, in-process.
+wadd = { path = "../../wadd" }
+wad-config.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

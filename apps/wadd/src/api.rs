@@ -41,6 +41,9 @@ pub struct AppState {
     pub secrets: Arc<crate::secrets::Secrets>,
     pub github: Arc<crate::github::GithubService>,
     pub network: Arc<crate::network::Network>,
+    /// The machine the registry manages (podman), for diagnostics.
+    pub registry_backend: Arc<dyn crate::backend::Backend>,
+    pub meter: crate::metrics::Meter,
     /// Power off and restart (logind); None without the system bus.
     pub power: Option<wad_systemd::Power>,
     /// The account link; None without cloud settings.
@@ -113,8 +116,8 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/machine", get(machine))
         .route("/v1/logs", get(logs))
         .route("/v1/events", get(events))
-        .route("/v1/workspaces", get(workspaces))
-        .route("/v1/workspaces/{id}", get(workspace))
+        .route("/v1/workspaces", get(workspaces).post(workspace_create))
+        .route("/v1/workspaces/{id}", get(workspace).put(workspace_put).delete(workspace_delete))
         .route("/v1/workspaces/{id}/state", get(workspace_state))
         .route("/v1/workspaces/{id}/start", post(start))
         .route("/v1/workspaces/{id}/stop", post(stop))
@@ -156,6 +159,11 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/secrets", get(secrets))
         .route("/v1/secrets/{name}", axum::routing::put(secret_put).delete(secret_delete))
         .route("/v1/library/{collection}", get(library))
+        .route("/v1/library/{collection}/{id}", get(library_get).put(library_put).delete(library_delete))
+        .route("/v1/metrics", get(metrics))
+        .route("/v1/diagnostics", get(diagnostics))
+        .route("/v1/logs/unit/{unit}", get(unit_log))
+        .route("/v1/logs/workspace/{id}", get(workspace_log))
         .fallback(|| async { Failure(ApiError::new(ErrorCode::NotFound, "no such endpoint")) })
         .layer(middleware::from_fn_with_state(app.clone(), check_peer))
         .with_state(app)
@@ -184,6 +192,46 @@ async fn workspaces(State(app): State<Arc<AppState>>) -> Json<Vec<Workspace>> {
 
 async fn workspace(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Workspace>, Failure> {
     app.registry.workspaces().into_iter().find(|w| w.id == id).map(Json).ok_or_else(|| no_workspace(&id))
+}
+
+/// Adds a workspace (refused if one has that id).
+async fn workspace_create(
+    State(app): State<Arc<AppState>>,
+    Json(ws): Json<Workspace>,
+) -> Result<(StatusCode, Json<Workspace>), Failure> {
+    if app.registry.workspaces().iter().any(|w| w.id == ws.id) {
+        return Err(Failure(ApiError::new(ErrorCode::Conflict, format!("workspace {:?} already exists", ws.id))));
+    }
+    let id = ws.id.clone();
+    app.registry.put_workspace(ws).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(app.registry.workspaces().into_iter().find(|w| w.id == id).ok_or_else(|| no_workspace(&id))?),
+    ))
+}
+
+/// Replaces a workspace's settings (its projects stay: a launch sets those).
+async fn workspace_put(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(mut ws): Json<Workspace>,
+) -> Result<Json<wad_proto::v1::WorkspaceSaved>, Failure> {
+    if !app.registry.workspaces().iter().any(|w| w.id == id) {
+        return Err(no_workspace(&id));
+    }
+    ws.id = id.clone();
+    let restart_required = app.registry.put_workspace(ws).await?;
+    let workspace = app.registry.workspaces().into_iter().find(|w| w.id == id).ok_or_else(|| no_workspace(&id))?;
+    Ok(Json(wad_proto::v1::WorkspaceSaved { workspace, restart_required }))
+}
+
+/// Removes a workspace, stopping it first if it runs.
+async fn workspace_delete(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, Failure> {
+    if app.registry.state(&id).is_some_and(|s| s.container == "running") {
+        app.view.stop(&id).await?;
+    }
+    app.registry.remove_workspace(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn states(State(app): State<Arc<AppState>>) -> Json<Vec<WorkspaceState>> {
@@ -639,6 +687,78 @@ async fn secret_delete(State(app): State<Arc<AppState>>, Path(name): Path<String
     } else {
         Err(Failure(ApiError::new(ErrorCode::NotFound, format!("no secret {name:?}"))))
     }
+}
+
+fn lib_failure(e: String) -> Failure {
+    Failure(ApiError::new(if e.starts_with("no collection") { ErrorCode::NotFound } else { ErrorCode::BadRequest }, e))
+}
+
+async fn library_get(
+    State(app): State<Arc<AppState>>,
+    Path((collection, id)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    match app.store.library_get(&collection, &id).map_err(lib_failure)? {
+        Some(d) => Ok(Json(d)),
+        None => Err(Failure(ApiError::new(ErrorCode::NotFound, format!("no {id:?} in {collection}")))),
+    }
+}
+
+/// Saves one of Wad Creator's documents (opaque to wadd).
+async fn library_put(
+    State(app): State<Arc<AppState>>,
+    Path((collection, id)): Path<(String, String)>,
+    Json(doc): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    app.store.library_put(&collection, &id, &doc).map_err(lib_failure)?;
+    Ok(Json(doc))
+}
+
+async fn library_delete(
+    State(app): State<Arc<AppState>>,
+    Path((collection, id)): Path<(String, String)>,
+) -> Result<StatusCode, Failure> {
+    if app.store.library_delete(&collection, &id).map_err(lib_failure)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(Failure(ApiError::new(ErrorCode::NotFound, format!("no {id:?} in {collection}"))))
+    }
+}
+
+async fn metrics(State(app): State<Arc<AppState>>) -> Json<wad_proto::v1::Metrics> {
+    let root = app
+        .registry_backend
+        .podman_info()
+        .await
+        .ok()
+        .and_then(|i| i.pointer("/store/graphRoot").and_then(|v| v.as_str()).map(String::from));
+    Json(app.meter.snapshot(std::path::Path::new(root.as_deref().unwrap_or("/"))).await)
+}
+
+async fn diagnostics(State(app): State<Arc<AppState>>) -> Json<wad_proto::v1::Diagnostics> {
+    Json(crate::diagnostics::diagnostics(&app).await)
+}
+
+#[derive(Deserialize)]
+struct LinesQuery {
+    lines: Option<usize>,
+}
+
+/// A unit's journal (wadd, greetd, a workspace's), redacted.
+async fn unit_log(
+    State(app): State<Arc<AppState>>,
+    Path(unit): Path<String>,
+    Query(q): Query<LinesQuery>,
+) -> Result<Json<wad_proto::v1::LogText>, Failure> {
+    Ok(Json(crate::diagnostics::unit_log(&app, &unit, q.lines.unwrap_or(200).clamp(1, 2000)).await?))
+}
+
+/// A workspace container's output, redacted.
+async fn workspace_log(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(q): Query<LinesQuery>,
+) -> Result<Json<wad_proto::v1::LogText>, Failure> {
+    Ok(Json(crate::diagnostics::workspace_log(&app, &id, q.lines.unwrap_or(200).clamp(1, 2000)).await?))
 }
 
 async fn library(

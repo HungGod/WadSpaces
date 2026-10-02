@@ -137,3 +137,13 @@ async fn real_rootless_podman() {
     assert!(p.image_exists("docker.io/library/busybox:latest").await.unwrap());
     assert_eq!(p.container_status("wad-does-not-exist").await.unwrap(), "missing");
 }
+
+#[test]
+fn container_output_frames() {
+    let mut framed = vec![1, 0, 0, 0, 0, 0, 0, 6];
+    framed.extend_from_slice(b"hello\n");
+    framed.extend_from_slice(&[2, 0, 0, 0, 0, 0, 0, 4]);
+    framed.extend_from_slice(b"oops");
+    assert_eq!(demux(&framed), "hello\noops");
+    assert_eq!(demux(b"plain text\n"), "plain text\n");
+}

@@ -33,6 +33,11 @@ export const commands = {
 	waddRequest: (method: Method, path: string, body: unknown | null) => __TAURI_INVOKE<Json>("wadd_request", { method, path, body }),
 	/**  The last `state` event (wadd's snapshot), if one has arrived. */
 	waddLastState: () => __TAURI_INVOKE<unknown | null>("wadd_last_state"),
+	/**
+	 *  Which wadd the app talks to: "rs" or "py" (builds differ: the Rust one
+	 *  builds from the design).
+	 */
+	waddKind: () => __TAURI_INVOKE<string>("wadd_kind"),
 };
 
 /** Events */

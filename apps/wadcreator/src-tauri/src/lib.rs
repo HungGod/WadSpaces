@@ -4,6 +4,7 @@
 //! and Firestore, so values like the GitHub token never reach JavaScript.
 
 mod github;
+mod rswadd;
 #[cfg(feature = "spike")]
 mod spike;
 mod theme;
@@ -38,6 +39,7 @@ fn commands() -> tauri_specta::Builder<tauri::Wry> {
             theme::set_theme,
             wadd::wadd_request,
             wadd::wadd_last_state,
+            wadd::wadd_kind,
         ])
         .events(tauri_specta::collect_events![wadd::WaddEvent])
 }

@@ -72,6 +72,8 @@ pub enum Event {
     Github(crate::github::SignIn),
     /// The network changed (joined, left, connectivity).
     Network(NetworkStatus),
+    /// The workspace list changed (added, edited, removed, built).
+    Workspaces(Vec<Workspace>),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
@@ -93,6 +95,7 @@ impl Event {
             Event::Cloud(_) => "cloud",
             Event::Github(_) => "github",
             Event::Network(_) => "network",
+            Event::Workspaces(_) => "workspaces",
             Event::Notice { .. } => "notice",
         }
     }
@@ -686,4 +689,84 @@ pub enum PowerAction {
 #[serde(rename_all = "camelCase")]
 pub struct PowerRequest {
     pub action: PowerAction,
+}
+
+/// GET /v1/metrics: how busy the machine is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Metrics {
+    /// Percent busy since the last look.
+    pub cpu: f64,
+    /// Percent of memory used.
+    pub mem: f64,
+    pub mem_used: u64,
+    pub mem_total: u64,
+    pub disk_free: u64,
+    pub disk_total: u64,
+    /// The 1-minute load average.
+    pub load: f64,
+    /// The first GPU, e.g. "Intel (i915)".
+    pub gpu: String,
+}
+
+/// PUT /v1/workspaces/{id}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSaved {
+    pub workspace: Workspace,
+    /// It's running with the old settings: a restart picks up the new ones.
+    pub restart_required: bool,
+}
+
+/// GET /v1/diagnostics: enough to see what's wrong without a shell. Redacted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Diagnostics {
+    pub wadd: DiagWadd,
+    pub podman: DiagPodman,
+    pub disk: DiagDisk,
+    pub network: NetworkStatus,
+    pub view: ViewState,
+    pub keys: KeysStatus,
+    pub secrets: Vec<SecretInfo>,
+    /// The units whose logs can be read (GET /v1/logs/unit/{unit}).
+    pub log_units: Vec<String>,
+    pub workspaces: Vec<WorkspaceState>,
+    /// The last warnings and errors in wadd's log.
+    pub recent_problems: Vec<LogLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagWadd {
+    pub version: String,
+    pub uptime_s: u64,
+    pub pid: u32,
+    pub profile: Profile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagPodman {
+    pub connected: bool,
+    pub version: Option<String>,
+    pub graph_root: Option<String>,
+    pub storage_driver: Option<String>,
+    pub images: Option<u64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagDisk {
+    pub path: String,
+    pub free_bytes: u64,
+    pub total_bytes: u64,
+}
+
+/// GET /v1/logs/unit/{unit} and /v1/logs/workspace/{id}: redacted text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LogText {
+    pub text: String,
 }

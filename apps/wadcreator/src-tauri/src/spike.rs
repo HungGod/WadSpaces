@@ -56,12 +56,16 @@ const LOGIN: &str = r#"(() => {
 
 const AFTER: &str = r#"window.__report("page", { href: location.href, text: document.body.innerText.slice(0, 300), watch: window.__spike });"#;
 
-/// Calls to wadd through the app (src/wadd.rs): a read, a 404, a refused
-/// secret, a raw upload, and whether the event stream has delivered a state.
+/// Calls to wadd through the app (src/wadd.rs): which wadd, reads, a 404, a
+/// refused secret, a raw upload, and whether the event stream has delivered
+/// a state.
 const WADD: &str = r#"(async () => {
   const inv = window.__TAURI_INTERNALS__.invoke;
   const r = {};
   const t = async (k, f) => { try { r[k] = { ok: await f() }; } catch (e) { r[k] = { err: e }; } };
+  await t("kind", () => inv("wadd_kind"));
+  await t("network", async () => (await inv("wadd_request", { method: "GET", path: "/api/network", body: null })).connectivity);
+  await t("wifi", async () => (await inv("wadd_request", { method: "GET", path: "/api/network/wifi", body: null })).length);
   await t("specs", async () => (await inv("wadd_request", { method: "GET", path: "/api/specs", body: null })).map((s) => s.id));
   await t("missing", () => inv("wadd_request", { method: "GET", path: "/api/workspaces/nope", body: null }));
   await t("secret", () => inv("wadd_request", { method: "PUT", path: "/api/secrets/github_token", body: { value: "x" } }));

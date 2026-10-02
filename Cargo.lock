@@ -5686,13 +5686,17 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-single-instance",
  "tauri-specta",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wad-config",
  "wad-firebase",
  "wad-github",
  "wad-proto",
+ "wad-store",
+ "wadd",
  "webkit2gtk",
 ]
 

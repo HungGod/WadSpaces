@@ -4,6 +4,7 @@
 // fetch to 127.0.0.1:8080. The online app never calls wadd: it reaches
 // machines through the cloud relay (relay.ts).
 
+import type { WadspaceSpec } from "@core/model";
 import type { GithubRepo, Project, ProjectDraft } from "@core/projects";
 import type { WaddSpec } from "@core/spec";
 import { inTauri } from "./shell";
@@ -310,6 +311,12 @@ async function call<T>(method: Method, path: string, body?: unknown, raw?: { dat
 }
 
 export const wadd = {
+  /** Which wadd answers: "rs" (the Rust one) or "py". A browser only reaches the Python one. */
+  kind: async (): Promise<"rs" | "py"> => {
+    if (!inTauri) return "py";
+    const { commands } = await import("@/gen/bindings");
+    return (await commands.waddKind()) === "rs" ? "rs" : "py";
+  },
   specs: () => call<WaddSpec[]>("GET", "/api/specs"),
   action: (id: string, action: "switch" | "start" | "stop" | "restart" | "download") =>
     call<{ ok: boolean }>("POST", `/api/workspaces/${encodeURIComponent(id)}/${action}`),
@@ -338,6 +345,9 @@ export const wadd = {
   createBuild: (workspace: WaddSpec, baseImage: string) => call<BuildSummary>("POST", "/api/builds", { workspace, base_image: baseImage }),
   buildContext: (id: string, tarball: Uint8Array) =>
     call<BuildSummary>("PUT", `/api/builds/${encodeURIComponent(id)}/context`, undefined, { data: tarball, type: "application/x-tar" }),
+  /** The Rust wadd: build from the design (it makes the build folder itself). */
+  buildDesign: (req: { design: WadspaceSpec; wallpaper: { fileName: string; data: string }; projects: Project[] }) =>
+    call<BuildSummary>("POST", "/api/builds/design", req),
   build: (id: string, since = 0) => call<BuildUpdate>("GET", `/api/builds/${encodeURIComponent(id)}?since=${since}`),
   cancelBuild: (id: string) => call<BuildSummary>("DELETE", `/api/builds/${encodeURIComponent(id)}`),
   // Projects (folders mounted at launch) and launches

@@ -198,6 +198,53 @@ impl State {
             .then(|| json_files(&self.dir.join("library").join(collection)).into_iter().map(|(_, d)| d).collect())
     }
 
+    fn library_file(&self, collection: &str, id: &str) -> Result<PathBuf, String> {
+        if !COLLECTIONS.contains(&collection) {
+            return Err(format!("no collection {collection:?}"));
+        }
+        // ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        let ok = (1..=128).contains(&id.len())
+            && id.as_bytes()[0].is_ascii_alphanumeric()
+            && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'));
+        if !ok {
+            return Err(format!("bad id {id:?}"));
+        }
+        Ok(self.dir.join("library").join(collection).join(format!("{id}.json")))
+    }
+
+    /// One library document; Ok(None) when there's none.
+    pub fn library_get(&self, collection: &str, id: &str) -> Result<Option<Value>, String> {
+        Ok(read_json(&self.library_file(collection, id)?))
+    }
+
+    /// Saves a library document (a JSON object, 24 MB at most: wallpapers
+    /// ride along as data URLs).
+    pub fn library_put(&self, collection: &str, id: &str, doc: &Value) -> Result<(), String> {
+        let path = self.library_file(collection, id)?;
+        if !doc.is_object() {
+            return Err("a document is a JSON object".into());
+        }
+        let data = serde_json::to_vec(doc).map_err(|e| e.to_string())?;
+        if data.len() > 24 * 1024 * 1024 {
+            return Err("document too big (24 MB max)".into());
+        }
+        let dir = path.parent().expect("a folder");
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, data)
+            .and_then(|_| std::fs::rename(&tmp, &path))
+            .map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// False if there was none.
+    pub fn library_delete(&self, collection: &str, id: &str) -> Result<bool, String> {
+        match std::fs::remove_file(self.library_file(collection, id)?) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
     /// What a launch mounted into a workspace (extra/<ws>/projects.json).
     pub fn manifest(&self, ws: &str) -> Option<Value> {
         read_json(&self.dir.join("extra").join(ws).join("projects.json"))

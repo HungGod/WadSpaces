@@ -48,7 +48,7 @@ import {
   type WadspacePatch,
 } from "../backend";
 import { ensureProjects, hasRepos, knownProjectIds, migrateRepos, withProjects } from "../projects";
-import { buildRequest, toLaunchProgress, toProgress } from "./builds";
+import { buildRequest, designRequest, toLaunchProgress, toProgress } from "./builds";
 import { LocalLibrary, type LibraryEntry } from "./library";
 import { lastSession, onboarded, presetProjectsMade } from "./store";
 
@@ -415,6 +415,7 @@ export class LocalBackend implements Backend {
   async startBuild(wadspaceId: string, design?: Wadspace) {
     if (!this.caps.localBuild) throw new Unsupported("Building on this machine (it needs a newer wadd)");
     const ws = design ?? (await this.getWadspace(wadspaceId));
+    if ((await wadd.kind()) === "rs") return (await wadd.buildDesign(await designRequest(ws, this.projects))).id;
     const req = await buildRequest(ws, this.specs.find((s) => s.id === wadspaceId), this.projects);
     const job = await wadd.createBuild(req.workspace, req.baseImage);
     await wadd.buildContext(job.id, req.tarball);

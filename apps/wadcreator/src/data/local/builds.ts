@@ -1,6 +1,8 @@
-// Building on this machine: the app makes the build folder (the same one
-// "Download build folder" gives you), tars it, and hands it to wadd, which
-// builds it with podman and adds the workspace (wadd/builds.py).
+// Building on this machine. For the Python wadd the app makes the build folder
+// (the same one "Download build folder" gives you), tars it, and hands it to
+// wadd, which builds it with podman and adds the workspace (wadd/builds.py).
+// The Rust wadd makes the folder itself from the design (designRequest): the
+// app only draws the wallpaper.
 import { toBuildSpec } from "@core/build";
 import { bundleFiles } from "@core/generator";
 import type { WadspaceSpec } from "@core/model";
@@ -38,6 +40,24 @@ export async function buildRequest(ws: WadspaceSpec, installed?: WaddSpec, proje
     ? { ...installed, ...fresh, volumes: union(installed.volumes, fresh.volumes), icon: installed.icon }
     : fresh;
   return { workspace, baseImage: spec.baseImage, tarball: tar(files), skipped };
+}
+
+/** What the Rust wadd builds from: the design, its wallpaper as drawn here, and its projects. */
+export interface DesignRequest {
+  design: WadspaceSpec;
+  wallpaper: { fileName: string; data: string };
+  projects: Project[];
+}
+
+export async function designRequest(ws: WadspaceSpec, projects?: Project[]): Promise<DesignRequest> {
+  const wp = await renderWallpaper(ws.layout.wallpaper);
+  return { design: ws, wallpaper: { fileName: wp.fileName, data: base64(new Uint8Array(await wp.blob.arrayBuffer())) }, projects: projects ?? [] };
+}
+
+function base64(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }
 
 /** wadd's build job, as the app tracks builds. */
