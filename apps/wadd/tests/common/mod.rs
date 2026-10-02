@@ -34,6 +34,10 @@ pub struct Machine {
     pub volumes: HashMap<String, String>,
     /// Times the units were written.
     pub installs: usize,
+    /// Builds asked for: (tag, base, context).
+    pub builds: Vec<(String, String, Vec<u8>)>,
+    pub build_fails: Option<String>,
+    pub build_slow: bool,
 }
 
 pub const TOKEN: &str = "ghp_TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT";
@@ -130,6 +134,26 @@ impl Backend for Fake {
     }
     async fn github_token(&self) -> Option<String> {
         Some(TOKEN.into())
+    }
+    async fn build(&self, context: Vec<u8>, tag: &str, base: &str, mut on_line: OnLine) -> Result<(), String> {
+        let (fails, slow) = {
+            let mut m = self.0.lock().unwrap();
+            m.builds.push((tag.into(), base.into(), context));
+            (m.build_fails.clone(), m.build_slow)
+        };
+        on_line(&format!("STEP 1/2: FROM {base}"));
+        if slow {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+        if let Some(e) = fails {
+            return Err(e);
+        }
+        on_line("STEP 2/2: COPY root/ /");
+        on_line("--> 0123abcd");
+        self.with(|m| {
+            m.images.insert(tag.into());
+        });
+        Ok(())
     }
     async fn workspace_of(&self, container: &str) -> Option<String> {
         self.0.lock().unwrap().labels.get(container).cloned()

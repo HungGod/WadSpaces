@@ -189,6 +189,59 @@ impl Podman {
         Ok(info.and_then(|i| i.get("Mountpoint").and_then(Value::as_str).filter(|m| !m.is_empty()).map(String::from)))
     }
 
+    /// Builds an image from a tar build context; returns the image id. Each
+    /// output line goes to `on_line`. podman answers 200 even when the build
+    /// fails, so errors come from the stream. Dropping the future closes the
+    /// stream, which stops the build.
+    pub async fn build(
+        &self,
+        context: Vec<u8>,
+        tag: &str,
+        buildargs: &serde_json::Map<String, Value>,
+        mut on_line: impl FnMut(&str),
+    ) -> Result<String, Error> {
+        let args = serde_json::to_string(buildargs).expect("json");
+        let path = format!(
+            "/build?t={}&layers=true&rm=true&forcerm=true&pull=false&buildargs={}",
+            segment(tag),
+            segment(&args)
+        );
+        let res = self.send(Method::POST, &path, Some((Bytes::from(context), "application/x-tar"))).await?;
+        if !res.status().is_success() {
+            return Err(Self::status_error(&format!("build {tag}"), res).await);
+        }
+        let mut body = res.into_body();
+        let mut buf: Vec<u8> = Vec::new();
+        let mut image_id = String::new();
+        while let Some(frame) = body.frame().await {
+            let frame = frame.map_err(|e| Error::Http(e.to_string()))?;
+            let Ok(data) = frame.into_data() else { continue };
+            buf.extend_from_slice(&data);
+            while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = buf.drain(..=nl).collect();
+                let Ok(msg) = serde_json::from_slice::<Value>(&line) else { continue };
+                let err = msg
+                    .pointer("/errorDetail/message")
+                    .or_else(|| msg.get("error"))
+                    .and_then(Value::as_str)
+                    .filter(|e| !e.is_empty());
+                if let Some(e) = err {
+                    return Err(Error::Stream(e.trim().to_string()));
+                }
+                let text = msg.get("stream").and_then(Value::as_str).unwrap_or_default();
+                let t = text.trim();
+                if t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    image_id = t.into();
+                    continue;
+                }
+                for part in text.trim_end_matches('\n').split('\n') {
+                    on_line(part);
+                }
+            }
+        }
+        Ok(image_id)
+    }
+
     // ---------------------------------------------------------- secrets
     /// A secret's value, for wadd's own use (git's token); never sent out.
     /// None if there's no such secret.

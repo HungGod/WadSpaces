@@ -16,27 +16,12 @@ root=$(cd "$(dirname "$0")/../../.." && pwd)
 image=${1:-localhost/wadspaces-cosmic-bodybuilding:latest}
 dir=$root/.build/wadd-try-view
 sock=$dir/wadd.sock
-# sway's runtime dir: under yours, because a native workspace mounts
-# $XDG_RUNTIME_DIR (and is pointed at this socket by WADSPACES_WAYLAND).
-rt_name=wadd-try-sway
-rt=$XDG_RUNTIME_DIR/$rt_name
-rm -rf "$dir" "$rt"
+rm -rf "$dir"
 mkdir -p "$dir/state" "$dir/projects"
-mkdir -m 700 "$rt"
-
-if command -v sway >/dev/null; then sway=sway; swaymsg=swaymsg; libs=
-else sway=$root/.build/sway/usr/bin/sway; swaymsg=$root/.build/sway/usr/bin/swaymsg; libs=$root/.build/sway/usr/lib64; fi
+. "$root/apps/wadd/dev/sway.sh"
 podman image exists localhost/wadspaces-test:latest ||
   podman build -q -t localhost/wadspaces-test:latest "$root/apps/wadd/dev/test-image" >/dev/null
-
-# The machine's sway rules, without its programs.
-{ grep -v '^exec ' "$root/host/etc/sway/wadspaces.conf"; echo 'output HEADLESS-1 resolution 1280x800'; } >"$dir/sway.conf"
-env -u WAYLAND_DISPLAY -u DISPLAY XDG_RUNTIME_DIR="$rt" WLR_BACKENDS=headless WLR_RENDERER=pixman \
-  WLR_LIBINPUT_NO_DEVICES=1 ${libs:+LD_LIBRARY_PATH=$libs} "$sway" -c "$dir/sway.conf" >"$dir/sway.log" 2>&1 &
-sway_pid=$!
-for _ in $(seq 50); do ls "$rt"/sway-ipc.*.sock >/dev/null 2>&1 && [ -S "$rt/wayland-1" ] && break; sleep 0.1; done
-ipc=$(ls "$rt"/sway-ipc.*.sock)
-sm() { env ${libs:+LD_LIBRARY_PATH=$libs} "$swaymsg" -s "$ipc" "$@"; }
+start_sway "$dir"
 
 cat >"$dir/wadd.toml" <<TOML
 [machine]
@@ -69,9 +54,7 @@ finish() {
   systemctl --user stop wad-trynative.service wad-trystream.service 2>/dev/null || true
   rm -f "$XDG_RUNTIME_DIR"/containers/systemd/wad-try*.container
   systemctl --user daemon-reload
-  kill "$sway_pid" 2>/dev/null || true
-  wait "$sway_pid" 2>/dev/null || true
-  rm -rf "$rt"
+  stop_sway
 }
 trap finish EXIT
 for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
@@ -81,17 +64,6 @@ view() { curl -sS --unix-socket "$sock" http://wadd/v1/view | sed -n 's/.*"view"
 until_view() { # substring
   for _ in $(seq 1200); do view | grep -q "$1" && return 0; sleep 0.1; done
   echo "timed out: $(view)"; tail -5 "$dir/wadd.log"; return 1
-}
-focused() { sm -t get_workspaces | python3 -c 'import json,sys; print(next(w["name"] for w in json.load(sys.stdin) if w["focused"]))'; }
-where() { # the workspace's window: its sway workspace and whether it's fullscreen and focused
-  sm -t get_tree | python3 -c '
-import json, sys
-def walk(n, ws=None):
-    if n.get("type") == "workspace": ws = n["name"]
-    if n.get("pid") and n.get("type") in ("con", "floating_con"):
-        print(ws, "fullscreen" if n.get("fullscreen_mode") else "tiled", "focused" if n.get("focused") else "", n.get("app_id"))
-    for c in n.get("nodes", []) + n.get("floating_nodes", []): walk(c, ws)
-walk(json.load(sys.stdin))'
 }
 elapsed() { echo "$(( ($(date +%s%N) - t0) / 1000000 )) ms"; }
 

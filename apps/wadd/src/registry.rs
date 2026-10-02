@@ -60,6 +60,7 @@ pub struct Registry {
     windows: Arc<Windows>,
     /// Told when a bring-up finishes (the view shows a pending switch).
     on_ready: Mutex<Option<ReadyHook>>,
+    on_list: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     /// Itself, for the tasks it starts.
     me: std::sync::Weak<Registry>,
 }
@@ -155,6 +156,7 @@ impl Registry {
             epoch: Instant::now(),
             windows: Arc::default(),
             on_ready: Mutex::new(None),
+            on_list: Mutex::new(None),
         })
     }
 
@@ -200,8 +202,30 @@ impl Registry {
         let mut list = self.workspaces();
         let ws = list.iter_mut().find(|w| w.id == id).ok_or_else(|| format!("no workspace {id:?}"))?;
         ws.projects = projects;
+        self.set_workspaces(list).await
+    }
+
+    /// A new workspace list (a build added or changed one): saved, units
+    /// rewritten, and whoever follows the list told.
+    pub async fn set_workspaces(&self, list: Vec<Workspace>) -> Result<(), String> {
         self.save(&list)?;
-        self.load(list).await
+        let r = self.load(list).await;
+        if let Some(f) = self.on_list.lock().unwrap().as_ref() {
+            f();
+        }
+        r
+    }
+
+    /// Calls `f` whenever set_workspaces changes the list (hotkeys follow it).
+    pub fn on_list_change(&self, f: impl Fn() + Send + Sync + 'static) {
+        *self.on_list.lock().unwrap() = Some(Box::new(f));
+    }
+
+    /// Its image is here now (a build made it).
+    pub fn image_here(&self, id: &str) {
+        if let Ok(ws) = self.workspace(id) {
+            self.update(&ws, |st| st.image_present = Some(true));
+        }
     }
 
     /// The workspace list, as the Rust wadd's own (it wins over the Python

@@ -70,3 +70,28 @@ fn the_vendor_cloud_file_wins() {
         matches!(read(&d.path().join("nope.yaml"), None), Err(Error::Config(m)) if m.starts_with("config not found"))
     );
 }
+
+#[test]
+fn workspaces_round_trip_through_the_yaml_shape() {
+    let cases: Vec<Value> = serde_json::from_str(CASES).unwrap();
+    let mut checked = 0;
+    for c in &cases {
+        let text = c["yaml"].as_str().unwrap();
+        let data: Value = if text.trim().is_empty() { json!({}) } else { serde_norway::from_str(text).unwrap() };
+        let data = if data.is_null() { json!({}) } else { data };
+        let Ok(cfg) = parse(&data) else { continue };
+        let again = check_workspaces(cfg.workspaces.iter().map(to_yaml).collect()).unwrap();
+        assert_eq!(again, cfg.workspaces, "{}", c["name"]);
+        checked += cfg.workspaces.len();
+    }
+    assert!(checked > 10);
+    // Checked together: a second workspace on the same port is refused.
+    let one = to_yaml(
+        &check_workspaces(vec![serde_json::json!({"id": "a", "name": "A", "image": "i", "port": 3100})]).unwrap()[0],
+    );
+    let mut two = one.clone();
+    two["id"] = "b".into();
+    two["container_name"] = "wad-b".into();
+    let e = check_workspaces(vec![one, two]).unwrap_err();
+    assert!(e.to_string().contains("port 3100 already used"), "{e}");
+}

@@ -342,5 +342,56 @@ fn check_projects(v: Option<&Value>, where_: &str) -> Result<Vec<MountedProject>
     Ok(out)
 }
 
+/// A workspace in workspaces.yaml's shape: what parse() reads back.
+pub fn to_yaml(w: &Workspace) -> Value {
+    let mut o = Map::new();
+    o.insert("id".into(), w.id.clone().into());
+    o.insert("name".into(), w.name.clone().into());
+    o.insert("image".into(), w.image.clone().into());
+    o.insert("display".into(), if w.display == Display::Host { "host" } else { "stream" }.into());
+    if let Some(p) = w.port {
+        o.insert("port".into(), p.into());
+    }
+    if let Some(h) = w.hotkey {
+        o.insert("hotkey".into(), h.into());
+    }
+    if let Some(i) = &w.icon {
+        o.insert("icon".into(), i.clone().into());
+    }
+    o.insert("enabled".into(), w.enabled.into());
+    o.insert("autostart".into(), w.autostart.into());
+    o.insert("container_name".into(), w.container_name.clone().into());
+    o.insert("container_port".into(), w.container_port.into());
+    let env: Map<String, Value> = w.env.iter().map(|(k, v)| (k.clone(), v.clone().into())).collect();
+    o.insert("env".into(), Value::Object(env));
+    o.insert("secrets".into(), w.secrets.clone().into());
+    o.insert("volumes".into(), w.volumes.clone().into());
+    o.insert("devices".into(), w.devices.clone().into());
+    o.insert("shm_size".into(), w.shm_size.clone().map(Value::from).unwrap_or(Value::Null));
+    let projects: Vec<Value> = w
+        .projects
+        .iter()
+        .map(|p| {
+            let mut m = Map::new();
+            m.insert("id".into(), p.id.clone().into());
+            m.insert("mount".into(), p.mount.clone().into());
+            if let Some(path) = &p.path {
+                m.insert("path".into(), path.clone().into());
+            }
+            Value::Object(m)
+        })
+        .collect();
+    o.insert("projects".into(), projects.into());
+    Value::Object(o)
+}
+
+/// Workspaces (in workspaces.yaml's shape) checked together, as the file
+/// would be: ids, ports, hotkeys and names unique, and each one valid.
+pub fn check_workspaces(list: Vec<Value>) -> Result<Vec<Workspace>, Error> {
+    // The Rust wadd has no TCP port of its own to keep free.
+    let data = serde_json::json!({"daemon": {"port": 0}, "wadcreator": {"enabled": false}, "workspaces": list});
+    parse(&data).map(|c| c.workspaces)
+}
+
 #[cfg(test)]
 mod tests;

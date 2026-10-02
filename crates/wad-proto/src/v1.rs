@@ -64,6 +64,8 @@ pub enum Event {
     },
     /// A launch moved on: the job, and its log lines since the last event.
     Launch(LaunchLog),
+    /// A build moved on: the job, and its log lines since the last event.
+    Build(BuildLog),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
@@ -81,6 +83,7 @@ impl Event {
             Event::Session(_) => "session",
             Event::Projects { .. } => "projects",
             Event::Launch(_) => "launch",
+            Event::Build(_) => "build",
             Event::Notice { .. } => "notice",
         }
     }
@@ -496,6 +499,89 @@ pub struct Launch {
 #[serde(rename_all = "camelCase")]
 pub struct LaunchLog {
     pub launch: Launch,
+    pub from: u64,
+    pub lines: Vec<String>,
+}
+
+/// POST /v1/builds: build a design on this machine and add it (or update
+/// it) as a workspace. Not in the TypeScript bindings: the design is the
+/// UI's own document (src/core/model.ts), which wadd reads with wad-core.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildRequest {
+    pub design: serde_json::Value,
+    /// The wallpaper, drawn by the app (it renders the design's canvas).
+    #[serde(default)]
+    pub wallpaper: Option<Wallpaper>,
+    /// The projects the design names, for its README.
+    #[serde(default)]
+    pub projects: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Wallpaper {
+    pub file_name: String,
+    /// The image, base64.
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum BuildStatus {
+    Queued,
+    Building,
+    Done,
+    Error,
+    Cancelled,
+}
+
+impl BuildStatus {
+    pub fn finished(self) -> bool {
+        matches!(self, Self::Done | Self::Error | Self::Cancelled)
+    }
+}
+
+/// Something in the design the build leaves out, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Skipped {
+    pub label: String,
+    pub reason: String,
+}
+
+/// A build: the design's image, made here, then added as a workspace.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Build {
+    pub id: String,
+    pub ws_id: String,
+    pub name: String,
+    pub status: BuildStatus,
+    /// 0..1
+    pub progress: f64,
+    pub error: Option<String>,
+    /// localhost/wadspaces-<id>:latest
+    pub image: String,
+    pub base_image: String,
+    /// Unix seconds.
+    pub created: f64,
+    pub started: Option<f64>,
+    pub finished: Option<f64>,
+    /// It replaced a workspace that was already here.
+    pub updated: bool,
+    /// It's running the old image: a restart picks up the new one.
+    pub restart_required: bool,
+    pub skipped: Vec<Skipped>,
+    pub line_count: u64,
+}
+
+/// GET /v1/builds/{id}?since=n, and build events: the job, and its log from
+/// line `from`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildLog {
+    pub build: Build,
     pub from: u64,
     pub lines: Vec<String>,
 }

@@ -52,6 +52,11 @@ pub trait Backend: Send + Sync + 'static {
     async fn github_token(&self) -> Option<String> {
         None
     }
+    /// Builds an image from a tar build context on `base` (its BASE_IMAGE
+    /// build argument). Dropping the future stops the build.
+    async fn build(&self, _context: Vec<u8>, _tag: &str, _base: &str, _on_line: OnLine) -> Result<(), String> {
+        Err("no podman".into())
+    }
 }
 
 /// The machine as wadd's config describes it: podman's socket, systemd (the
@@ -219,6 +224,12 @@ impl Backend for Real {
                 None
             }
         }
+    }
+
+    async fn build(&self, context: Vec<u8>, tag: &str, base: &str, mut on_line: OnLine) -> Result<(), String> {
+        let mut args = serde_json::Map::new();
+        args.insert("BASE_IMAGE".into(), base.into());
+        self.podman.build(context, tag, &args, |l| on_line(l)).await.map(drop).map_err(|e| e.to_string())
     }
 
     async fn github_token(&self) -> Option<String> {

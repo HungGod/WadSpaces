@@ -160,6 +160,8 @@ pub struct Daemon {
     pub projects_uid: u32,
     /// Folder projects and the folder browser stay inside these.
     pub folder_roots: Vec<PathBuf>,
+    /// A build won't start with less free disk than this.
+    pub build_min_free_gb: u64,
 }
 
 /// Home folders, and where drives get mounted.
@@ -219,6 +221,7 @@ impl Daemon {
                 prefetch_min_free_gb: 15,
                 projects_uid: 1000,
                 folder_roots: FOLDER_ROOTS.iter().map(PathBuf::from).collect(),
+                build_min_free_gb: 8,
             },
             Profile::User => Self {
                 socket: runtime_dir().join("wadd/wadd.sock"),
@@ -237,6 +240,7 @@ impl Daemon {
                 prefetch_min_free_gb: 15,
                 projects_uid: 1000,
                 folder_roots: FOLDER_ROOTS.iter().map(PathBuf::from).collect(),
+                build_min_free_gb: 8,
             },
         }
     }
@@ -334,6 +338,7 @@ struct RawDaemon {
     prefetch_min_free_gb: u64,
     projects_uid: u32,
     folder_roots: Vec<PathBuf>,
+    build_min_free_gb: u64,
 }
 #[derive(serde::Serialize)]
 struct RawLog {
@@ -362,6 +367,7 @@ impl From<&Config> for Raw {
                 prefetch_min_free_gb: c.daemon.prefetch_min_free_gb,
                 projects_uid: c.daemon.projects_uid,
                 folder_roots: c.daemon.folder_roots.clone(),
+                build_min_free_gb: c.daemon.build_min_free_gb,
             },
             log: RawLog { level: c.log.level.clone(), buffer_lines: c.log.buffer_lines },
             keys: c.keys.clone(),

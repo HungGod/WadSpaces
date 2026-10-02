@@ -273,3 +273,28 @@ async fn projects() {
     }
     panic!("the launch never failed");
 }
+
+#[tokio::test]
+async fn builds() {
+    let (_d, sock, stop) = start(true).await;
+    let design = r##"{"design":{"id":"trybuild","name":"Try build","layout":{"wallpaper":{"type":"color","value":"#000"},"icons":[]},
+        "advanced":{"display":"host","hotkey":2,"tools":[],"env":{},"secrets":[],"devices":[],"shmSize":"1g"}}}"##;
+    let (status, body) = send(&sock, "POST", "/v1/builds", design).await;
+    assert_eq!(status, 201, "{body}");
+    let b: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(b["image"], "localhost/wadspaces-trybuild:latest");
+    // No machine here: the base can't be found, and the build says so.
+    for _ in 0..100 {
+        let (_, body) = get(&sock, &format!("/v1/builds/{}", b["id"].as_str().unwrap())).await;
+        if body.contains(r#""status":"error""#) {
+            assert!(body.contains("no machine in tests"), "{body}");
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let (status, body) = send(&sock, "POST", "/v1/builds", r#"{"design":{"id":"Bad Id"}}"#).await;
+    assert_eq!(status, 400, "{body}");
+    let (_, body) = get(&sock, "/v1/builds").await;
+    assert!(body.contains("trybuild"), "{body}");
+    let _ = stop.send(());
+}

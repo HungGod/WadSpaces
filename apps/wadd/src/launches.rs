@@ -46,6 +46,7 @@ use wad_proto::{ApiError, ErrorCode};
 
 use crate::backend::Backend;
 use crate::events::Bus;
+use crate::joblog::Lines;
 use crate::projects::{NOT_HERE, Projects, relabel};
 use crate::registry::Registry;
 use crate::view::View;
@@ -85,19 +86,7 @@ fn commits(n: u32) -> &'static str {
 
 struct Job {
     launch: Launch,
-    lines: Vec<String>,
-    dropped: u64,
-}
-
-impl Job {
-    fn total(&self) -> u64 {
-        self.dropped + self.lines.len() as u64
-    }
-
-    fn since(&self, n: u64) -> Vec<String> {
-        let skip = n.saturating_sub(self.dropped) as usize;
-        self.lines.iter().skip(skip).cloned().collect()
-    }
+    log: Lines,
 }
 
 pub struct Launches {
@@ -219,7 +208,8 @@ impl Launches {
             finished: None,
             line_count: 0,
         };
-        self.jobs.lock().unwrap().push(Job { launch: launch.clone(), lines: vec![], dropped: 0 });
+        let log = Lines::new(&self.log_dir, &launch.id, MAX_LINES);
+        self.jobs.lock().unwrap().push(Job { launch: launch.clone(), log });
         self.trim();
         self.publish(&id, true);
         let me = self.me.upgrade().expect("launches outlive their calls");
@@ -241,7 +231,7 @@ impl Launches {
     }
 
     fn launch_of(&self, j: &Job) -> Launch {
-        Launch { line_count: j.total(), ..j.launch.clone() }
+        Launch { line_count: j.log.total(), ..j.launch.clone() }
     }
 
     pub fn list(&self) -> Vec<Launch> {
@@ -252,7 +242,7 @@ impl Launches {
     pub fn log(&self, id: &str, since: u64) -> Result<LaunchLog, ApiError> {
         let jobs = self.jobs.lock().unwrap();
         let j = jobs.iter().find(|j| j.launch.id == id).ok_or_else(|| no_launch(id))?;
-        Ok(LaunchLog { launch: self.launch_of(j), from: since, lines: j.since(since) })
+        Ok(LaunchLog { launch: self.launch_of(j), from: since, lines: j.log.since(since) })
     }
 
     pub fn cancel(&self, id: &str) -> Result<Launch, ApiError> {
@@ -284,22 +274,8 @@ impl Launches {
     }
 
     fn line(&self, id: &str, text: &str) {
-        {
-            let mut jobs = self.jobs.lock().unwrap();
-            let Some(j) = jobs.iter_mut().find(|j| j.launch.id == id) else { return };
-            j.lines.push(text.into());
-            if j.lines.len() > MAX_LINES {
-                let cut = j.lines.len() - MAX_LINES;
-                j.lines.drain(..cut);
-                j.dropped += cut as u64;
-            }
-        }
-        let _ = std::fs::create_dir_all(&self.log_dir);
-        if let Ok(mut f) =
-            std::fs::OpenOptions::new().create(true).append(true).open(self.log_dir.join(format!("{id}.log")))
-        {
-            use std::io::Write;
-            let _ = writeln!(f, "{text}");
+        if let Some(j) = self.jobs.lock().unwrap().iter_mut().find(|j| j.launch.id == id) {
+            j.log.push(text);
         }
         self.publish(id, false);
     }
@@ -341,11 +317,11 @@ impl Launches {
             jobs.iter()
                 .filter_map(|j| {
                     let from = sent.get(&j.launch.id).copied().unwrap_or(0);
-                    if j.launch.id != id && from == j.total() {
+                    if j.launch.id != id && from == j.log.total() {
                         return None;
                     }
-                    sent.insert(j.launch.id.clone(), j.total());
-                    Some(LaunchLog { launch: self.launch_of(j), from, lines: j.since(from) })
+                    sent.insert(j.launch.id.clone(), j.log.total());
+                    Some(LaunchLog { launch: self.launch_of(j), from, lines: j.log.since(from) })
                 })
                 .collect()
         };

@@ -55,10 +55,12 @@ apps/wadd/dev/try-view.sh    # the screen: a headless sway with the machine's ru
                              # workspace's window: switching, Super+Tab, focus sessions
 apps/wadd/dev/try-projects.sh  # projects: a GitHub clone, a folder and a loop-device "stick",
                                # launched together into a workspace
+apps/wadd/dev/try-build.sh   # builds: a design built on the lean base, installed, and opened
+                             # in the headless sway
 sudo target/debug/wadd keys  # the keyboard proxy for 20 s (prints what Super chords would do)
 ```
 
-`try-view.sh` needs sway; unpacked under `.build/sway` is enough (the script says how).
+`try-view.sh` and `try-build.sh` need sway; unpacked under `.build/sway` is enough (`dev/sway.sh` says how), and `try-build.sh` needs the lean base (`../Wadspaces-David/build.sh --only _common`).
 
 ## History
 

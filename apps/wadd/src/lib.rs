@@ -6,9 +6,11 @@
 pub mod access;
 pub mod api;
 pub mod backend;
+pub mod builds;
 pub mod display;
 pub mod drives;
 pub mod events;
+pub mod joblog;
 pub mod launches;
 pub mod logbuf;
 pub mod projects;
@@ -186,17 +188,19 @@ impl Server {
         let launches = launches::Launches::new(
             registry.clone(),
             view.clone(),
-            backend,
+            backend.clone(),
             projects.clone(),
             bus.clone(),
             &d.state_dir,
         );
+        let builds = builds::Builds::new(registry.clone(), backend, bus.clone(), &d.state_dir, d.build_min_free_gb);
         let state = Arc::new(AppState {
             bus,
             registry,
             view,
             projects,
             launches,
+            builds,
             keys: std::sync::Mutex::new(None),
             keys_enabled: config.keys.enabled,
             logs,
@@ -248,6 +252,15 @@ impl Server {
         self.state.view.restore_session();
         let watcher = self.sway.clone().map(|d| tokio::spawn(d.run(self.state.view.clone() as Arc<dyn WindowSink>)));
         *self.state.keys.lock().unwrap() = self.start_keys();
+        // A build can add a workspace (and its hotkey).
+        let (app, home) = (Arc::downgrade(&self.state), self.keys.home.clone());
+        registry.on_list_change(move || {
+            let Some(app) = app.upgrade() else { return };
+            let keys = app.keys.lock().unwrap();
+            if let Some(proxy) = keys.as_ref() {
+                proxy.router().lock().unwrap().set_bindings(app.view.bindings(&home));
+            }
+        });
         let reconcile = registry.spawn_reconcile(self.reconcile_every);
         let (mode, min_free_gb) = self.prefetch;
         let prefetch = tokio::spawn(registry.clone().prefetch(mode, min_free_gb, Duration::from_secs(300)));

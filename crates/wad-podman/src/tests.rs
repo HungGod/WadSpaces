@@ -53,6 +53,21 @@ async fn fake() -> (tempfile::TempDir, Podman) {
             }),
         )
         .route(
+            "/v5.0.0/libpod/build",
+            post(|Query(q): Query<std::collections::HashMap<String, String>>, body: axum::body::Bytes| async move {
+                let args: serde_json::Value = serde_json::from_str(q.get("buildargs").map(String::as_str).unwrap_or("{}")).unwrap();
+                assert_eq!(&body[..], b"tar", "the build context arrives as the body");
+                if q.get("t").map(String::as_str) == Some("localhost/wadspaces-bad:latest") {
+                    return "{\"stream\":\"STEP 1/2: FROM base\\n\"}\n{\"error\":\"exit status 1\",\"errorDetail\":{\"message\":\"RUN failed: exit status 1\"}}\n".to_string();
+                }
+                format!(
+                    "{{\"stream\":\"STEP 1/2: FROM {}\\n\"}}\n{{\"stream\":\"STEP 2/2: COPY root/ /\\n--> abc\\n\"}}\n{{\"stream\":\"{}\\n\"}}\n",
+                    args["BASE_IMAGE"].as_str().unwrap(),
+                    "f".repeat(64)
+                )
+            }),
+        )
+        .route(
             "/v5.0.0/libpod/images/pull",
             post(|Query(q): Query<std::collections::HashMap<String, String>>| async move {
                 let r = q.get("reference").cloned().unwrap_or_default();
@@ -83,6 +98,14 @@ async fn images_containers_and_pulls() {
     assert_eq!(p.volume_mountpoint("nope").await.unwrap(), None);
     assert_eq!(p.secret_value("github_token").await.unwrap().as_deref(), Some("ghp_x"));
     assert_eq!(p.secret_value("nope").await.unwrap(), None);
+    let mut out = vec![];
+    let args = serde_json::json!({"BASE_IMAGE": "localhost/wadspaces-base:trixie"}).as_object().unwrap().clone();
+    let id =
+        p.build(b"tar".to_vec(), "localhost/wadspaces-ok:latest", &args, |l| out.push(l.to_string())).await.unwrap();
+    assert_eq!(id, "f".repeat(64));
+    assert_eq!(out, ["STEP 1/2: FROM localhost/wadspaces-base:trixie", "STEP 2/2: COPY root/ /", "--> abc"]);
+    let e = p.build(b"tar".to_vec(), "localhost/wadspaces-bad:latest", &args, |_| {}).await.unwrap_err();
+    assert_eq!(e.to_string(), "RUN failed: exit status 1");
     let mut lines = vec![];
     p.pull("ghcr.io/o/ok:1", |l| lines.push(l.to_string())).await.unwrap();
     assert_eq!(lines, ["Trying to pull", "Copying blob sha256:abc"]);

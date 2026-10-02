@@ -19,8 +19,9 @@ use serde::Deserialize;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::BroadcastStream;
 use wad_proto::v1::{
-    Browse, CloudLink, Drive, Event, Health, KeysStatus, Launch, LaunchLog, LaunchRequest, LogLine, MachineInfo,
-    Project, ProjectDeleted, ProjectStatus, Run, Session, SessionRequest, ViewState, Workspace, WorkspaceState,
+    Browse, Build, BuildLog, BuildRequest, CloudLink, Drive, Event, Health, KeysStatus, Launch, LaunchLog,
+    LaunchRequest, LogLine, MachineInfo, Project, ProjectDeleted, ProjectStatus, Run, Session, SessionRequest,
+    ViewState, Workspace, WorkspaceState,
 };
 use wad_proto::{ApiError, ErrorCode};
 
@@ -36,6 +37,7 @@ pub struct AppState {
     pub view: Arc<View>,
     pub projects: Arc<crate::projects::Projects>,
     pub launches: Arc<crate::launches::Launches>,
+    pub builds: Arc<crate::builds::Builds>,
     /// The keyboard proxy, while it runs.
     pub keys: std::sync::Mutex<Option<wad_input::Proxy>>,
     pub keys_enabled: bool,
@@ -124,6 +126,12 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/browse", get(browse))
         .route("/v1/launches", get(launches).post(launch_create))
         .route("/v1/launches/{id}", get(launch).delete(launch_cancel))
+        // A design and its wallpaper (base64): more than axum's default 2 MB.
+        .route(
+            "/v1/builds",
+            get(builds).post(build_create).layer(axum::extract::DefaultBodyLimit::max(96 * 1024 * 1024)),
+        )
+        .route("/v1/builds/{id}", get(build).delete(build_cancel))
         .route("/v1/runs", get(runs))
         .route("/v1/session", get(session).post(session_begin))
         .route("/v1/session", delete(session_end))
@@ -335,6 +343,32 @@ async fn launch(
     Query(q): Query<SinceQuery>,
 ) -> Result<Json<LaunchLog>, Failure> {
     Ok(Json(app.launches.log(&id, q.since)?))
+}
+
+async fn builds(State(app): State<Arc<AppState>>) -> Json<Vec<Build>> {
+    Json(app.builds.list())
+}
+
+/// Builds a design here and adds it as a workspace (or updates the one
+/// here); progress arrives as build events.
+async fn build_create(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<BuildRequest>,
+) -> Result<(StatusCode, Json<Build>), Failure> {
+    Ok((StatusCode::CREATED, Json(app.builds.create(&req)?)))
+}
+
+/// A build, and its log from line `since`.
+async fn build(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(q): Query<SinceQuery>,
+) -> Result<Json<BuildLog>, Failure> {
+    Ok(Json(app.builds.log(&id, q.since)?))
+}
+
+async fn build_cancel(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Build>, Failure> {
+    Ok(Json(app.builds.cancel(&id)?))
 }
 
 async fn launch_cancel(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Launch>, Failure> {
