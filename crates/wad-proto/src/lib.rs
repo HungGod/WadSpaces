@@ -5,5 +5,6 @@
 
 pub mod error;
 pub mod github;
+pub mod v1;
 
 pub use error::{ApiError, ErrorCode};

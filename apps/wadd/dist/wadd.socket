@@ -1,0 +1,15 @@
+# The Rust wadd's API socket (stage 2). systemd owns it, so clients can
+# connect while wadd (re)starts; it starts wadd on the first connection too.
+# Group `wad`: the kiosk user's group; admins in it (or wheel) may use it.
+[Unit]
+Description=WadSpaces daemon API socket
+
+[Socket]
+ListenStream=/run/wadd/wadd.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=wad
+DirectoryMode=0755
+
+[Install]
+WantedBy=sockets.target

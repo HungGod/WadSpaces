@@ -1,0 +1,27 @@
+# The Rust wadd (stage 2). Replaces the Python wadd.service at cutover (M10);
+# until then this file isn't in the image.
+[Unit]
+Description=WadSpaces workspace daemon (wadd)
+Requires=wadd.socket
+After=wadd.socket network-online.target podman.socket
+Wants=network-online.target podman.socket
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/wadd serve
+Restart=always
+RestartSec=2
+TimeoutStopSec=10
+StateDirectory=wadspaces
+ProtectSystem=strict
+# read-only, not "yes": wadd connects to sway's IPC socket in the kiosk
+# session's /run/user/1000, which appears after wadd has started.
+ProtectHome=read-only
+ReadWritePaths=/var/lib/wadspaces /run/containers /run/podman
+ReadWritePaths=-/var/lib/wadspaces-projects -/var/lib/containers/storage/volumes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
