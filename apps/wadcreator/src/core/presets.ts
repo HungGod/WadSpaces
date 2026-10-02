@@ -28,22 +28,22 @@ export const PRESETS: CreatorSpec[] = [
     kaleResources: kale(["Spritesheet Packer", "https://www.codeandweb.com/free-sprite-sheet-packer"], ["Github", "https://github.com"], ["Claude", "https://claude.ai"], ["Piskel", "https://www.piskelapp.com/"]),
   }),
   newSpec({
-    id: "wad-c", name: "Wad Creator Dev", port: 3120, hotkey: 3, display: "stream",
+    id: "wad-c", name: "Wad Creator Dev", port: 3120, hotkey: 3, display: "host",
     features: ["git", "nodejs", "firebase", "vscode", "claude-code", "chrome"],
     webapps: web(["Claude", "https://claude.ai"], ["GitHub", "https://github.com"], ["Google Cloud", "https://console.cloud.google.com"], ["OpenRouter", "https://openrouter.ai"]),
   }),
   newSpec({
-    id: "kale-b", name: "Kale Browser", port: 3130, hotkey: 4, display: "stream",
+    id: "kale-b", name: "Kale Browser", port: 3130, hotkey: 4, display: "host",
     features: ["git", "python", "nodejs", "vscode", "claude-code"],
     kaleResources: KALE_DEV,
   }),
   newSpec({
-    id: "vanua-academy", name: "Vanua Academy", port: 3140, hotkey: 5, display: "stream",
+    id: "vanua-academy", name: "Vanua Academy", port: 3140, hotkey: 5, display: "host",
     features: ["git", "python", "nodejs", "firebase", "vscode", "claude-code", "chrome", "hplip"],
     webapps: web(["Gmail", "https://mail.google.com"], ["Claude", "https://claude.ai"], ["GitHub", "https://github.com"], ["Google Cloud", "https://console.cloud.google.com"], ["Google Workspace", "https://workspace.google.com/dashboard"], ["Google Drive", "https://drive.google.com"]),
   }),
   newSpec({
-    id: "kale-p", name: "Kale Phone", port: 3150, hotkey: 6, display: "stream", devices: ["/dev/dri", "/dev/kvm"],
+    id: "kale-p", name: "Kale Phone", port: 3150, hotkey: 6, display: "host", devices: ["/dev/dri", "/dev/kvm"],
     features: ["git", "nodejs", "vscode", "claude-code", "android-studio"],
     kaleResources: KALE_DEV,
   }),

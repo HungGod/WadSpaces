@@ -117,7 +117,7 @@ describe("quadlet", () => {
 const kaleB = newSpec({
   id: "kale-b",
   name: "Kale Browser",
-  display: "stream",
+  display: "host",
   features: ["git", "python", "nodejs", "vscode", "claude-code"],
   projects: [{ id: "kaleb00000000000000a", name: "KaleBrowser", mount: "KaleBrowser" }],
   kaleResources: [
@@ -180,10 +180,14 @@ describe("bundleFiles", () => {
   });
 
   it("compose lists the projects as mounts to fill in by hand", () => {
-    const c = compose(kaleB);
-    expect(c).toContain("      - wad-kale-b-config:/config:z\n      # - /path/to/KaleBrowser:/config/Desktop/KaleBrowser:z  (project KaleBrowser)\n");
-    const bare = compose({ ...kaleB, persistConfig: false });
-    expect(bare).toContain("    # volumes:\n      # - /path/to/KaleBrowser:/config/Desktop/KaleBrowser:z  (project KaleBrowser)\n");
+    const project = "      # - /path/to/KaleBrowser:/config/Desktop/KaleBrowser:z  (project KaleBrowser)\n";
+    // Native (lean) workspaces: after the stream sidecar's display volume.
+    expect(compose(kaleB)).toContain(`      - wad-kale-b-config:/config:z\n      - kale-b-display:/run/wadspaces-display:z\n${project}`);
+    expect(compose({ ...kaleB, persistConfig: false })).toContain(`    volumes:\n      - kale-b-display:/run/wadspaces-display:z\n${project}`);
+    // Streamed (Selkies) ones have no other volumes without a config volume.
+    const stream = { ...kaleB, display: "stream" as const };
+    expect(compose(stream)).toContain(`      - wad-kale-b-config:/config:z\n${project}`);
+    expect(compose({ ...stream, persistConfig: false })).toContain(`    # volumes:\n${project}`);
   });
 });
 
