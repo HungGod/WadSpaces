@@ -4,8 +4,8 @@ The software that runs a WadSpaces machine, and the Wad Creator app used to desi
 
 | Path | What it is |
 |---|---|
-| `apps/wadcreator/` | Wad Creator: the React UI. It has two targets: the web portal (`wad-spaces.web.app`, Firebase) and the app on the machine (Tauri, coming in stage 1a). The Firebase function and Firestore rules are here too. |
-| `host/` | The machine's OS image (Fedora bootc, sway), and `host/build.sh` to build it and write it to a drive. |
+| `apps/wadcreator/` | Wad Creator: the React UI. Built for three targets (`src/lib/machine.ts`): the web portal (`online`, `wad-spaces.web.app`), the machine app (`machine`, inside Tauri: the kiosk's shell), and `offline` (development against a dev wadd). The Firebase function and Firestore rules are here too. |
+| `host/` | The machine's OS image (Fedora bootc, sway, Wad Creator as the shell), and `host/build.sh` to build it and write it to a drive. |
 | `legacy/wadd-py/` | wadd, the machine daemon, in Python. It is frozen while the Rust wadd is written (stage 2), then removed. |
 | `fixtures/quadlet/` | Unit files and workspace specs that every renderer must reproduce byte for byte (wadd's tests and the UI's generator tests read these). |
 | `apps/wadcreator/src-tauri/` | The machine app: Tauri around the same React UI. Its Rust side holds the commands the UI calls (`src/gen/bindings.ts` is generated from them). |
