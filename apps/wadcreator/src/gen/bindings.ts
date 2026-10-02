@@ -27,6 +27,8 @@ export const commands = {
 	 *  clipboard first, to paste there.
 	 */
 	githubOpenBrowser: () => __TAURI_INVOKE<null>("github_open_browser"),
+	/**  Tells the HUD which theme the app shows. */
+	setTheme: (theme: Theme) => __TAURI_INVOKE<null>("set_theme", { theme }),
 	/**  Calls wadd's HTTP API: `path` is like `/api/projects?x=1`. */
 	waddRequest: (method: Method, path: string, body: unknown | null) => __TAURI_INVOKE<Json>("wadd_request", { method, path, body }),
 	/**  The last `state` event (wadd's snapshot), if one has arrived. */
@@ -120,6 +122,8 @@ export type GithubSignedIn = {
 export type Json = unknown;
 
 export type Method = "GET" | "POST" | "PUT" | "DELETE";
+
+export type Theme = "dark" | "light";
 
 /**
  *  One event from wadd's stream (`state`, `build`, `launch`, `projects`, …),

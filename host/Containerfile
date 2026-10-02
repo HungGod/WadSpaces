@@ -10,7 +10,7 @@ RUN dnf -y install \
       python3 python3-fastapi python3-uvicorn python3-websockets python3-pyyaml \
       python3-evdev python3-httpx \
       mesa-dri-drivers libva-utils \
-      adwaita-cursor-theme google-noto-sans-fonts google-noto-emoji-fonts liberation-fonts \
+      adwaita-cursor-theme google-noto-sans-fonts google-noto-emoji-fonts liberation-fonts rsms-inter-vf-fonts \
       dbus-daemon dbus-tools wlr-randr NetworkManager-wifi NetworkManager-tui curl \
       gtk4 gtk4-layer-shell python3-gobject \
       git-core \

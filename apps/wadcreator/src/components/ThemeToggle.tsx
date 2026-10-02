@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import clsx from "clsx";
+import { inTauri } from "@/lib/shell";
+
+/** The machine app: the HUD (above every window) follows the app's theme. */
+export function tellHud(t: "dark" | "light") {
+  if (!inTauri) return;
+  import("@/gen/bindings").then(({ commands }) => commands.setTheme(t)).catch(() => {});
+}
 
 export function useTheme() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -12,6 +19,7 @@ export function useTheme() {
     try {
       localStorage.setItem("ws-theme", t);
     } catch {}
+    tellHud(t);
     setTheme(t);
   };
   return [theme, set] as const;

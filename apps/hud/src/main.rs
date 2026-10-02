@@ -15,6 +15,8 @@
 //! WADSPACES_HUD_SNAPSHOT=<dir> renders each surface to a PNG there and exits.
 
 mod model;
+mod theme;
+mod thumb;
 mod wadd;
 
 use std::cell::{Cell, RefCell};
@@ -26,60 +28,34 @@ use gtk::prelude::*;
 use gtk::{gdk, glib};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use model::{Carousel, Pick, State, WifiNetwork};
+use theme::Theme;
 use wadd::{Incoming, Wadd};
 
-const CSS: &str = r#"
-window { background: transparent; }
-.pill {
-  background: #141422; color: #ecebf5; border: 1px solid #26263a;
-  border-radius: 999px; padding: 4px 12px; min-height: 0;
-  font: 13px "Noto Sans", sans-serif; box-shadow: none;
-}
-.pill:hover { border-color: #3a3a58; }
-.pill.offline { color: #e8c36a; border-color: #5a4a26; }
-.pill.done { color: #8fd18a; border-color: #8fd18a; }
-.pill.focus { color: #c6ff1f; border-color: #4a5a1a; }
+/// The WadSpaces logo mark for each theme (apps/wadcreator/public/brand), 128 px.
+const LOGO_DARK: &[u8] = include_bytes!("../assets/logo-dark.png");
+const LOGO_LIGHT: &[u8] = include_bytes!("../assets/logo-light.png");
 
-button.dim, button.dim:hover, button.dim:active {
-  background: rgba(5, 3, 12, 0.62); background-image: none; border: none; border-radius: 0; box-shadow: none; outline: none;
+fn logo(t: Theme) -> Option<gdk::Texture> {
+    let bytes = if t == Theme::Light { LOGO_LIGHT } else { LOGO_DARK };
+    gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)).ok()
 }
-.card {
-  background: #120d1f; color: #ecebf5; border: 1px solid #2c2440;
-  border-radius: 24px; padding: 22px;
-}
-.title { font: 600 18px "Noto Sans", sans-serif; }
-.sub { color: #9a93b0; font: 13px "Noto Sans", sans-serif; }
-.section { color: #6f6888; font: 600 11px "Noto Sans", sans-serif; letter-spacing: 1px; }
-.error { color: #ff7a9c; font: 13px "Noto Sans", sans-serif; }
-.menu-button {
-  background: #1d1730; color: #ecebf5; border: 1px solid #2c2440; border-radius: 14px;
-  padding: 12px 18px; font: 500 15px "Noto Sans", sans-serif; min-width: 220px;
-}
-.menu-button:hover { background: #261e3d; }
-.menu-button.danger { color: #ff7a9c; border-color: #4a2236; }
-.menu-button.quiet { background: transparent; border-color: transparent; color: #9a93b0; }
-.small-button {
-  background: #1d1730; color: #ecebf5; border: 1px solid #2c2440; border-radius: 10px;
-  padding: 4px 12px; font: 500 13px "Noto Sans", sans-serif;
-}
-.small-button.primary { background: #c6ff1f; color: #0a0614; border-color: #c6ff1f; }
-.net-row { background: transparent; border: none; border-radius: 12px; padding: 8px 10px; color: #ecebf5; font: 14px "Noto Sans", sans-serif; }
-.net-row:hover { background: #1d1730; }
-.net-row.active { background: rgba(198, 255, 31, 0.12); }
-.net-row .tag { color: #6f6888; font-size: 12px; }
-.net-row .bars { color: #9a93b0; font-size: 11px; min-width: 34px; }
-scrollbar slider { min-width: 6px; min-height: 6px; margin: 0; }
-.status { background: #1a1428; border-radius: 14px; padding: 10px 14px; }
-entry, passwordentry { background: #0f0a1a; color: #ecebf5; border: 1px solid #c6ff1f; border-radius: 10px; padding: 6px 10px; }
 
-.switcher { background: rgba(18, 13, 31, 0.94); border: 1px solid #2c2440; border-radius: 28px; padding: 18px; }
-.item { border-radius: 18px; padding: 14px; min-width: 128px; border: 2px solid transparent; }
-.item.selected { background: rgba(198, 255, 31, 0.14); border: 2px solid #c6ff1f; }
-.item .icon { background: #261e3d; border-radius: 16px; min-width: 64px; min-height: 64px;
-  font: 700 26px "Noto Sans", sans-serif; color: #ecebf5; }
-.item .name { color: #ecebf5; font: 500 13px "Noto Sans", sans-serif; margin-top: 8px; }
-.item .state { color: #6f6888; font: 11px "Noto Sans", sans-serif; }
-"#;
+/// A square image drawn at `px` logical pixels (whatever its own size),
+/// rounded by the `class` CSS (the box clips it).
+fn square_image(texture: &gdk::Texture, px: i32, class: &str) -> gtk::Widget {
+    let image = gtk::Image::from_paintable(Some(texture));
+    image.set_pixel_size(px);
+    let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    frame.set_overflow(gtk::Overflow::Hidden);
+    frame.set_size_request(px, px);
+    frame.set_halign(gtk::Align::Center);
+    frame.set_valign(gtk::Align::Center);
+    if !class.is_empty() {
+        frame.add_css_class(class);
+    }
+    frame.append(&image);
+    frame.upcast()
+}
 
 fn now() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
@@ -192,10 +168,14 @@ struct Hud {
     switcher_box: gtk::Box,
     carousel: RefCell<Carousel>,
     icons: RefCell<HashMap<String, Option<gdk::Texture>>>,
+    /// The site's colours, dark or light as Wad Creator is.
+    theme: Cell<Theme>,
+    css: gtk::CssProvider,
+    logo: RefCell<Option<gdk::Texture>>,
 }
 
 impl Hud {
-    fn build(app: &gtk::Application) -> Rc<Hud> {
+    fn build(app: &gtk::Application, css: gtk::CssProvider, theme: Theme) -> Rc<Hud> {
         let wadd = Wadd::from_env();
 
         // The bar.
@@ -205,7 +185,10 @@ impl Hud {
         let done = label("Time's up", "pill");
         done.add_css_class("done");
         let timer = button("⏱", &["pill", "focus"]);
-        let home = button("Home", &["pill"]);
+        let home = gtk::Button::new();
+        home.add_css_class("pill");
+        home.add_css_class("logo-button");
+        home.set_label("Home"); // until the theme's logo is in (apply_theme)
         home.set_tooltip_text(Some("Back to Wad Creator (Super+0)"));
         let net = button("Wi-Fi", &["pill"]);
         let power_button = button("⏻", &["pill"]);
@@ -329,7 +312,11 @@ impl Hud {
             switcher_box,
             carousel: RefCell::default(),
             icons: RefCell::default(),
+            theme: Cell::new(theme),
+            css,
+            logo: RefCell::default(),
         });
+        hud.apply_theme(theme);
 
         // Wiring.
         let h = hud.clone();
@@ -384,6 +371,42 @@ impl Hud {
         hud.update_bar();
         hud.bar.present();
         hud
+    }
+
+    // -------------------------------------------------------------- theme
+    /// Colours and logos for `t`.
+    fn apply_theme(self: &Rc<Self>, t: Theme) {
+        self.theme.set(t);
+        self.css.load_from_string(&theme::css(t));
+        let l = logo(t);
+        match &l {
+            Some(tex) => self.home.set_child(Some(&square_image(tex, 18, ""))),
+            None => self.home.set_label("Home"),
+        }
+        self.logo.replace(l);
+        if self.switcher.is_visible() {
+            self.show_switcher();
+        }
+    }
+
+    /// Follows Wad Creator's theme file (it rewrites it when you switch).
+    fn follow_theme(self: &Rc<Self>) -> Option<gtk::gio::FileMonitor> {
+        let path = theme::file();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let monitor = gtk::gio::File::for_path(&path)
+            .monitor_file(gtk::gio::FileMonitorFlags::WATCH_MOVES, None::<&gtk::gio::Cancellable>)
+            .ok()?;
+        let h = self.clone();
+        monitor.connect_changed(move |_, _, _, _| {
+            let t = theme::current();
+            if t != h.theme.get() {
+                eprintln!("hud: theme {t:?}");
+                h.apply_theme(t);
+            }
+        });
+        Some(monitor)
     }
 
     // ---------------------------------------------------------------- bar
@@ -572,19 +595,23 @@ impl Hud {
             if i == c.index {
                 cell.add_css_class("selected");
             }
-            let texture = item.icon.as_ref().and_then(|p| self.icon(p));
-            let face: gtk::Widget = match texture {
-                Some(t) => {
-                    let pic = gtk::Picture::for_paintable(&t);
-                    pic.set_size_request(64, 64);
-                    pic.set_content_fit(gtk::ContentFit::Cover);
-                    pic.upcast()
-                }
-                None => label(&item.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(), "")
-                    .upcast(),
+            // Wad Creator (wadd's "launcher" view) is the WadSpaces logo.
+            let texture = if item.view == "launcher" {
+                self.logo.borrow().clone()
+            } else {
+                item.icon.as_ref().and_then(|p| self.icon(p))
             };
-            face.add_css_class("icon");
-            face.set_halign(gtk::Align::Center);
+            let face: gtk::Widget = match texture {
+                Some(t) => square_image(&t, 64, "icon"),
+                None => {
+                    let initial = label(
+                        &item.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(),
+                        "icon",
+                    );
+                    initial.set_halign(gtk::Align::Center);
+                    initial.upcast()
+                }
+            };
             cell.append(&face);
             let name = label(&item.name, "name");
             name.set_max_width_chars(16);
@@ -607,8 +634,9 @@ impl Hud {
         let w = self.wadd.clone();
         let h = self.clone();
         let p = path.to_string();
+        // Fetched and shrunk off the GTK loop: icons are often whole wallpapers.
         background(
-            move || w.bytes(&p).map(|b| (p, b)),
+            move || w.bytes(&p).and_then(|b| thumb::thumbnail(&b, 128)).map(|b| (p, b)),
             move |r| {
                 if let Some((p, bytes)) = r
                     && let Ok(t) = gdk::Texture::from_bytes(&glib::Bytes::from(&bytes))
@@ -673,6 +701,13 @@ fn save_png(win: &gtk::Window, path: &std::path::Path) {
 
 fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
     let _ = std::fs::create_dir_all(&dir);
+    // WADSPACES_HUD_SNAPSHOT_ICON: an image file to show as Writing's icon.
+    if let Some(bytes) = std::env::var_os("WADSPACES_HUD_SNAPSHOT_ICON").and_then(|p| std::fs::read(p).ok())
+        && let Some(t) =
+            thumb::thumbnail(&bytes, 128).and_then(|b| gdk::Texture::from_bytes(&glib::Bytes::from(&b)).ok())
+    {
+        hud.icons.borrow_mut().insert("/api/icons/writing".into(), Some(t));
+    }
     hud.state.replace(State {
         session: None,
         network: Some(model::Network {
@@ -736,7 +771,12 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
         open: true,
         index: 1,
         items: vec![
-            model::CarouselItem { view: "workspace:writing".into(), name: "Writing".into(), icon: None, running: true },
+            model::CarouselItem {
+                view: "workspace:writing".into(),
+                name: "Writing".into(),
+                icon: Some("/api/icons/writing".into()),
+                running: true,
+            },
             model::CarouselItem { view: "launcher".into(), name: "Wad Creator".into(), icon: None, running: true },
             model::CarouselItem {
                 view: "workspace:iq-dev".into(),
@@ -772,17 +812,18 @@ fn main() -> glib::ExitCode {
     let app = gtk::Application::builder().application_id("io.wadspaces.hud").build();
     app.connect_activate(|app| {
         let css = gtk::CssProvider::new();
-        css.load_from_string(CSS);
         if let Some(display) = gdk::Display::default() {
             gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
-        let hud = Hud::build(app);
+        let hud = Hud::build(app, css, theme::current());
         if let Some(dir) = std::env::var_os("WADSPACES_HUD_SNAPSHOT") {
             let _hold = app.hold();
             snapshot(hud, app.clone(), dir.into());
             std::mem::forget(_hold);
             return;
         }
+        // Kept for as long as the HUD runs.
+        std::mem::forget(hud.follow_theme());
         let (tx, rx) = async_channel::unbounded();
         hud.wadd.follow(tx);
         let h = hud.clone();
