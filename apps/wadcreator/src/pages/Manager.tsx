@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
   Activity,
+  Cast,
   Check,
   CloudDownload,
   Cpu,
@@ -30,11 +31,13 @@ import type { ContainerAction } from "@/data/backend";
 import { MachineDiagnostics } from "@/components/MachineDiagnostics";
 import { Page } from "@/components/Page";
 import { RunHistory } from "@/components/RunHistory";
+import { StreamDetails, StreamPasswordForm } from "@/components/StreamPassword";
 import { StreamLink, TailnetBadge, TailnetCard } from "@/components/Tailnet";
 import { Thumb } from "@/components/Thumb";
 import { Badge, Button, EmptyState, IconButton, Input, Label, Meter, Modal, PageHeader, Progress, Segmented } from "@/components/ui";
 import { timeAgo, uptime } from "@/lib/format";
 import { openWadspace } from "@/lib/launch";
+import { ensureStream, viewHere } from "@/lib/streams";
 import { THIS_MACHINE, isLocked, useApp } from "@/lib/store";
 import type { Container, Machine } from "@/lib/types";
 import { hasAccount, isThisMachine } from "@/lib/machine";
@@ -92,6 +95,18 @@ export default function ManagerPage() {
         <div className={clsx("grid gap-6", !offline && "lg:grid-cols-[300px_1fr]")}>
           {!offline && <MachineList machines={machines} selected={m.id} onSelect={setSelectedId} />}
           <MachineDetail key={m.id} m={m} />
+        </div>
+      )}
+
+      {backend.setStreamPassword && backend.target === "online" && (
+        <div className="mt-6 rounded-3xl border border-line bg-surface p-6">
+          <h3 className="flex items-center gap-2 font-display text-lg font-semibold">
+            <Cast className="size-4 text-accent" /> Viewing wadspaces on other devices
+          </h3>
+          <p className="mb-4 mt-1 text-sm text-muted">
+            A machine that allows it (in its Wad Creator: Viewing) streams its wadspaces to your other machines and to phones on its network. They sign in with your username and this password.
+          </p>
+          <StreamPasswordForm />
         </div>
       )}
 
@@ -234,6 +249,25 @@ function Containers({ m }: { m: Machine }) {
   const here = isThisMachine(m.id);
   const up = m.status === "online";
 
+  // Another machine's wadspace on this device: in the machine app, a window
+  // here (wadd's view of its stream); online, its links (a phone's browser).
+  const view = async (c: Container, name: string) => {
+    setBusy(`${c.id}:view`);
+    try {
+      const projects = wadspaces.find((w) => w.id === c.wadspaceId)?.mountedProjects ?? [];
+      if (backend.target === "machine") await viewHere(m, { id: c.wadspaceId, name }, projects);
+      else {
+        await ensureStream(m, { id: c.wadspaceId, name }, projects);
+        toast({ title: `${m.label} is streaming ${name}`, body: "Open its link below on this device", tone: "success" });
+      }
+      loadMachines();
+    } catch (e) {
+      toast({ title: "Couldn't view it", body: (e as Error).message, tone: "error" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const act = async (c: Container, action: ContainerAction) => {
     if (action === "remove" && !confirm(`Remove ${wadspaces.find((w) => w.id === c.wadspaceId)?.name ?? c.id} from ${m.label}? Its settings folder stays.`)) return;
     setBusy(`${c.id}:${action}`);
@@ -290,8 +324,24 @@ function Containers({ m }: { m: Machine }) {
                 )}
                 {c.phase === "error" && c.error && <div className="mt-1 break-words text-xs text-danger">{c.error}</div>}
                 {on && c.streamUrl && <StreamLink url={c.streamUrl} className="mt-2" />}
+                {!here && c.stream && backend.target === "online" && <StreamDetails stream={c.stream} className="mt-2" />}
               </div>
               <div className="flex items-center gap-0.5">
+                {!here && c.native && hasAccount && (
+                  <IconButton
+                    label={
+                      m.allowRemote
+                        ? backend.target === "machine"
+                          ? "View here"
+                          : "View on this device"
+                        : `Viewing from other devices is off on ${m.label} (its Wad Creator: Viewing)`
+                    }
+                    disabled={!up || !m.allowRemote || b("view")}
+                    onClick={() => view(c, ws?.name ?? c.wadspaceId)}
+                  >
+                    {b("view") ? <Loader2 className="size-4 animate-spin" /> : <Cast className="size-4" />}
+                  </IconButton>
+                )}
                 {!c.onScreen && (
                   <IconButton label="Show on screen" disabled={!up || locked} onClick={() => ws && openWadspace(ws, m.id)}>
                     <Eye className="size-4" />

@@ -39,7 +39,7 @@ import { defaultAdvanced, dropFileIcons, newWadspaceId } from "@core/model";
 import { cleanDraft, toProjectDoc, validateProject, type GithubRepo, type Project, type ProjectDraft } from "@core/projects";
 import { presetProjects, presetWadspace } from "@core/presets";
 import { imageDataUrl } from "@/lib/images";
-import type { App, Container, Draft, LastSession, Machine, PublicUser, Wadspace } from "@/lib/types";
+import type { App, Container, Draft, LastSession, Machine, PublicUser, RemoteStream, Wadspace } from "@/lib/types";
 import {
   Unsupported,
   migrateDraft,
@@ -55,7 +55,7 @@ import {
 import { hasRepos, knownProjectIds, migrateRepos, withProjects } from "../projects";
 import { currentAuthUser, onAuthUser, signOut } from "./auth";
 import { auth, db } from "./firebase";
-import { ONLINE_WITHIN_MS, createEnrollCode, sendCommand, type CommandType, type RelayWorkspace } from "./relay";
+import { ONLINE_WITHIN_MS, commandResult, createEnrollCode, sendCommand, type CommandType, type RelayWorkspace } from "./relay";
 
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
 const iso = (t: unknown) => (t && typeof (t as Timestamp).toDate === "function" ? (t as Timestamp).toDate().toISOString() : new Date().toISOString());
@@ -564,7 +564,11 @@ export class CloudBackend implements Backend {
 
   private toMachine(id: string, d: DocumentData): Machine {
     const view = d.view as string | null;
-    const streams = (Array.isArray(d.streams) ? d.streams : []) as { wsId: string; url: string }[];
+    // Streams: wadd's (LAN links, pinned certificate), or the Python wadd's
+    // tailnet links ({wsId, url}).
+    const raw = (Array.isArray(d.streams) ? d.streams : []) as Record<string, unknown>[];
+    const streams = raw.filter((x) => typeof x.url === "string") as { wsId: string; url: string }[];
+    const lan = raw.filter((x) => Array.isArray(x.urls)).map(remoteStream);
     const tn = d.tailnet as { online?: boolean; ip?: string; dnsName?: string } | undefined;
     const containers: Container[] = ((d.workspaces ?? []) as RelayWorkspace[]).map((w) => ({
       id: w.id,
@@ -578,6 +582,8 @@ export class CloudBackend implements Backend {
       onScreen: view === `workspace:${w.id}`,
       hotkey: w.hotkey,
       streamUrl: streams.find((x) => x.wsId === w.id)?.url ?? null,
+      native: w.display === "host",
+      stream: lan.find((x) => x.wsId === w.id) ?? null,
     }));
     return {
       id,
@@ -585,7 +591,8 @@ export class CloudBackend implements Backend {
       label: d.name ?? d.hostname ?? id,
       os: d.daemonVersion ? `WadSpaces · wadd ${d.daemonVersion}` : "WadSpaces",
       status: isUp(d) ? "online" : "offline",
-      allowRemote: true,
+      allowRemote: d.allowRemote === true,
+      streams: lan,
       cpu: d.metrics?.cpu ?? null,
       ram: d.metrics?.mem ?? null,
       gpu: d.metrics?.gpu ?? "",
@@ -595,6 +602,35 @@ export class CloudBackend implements Backend {
       lastSeen: d.lastSeen ? iso(d.lastSeen) : null,
       tailnet: tn ? { online: !!tn.online && isUp(d), ip: tn.ip ?? null, dnsName: tn.dnsName ?? null } : null,
     };
+  }
+
+  // ------------------------------------------------------------- streams
+  /** Ask a machine to stream a wadspace to other devices (it refuses unless
+   *  it allows that, and the account has a stream password). */
+  async requestStream(machineId: string, wsId: string, opts: { projects?: string[]; restart?: boolean } = {}) {
+    const uid = await this.requireUid();
+    if (!this.machines.has(machineId)) throw new Error("That machine isn't linked to your account.");
+    const id = await sendCommand(uid, machineId, "launch", wsId, {
+      view: "stream",
+      projects: opts.projects ?? [],
+      restart: !!opts.restart,
+    });
+    await commandResult(uid, machineId, id);
+  }
+
+  /** The account's stream password: what other devices sign in to your
+   *  machines' streams with. Write-only here (the rules keep it from being
+   *  read back); your machines fetch it now. How many were asked. */
+  async setStreamPassword(password: string) {
+    const uid = await this.requireUid();
+    await setDoc(doc(db, "users", uid, "secrets", "stream_password"), { value: password, updatedAt: serverTimestamp() });
+    let n = 0;
+    for (const [mid, m] of this.machines) {
+      if (!isUp(m)) continue;
+      sendCommand(uid, mid, "sync-secrets").catch(() => {});
+      n++;
+    }
+    return n;
   }
 
   async listMachines() {
@@ -666,4 +702,19 @@ export class NeedsUsername extends Error {
 function isUp(d: DocumentData) {
   const t = d.lastSeen as Timestamp | undefined;
   return !!t && typeof t.toDate === "function" && Date.now() - t.toDate().getTime() < ONLINE_WITHIN_MS;
+}
+
+/** A stream entry from a machine's heartbeat, read carefully (it's the
+ *  machine's word, checked again by wadd before anything connects). */
+function remoteStream(x: Record<string, unknown>): RemoteStream {
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    wsId: str(x.wsId),
+    name: str(x.name) || str(x.wsId),
+    port: typeof x.port === "number" ? x.port : 0,
+    urls: (x.urls as unknown[]).filter((u): u is string => typeof u === "string" && u.startsWith("https://")),
+    user: str(x.user),
+    sha256: /^[0-9a-f]{64}$/.test(str(x.sha256)) ? str(x.sha256) : "",
+    ready: x.ready === true,
+  };
 }

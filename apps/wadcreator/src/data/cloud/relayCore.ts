@@ -8,6 +8,8 @@ export interface RelayWorkspace {
   container: string;
   phase: string;
   error: string | null;
+  /** "host" (on the machine's screen) or "stream" (the old all-in-one images). */
+  display?: "host" | "stream";
 }
 
 // The heartbeat comes every 30 s; a minute and a half of silence means offline.

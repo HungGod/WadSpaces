@@ -224,6 +224,14 @@ export interface Backend {
   tailnetLogin?(): Promise<{ url: string | null; online: boolean }>;
   tailnetLogout?(): Promise<void>;
 
+  /** Ask one of your machines to stream a wadspace to other devices on its
+   *  network (it refuses unless it allows that and there's a stream
+   *  password). Resolves once it has started it. */
+  requestStream?(machineId: string, wsId: string, opts?: { projects?: string[]; restart?: boolean }): Promise<void>;
+  /** The account's stream password (write-only): how many machines were
+   *  asked to fetch it. */
+  setStreamPassword?(password: string): Promise<number>;
+
   /** Get the image and the projects' folders ready, then start and show the
    *  wadspace. Throws RestartNeeded when it's running with other projects. */
   launch(req: LaunchRequest): Promise<LaunchProgress>;

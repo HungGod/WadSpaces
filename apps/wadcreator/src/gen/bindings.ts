@@ -29,6 +29,13 @@ export const commands = {
 	githubOpenBrowser: () => __TAURI_INVOKE<null>("github_open_browser"),
 	/**  Tells the HUD which theme the app shows. */
 	setTheme: (theme: Theme) => __TAURI_INVOKE<null>("set_theme", { theme }),
+	/**
+	 *  Shows `machine_id`'s stream of `ws_id` in a window of its own (that
+	 *  machine must be streaming it: the UI asks it first).
+	 */
+	streamView: (machineId: string, wsId: string, title: string) => __TAURI_INVOKE<null>("stream_view", { machineId, wsId, title }),
+	/**  A QR code (SVG) of `text`: a stream's link, for a phone's camera. */
+	qrSvg: (text: string) => __TAURI_INVOKE<string>("qr_svg", { text }),
 	/**  Calls wadd's HTTP API: `path` is like `/api/projects?x=1`. */
 	waddRequest: (method: Method, path: string, body: unknown | null) => __TAURI_INVOKE<Json>("wadd_request", { method, path, body }),
 	/**  The last `state` event (wadd's snapshot), if one has arrived. */

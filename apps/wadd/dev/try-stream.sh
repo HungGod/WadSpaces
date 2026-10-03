@@ -4,6 +4,8 @@
 # `_stream` sidecar (localhost/wadspaces-stream:trixie), rootless.
 #
 #   apps/wadd/dev/try-stream.sh
+#   VIEW=1 apps/wadd/dev/try-stream.sh   also Wad Creator's stream window
+#                                        (WebKitGTK, in a virtual KWin), snapshotted
 #
 # Checks: refused until allowed and given a password; then the sidecar
 # answers over TLS with wadd's certificate (the fingerprint /v1/streams
@@ -94,7 +96,12 @@ api GET /v1/streams | field '[(s["wsId"], s["port"], s["user"], s["urls"]) for s
 sha=$(api GET /v1/streams | field 'd["sha256"]')
 user=$(api GET /v1/streams | field 'd["streams"][0]["user"]')
 urls=$(api GET /v1/streams | field '",".join(d["streams"][0]["urls"])')
-served=$(echo | openssl s_client -connect 127.0.0.1:$port 2>/dev/null | openssl x509 -outform der | sha256sum | cut -c1-64)
+served=
+for _ in $(seq 30); do # the port answers a moment before nginx's TLS does
+  served=$(echo | openssl s_client -connect 127.0.0.1:$port 2>/dev/null | openssl x509 -outform der 2>/dev/null | sha256sum | cut -c1-64) || true
+  [ "$served" != "$(printf '' | sha256sum | cut -c1-64)" ] && break
+  sleep 1
+done
 echo "certificate served is the one reported: $([ "$served" = "$sha" ] && echo yes || echo "NO ($served)")"
 pw=$(cat "$pwfile")
 code() { curl -sk -o /dev/null -m 10 -w '%{http_code}' "$@"; }
@@ -109,6 +116,21 @@ lan=${urls%%,*}
 echo "== a remote view of it (remote.rs)"
 (cd "$root" && TRY_STREAM_URLS="$urls" TRY_STREAM_USER="$user" TRY_STREAM_SHA256="$sha" TRY_STREAM_PASSWORD_FILE="$pwfile" \
   cargo test -q -p wadd --test remote a_view_of_a_real_stream -- --ignored --nocapture 2>&1 | grep -E 'through a view|panicked|test result')
+
+if [ -n "${VIEW:-}" ]; then
+  echo "== in Wad Creator's stream window (WebKitGTK)"
+  (cd "$root/apps/wadcreator" && npm run -s build:machine >/dev/null)
+  (cd "$root" && cargo build -q -p wadcreator --features spike,custom-protocol)
+  "$root/target/debug/wadd" view --url "https://127.0.0.1:$port/" --sha256 "$sha" --user "$user" \
+    --password-file "$pwfile" >"$dir/view.url" 2>"$dir/view.log" &
+  vpid=$!
+  for _ in $(seq 50); do [ -s "$dir/view.url" ] && break; sleep 0.1; done
+  rm -rf "$dir/spike"
+  WADCREATOR_SPIKE_STREAM=$(head -1 "$dir/view.url") WADD_DAEMON=rs WADD_SOCKET=$sock \
+    "$root/apps/wadcreator/src-tauri/spike/run.sh" "$dir/spike" | grep -E '^SPIKE (stream|snapshot)' | cut -c1-400
+  kill "$vpid" 2>/dev/null || true
+  echo "snapshot: $dir/spike/4-stream.png"
+fi
 
 echo "== ending it"
 api DELETE /v1/workspaces/writing/stream | field '("streams:", d["streams"])'

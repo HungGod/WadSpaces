@@ -6,9 +6,13 @@
 #   host/build.sh image        (or: podman build -f host/Containerfile -t localhost/wadspaces-host .)
 FROM quay.io/fedora/fedora-bootc:43
 
+# gstreamer1-plugin-openh264 (Fedora's Cisco repo): H.264 for WebKitGTK's
+# WebCodecs, how Wad Creator's stream windows show another machine's
+# wadspace (a Selkies stream).
 RUN dnf -y install \
       sway greetd podman \
       webkit2gtk4.1 librsvg2 shared-mime-info \
+      gstreamer1-plugin-openh264 \
       python3 \
       mesa-dri-drivers libva-utils \
       adwaita-cursor-theme google-noto-sans-fonts google-noto-emoji-fonts liberation-fonts rsms-inter-vf-fonts \

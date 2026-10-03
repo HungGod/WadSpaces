@@ -81,6 +81,19 @@ export interface Session {
   remaining_s: number | null;
 }
 
+/** GET /api/streams (the Rust wadd's /v1/streams): viewing this machine's
+ *  wadspaces from other devices on its network. */
+export interface StreamsStatus {
+  allowRemote: boolean;
+  passwordSet: boolean;
+  /** Why a stream can't start now. */
+  problem: string | null;
+  user: string;
+  /** The streams' certificate (SHA-256, hex); null until it's made. */
+  sha256: string | null;
+  streams: { wsId: string; name: string; port: number; urls: string[]; user: string; sha256: string; ready: boolean }[];
+}
+
 export interface NetworkStatus {
   available?: boolean;
   state?: string;
@@ -338,6 +351,14 @@ export const wadd = {
   wifiDisconnect: () => call<{ ok: boolean }>("POST", "/api/network/wifi/disconnect"),
   wifiForget: (ssid: string) => call<{ ok: boolean }>("POST", "/api/network/wifi/forget", { ssid }),
   power: (action: "poweroff" | "reboot") => call<{ ok: boolean }>("POST", "/api/power", { action }),
+  streams: () => call<StreamsStatus>("GET", "/api/streams"),
+  /** Only ever from the machine itself: the account can't turn it on. */
+  setAllowRemote: (allowRemote: boolean) => call<StreamsStatus>("PUT", "/api/streams/settings", { allowRemote }),
+  /** `takeover`: it's on this screen; take it off. */
+  startStream: (id: string, takeover = false) =>
+    call<StreamsStatus>("POST", `/api/workspaces/${encodeURIComponent(id)}/stream`, { takeover }),
+  stopStream: (id: string) => call<StreamsStatus>("DELETE", `/api/workspaces/${encodeURIComponent(id)}/stream`),
+
   /** The HUD's menu was closed: wadd puts back what was on screen. */
   hudClosed: () => call<{ ok: boolean }>("POST", "/api/hud/closed"),
   // Builds on this machine

@@ -149,6 +149,8 @@ fn body_for(m: &str, path: &str) -> Option<Value> {
         }
         ("POST", "/api/network/wifi/connect") | ("POST", "/api/network/wifi/forget") => json!({"ssid": "Home"}),
         ("POST", "/api/power") => json!({"action": "reboot"}),
+        ("PUT", "/api/streams/settings") => json!({"allowRemote": false}),
+        ("POST", "/api/workspaces/writing/stream") => json!({"takeover": false}),
         ("POST", "/api/builds") => json!({"workspace": {}, "base_image": "x"}),
         ("POST", "/api/projects") | ("PUT", "/api/projects/writing") => {
             json!({"name": "N", "mountName": "N", "source": {"kind": "git", "url": "https://github.com/o/n"}})

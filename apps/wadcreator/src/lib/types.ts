@@ -104,6 +104,25 @@ export interface Container {
   /** A streamed wadspace served on the machine's tailnet: opens on the user's
    *  devices signed in to the same tailnet, nowhere else. */
   streamUrl?: string | null;
+  /** Draws on the machine's screen (a lean image), so it can be streamed
+   *  to another device on the machine's network. */
+  native?: boolean;
+  /** Streamed to other devices right now (the machine's heartbeat). */
+  stream?: RemoteStream | null;
+}
+
+/** A wadspace a machine streams to other devices on its local network
+ *  (wadd's streams): its links there, the name to sign in with (the
+ *  password is the account's stream password) and the certificate's
+ *  SHA-256 to check it by. */
+export interface RemoteStream {
+  wsId: string;
+  name: string;
+  port: number;
+  urls: string[];
+  user: string;
+  sha256: string;
+  ready: boolean;
 }
 
 /** One stretch of a container being up: when, where, who ran it, and who looked in. */
@@ -130,7 +149,10 @@ export interface Machine {
   label: string;
   os: string;
   status: "online" | "offline";
+  /** Lets other devices view its wadspaces (turned on at the machine itself). */
   allowRemote: boolean;
+  /** What it streams to other devices now. */
+  streams?: RemoteStream[];
   /** Load in percent; null until the machine reports it. */
   cpu: number | null;
   ram: number | null;

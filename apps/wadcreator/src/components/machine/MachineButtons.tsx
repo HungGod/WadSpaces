@@ -1,14 +1,15 @@
-import { FolderGit2, Power, Wifi } from "lucide-react";
+import { Cast, FolderGit2, Power, Wifi } from "lucide-react";
 import clsx from "clsx";
 import { openMachinePanel, type Panel } from "./panels";
 
 const BUTTONS: { panel: Panel; label: string; icon: typeof Wifi }[] = [
   { panel: "wifi", label: "Wi-Fi", icon: Wifi },
   { panel: "github", label: "GitHub", icon: FolderGit2 },
+  { panel: "streams", label: "Viewing", icon: Cast },
   { panel: "power", label: "Power", icon: Power },
 ];
 
-/** The machine app's sidebar: this machine's Wi-Fi, GitHub sign-in and power. */
+/** The machine app's sidebar: this machine's Wi-Fi, GitHub sign-in, viewing from other devices and power. */
 export function MachineButtons({ narrow }: { narrow: boolean }) {
   return (
     <div className={clsx("flex gap-1", narrow ? "flex-col items-center" : "")}>

@@ -7,6 +7,7 @@ mod github;
 mod rswadd;
 #[cfg(feature = "spike")]
 mod spike;
+mod stream;
 mod theme;
 mod wadd;
 mod window;
@@ -37,6 +38,8 @@ fn commands() -> tauri_specta::Builder<tauri::Wry> {
             github::github_device_cancel,
             github::github_open_browser,
             theme::set_theme,
+            stream::stream_view,
+            stream::qr_svg,
             wadd::wadd_request,
             wadd::wadd_last_state,
             wadd::wadd_kind,

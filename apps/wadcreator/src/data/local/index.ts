@@ -615,6 +615,7 @@ export class LocalBackend implements Backend {
       onScreen: view === `workspace:${w.id}`,
       hotkey: w.hotkey,
       streamUrl: stream?.url ?? null,
+      native: w.display === "host",
     };
   }
 

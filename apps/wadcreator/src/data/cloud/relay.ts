@@ -2,7 +2,7 @@
 // heartbeat to users/{uid}/machines/{mid} every 30 s and runs the commands
 // queued under it; CloudBackend listens to the heartbeats. See firestore.rules
 // for what each side may write.
-import { addDoc, collection, doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, collection, doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { newEnrollCode } from "./relayCore";
 
@@ -10,13 +10,41 @@ export { ONLINE_WITHIN_MS, isOnlineNow, newEnrollCode, type RelayWorkspace } fro
 
 export type CommandType = "switch" | "start" | "stop" | "restart" | "projects-sync" | "sync-secrets" | "launch";
 
-/** Queue a command; the machine picks it up within a few seconds. */
-export async function sendCommand(uid: string, mid: string, type: CommandType, wsId?: string): Promise<void> {
-  await addDoc(collection(db, "users", uid, "machines", mid, "commands"), {
+/** Queue a command; the machine picks it up within a few seconds. Its id. */
+export async function sendCommand(
+  uid: string,
+  mid: string,
+  type: CommandType,
+  wsId?: string,
+  extra: Record<string, unknown> = {},
+): Promise<string> {
+  const ref = await addDoc(collection(db, "users", uid, "machines", mid, "commands"), {
+    ...extra,
     type,
     ...(wsId && { wsId }),
     status: "pending",
     createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+/** How a command went: its result once the machine has run it (a failure's
+ *  message thrown), or a timeout. */
+export function commandResult(uid: string, mid: string, id: string, timeoutMs = 60_000): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      stop();
+      reject(new Error("The machine didn't answer. Is it on?"));
+    }, timeoutMs);
+    const stop = onSnapshot(doc(db, "users", uid, "machines", mid, "commands", id), (snap) => {
+      const d = snap.data();
+      if (!d || (d.status !== "done" && d.status !== "error")) return;
+      clearTimeout(timer);
+      stop();
+      const result = (d.result ?? {}) as Record<string, unknown>;
+      if (d.status === "error") reject(new Error(String(result.error ?? "It didn't work.")));
+      else resolve(result);
+    });
   });
 }
 

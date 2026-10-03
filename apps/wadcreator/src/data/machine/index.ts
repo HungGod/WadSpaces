@@ -234,6 +234,14 @@ export class MachineBackend implements Backend {
     return uid ? this.cloud.tellMachines(uid, "sync-secrets") : 0;
   }
 
+  // ---------------------------------------------------------- streams
+  requestStream(machineId: string, wsId: string, opts?: { projects?: string[]; restart?: boolean }) {
+    return this.cloud.requestStream(machineId, wsId, opts);
+  }
+  setStreamPassword(password: string) {
+    return this.cloud.setStreamPassword(password);
+  }
+
   // ----------------------------------------------------- launches, builds
   launch(req: LaunchRequest) {
     return this.local.launch(req);

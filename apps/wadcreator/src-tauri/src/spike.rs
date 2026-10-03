@@ -38,6 +38,11 @@ const ENV: &str = r#"(async () => {
   r.toBlob = {};
   for (const t of ["image/webp", "image/jpeg", "image/png"]) r.toBlob[t] = await new Promise((res) => c.toBlob((b) => res(b ? b.type : null), t, 0.8));
   r.clipboard = typeof navigator.clipboard?.writeText;
+  // What a Selkies stream needs to show its video (the stream windows).
+  r.webcodecs = typeof VideoDecoder;
+  try { r.h264 = typeof VideoDecoder === "undefined" ? null : (await VideoDecoder.isConfigSupported({ codec: "avc1.42E01E", codedWidth: 1280, codedHeight: 720 })).supported; } catch (e) { r.h264 = String(e); }
+  r.webrtc = typeof RTCPeerConnection;
+  r.websocket = typeof WebSocket;
   r.text = document.body.innerText.slice(0, 200);
   r.watch = window.__spike;
   window.__report("env", r);
@@ -73,6 +78,16 @@ const WADD: &str = r#"(async () => {
   await t("upload", () => inv("wadd_build_context", new Uint8Array(1024), { headers: { "x-build-id": "nope" } }));
   await t("lastState", async () => (await inv("wadd_last_state"))?.machine);
   window.__report("wadd", r);
+})();"#;
+
+/// In a stream window: what the Selkies page shows (its status text, a
+/// canvas or video, and whether it's drawing).
+const STREAM_REPORT: &str = r#"(() => {
+  const v = document.querySelector("video, canvas");
+  const r = { href: location.href, title: document.title, text: document.body.innerText.slice(0, 200),
+    media: v ? `${v.tagName} ${v.width || v.videoWidth}x${v.height || v.videoHeight}` : null,
+    closeButton: !!document.getElementById("__wad_close") };
+  location.href = `spike:stream?${encodeURIComponent(JSON.stringify(r))}`;
 })();"#;
 
 /// The Wi-Fi step (when the machine is offline): pick a network, give a password.
@@ -140,6 +155,30 @@ fn snapshot(w: &WebviewWindow, path: PathBuf) {
 
 pub fn start(app: AppHandle, w: WebviewWindow) {
     let Some(dir) = std::env::var_os("WADCREATOR_SPIKE_DIR").map(PathBuf::from) else { return };
+    // A stream window at this view's address (`wadd view`), snapshotted.
+    if let Some(url) = std::env::var("WADCREATOR_SPIKE_STREAM").ok().and_then(|u| Url::parse(&u).ok()) {
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(3));
+            let (tx, rx) = std::sync::mpsc::channel();
+            let a = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                let _ = tx.send(crate::stream::open_window(&a, url, "5b1d0e", "Spike stream"));
+            });
+            match rx.recv() {
+                Ok(Ok(sw)) => {
+                    std::thread::sleep(Duration::from_secs(25));
+                    let _ = sw.eval(STREAM_REPORT);
+                    std::thread::sleep(Duration::from_secs(2));
+                    snapshot(&sw, dir.join("4-stream.png"));
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+                Ok(Err(e)) => println!("SPIKE stream-window-failed {e}"),
+                Err(_) => println!("SPIKE stream-window-failed"),
+            }
+            app.exit(0);
+        });
+        return;
+    }
     std::thread::spawn(move || {
         let wait = |s| std::thread::sleep(Duration::from_secs(s));
         let t0 = std::time::Instant::now();

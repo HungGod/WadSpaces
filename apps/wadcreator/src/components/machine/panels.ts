@@ -1,6 +1,6 @@
-// The machine app's menus (Wi-Fi, power, GitHub): opened by the HUD's buttons
+// The machine app's menus (Wi-Fi, power, GitHub, viewing from other devices): opened by the HUD's buttons
 // (through wadd's `panel` event), the sidebar, or a page. MachineChrome shows them.
-type Panel = "wifi" | "power" | "github";
+type Panel = "wifi" | "power" | "github" | "streams";
 const listeners = new Set<(p: Panel) => void>();
 
 export function openMachinePanel(p: Panel) {

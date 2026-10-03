@@ -142,11 +142,11 @@ impl Streams {
             .map(|v| v.trim().to_string())
             .unwrap_or_default();
         if value.is_empty() {
-            return Err("there's no stream password: set one in Wad Creator's Settings".into());
+            return Err("there's no stream password: set one in Wad Creator (Viewing)".into());
         }
         if value.chars().count() < self.cfg.min_password {
             return Err(format!(
-                "the stream password is too short: it needs {} characters or more (Wad Creator's Settings)",
+                "the stream password is too short: it needs {} characters or more (Wad Creator: Viewing)",
                 self.cfg.min_password
             ));
         }
@@ -160,7 +160,7 @@ impl Streams {
         }
         if !self.allow_remote() {
             return Some(format!(
-                "viewing from other devices is off on {}: turn it on in Wad Creator's Settings there",
+                "viewing from other devices is off on {}: turn it on in Wad Creator there (Viewing)",
                 self.machine
             ));
         }

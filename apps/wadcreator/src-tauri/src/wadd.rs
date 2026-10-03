@@ -35,7 +35,7 @@ pub struct WaddFailure {
 }
 
 impl WaddFailure {
-    fn new(status: u16, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: u16, message: impl Into<String>) -> Self {
         Self { status, message: message.into() }
     }
 }
@@ -103,6 +103,15 @@ impl Wadd {
         self.finish(res).await.map(drop)
     }
 
+    /// A call from the app's own Rust side, not the page (paths the page may
+    /// not use, like remote views). The Rust wadd has these; the Python one not.
+    pub async fn call(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value, WaddFailure> {
+        match &self.rs {
+            Some(rs) => rs.request(method, path, body).await,
+            None => Err(WaddFailure::new(409, "viewing another machine needs this machine's newer wadd")),
+        }
+    }
+
     fn unreachable(&self) -> WaddFailure {
         WaddFailure::new(0, format!("Cannot reach wadd at {}. Is this a WadSpaces machine?", self.base))
     }
@@ -135,6 +144,10 @@ fn allowed(method: Method, path: &str) -> Result<(), WaddFailure> {
     }
     if path_only.starts_with("/api/secrets") && !matches!(method, Method::Get) {
         return Err(WaddFailure::new(403, "secrets are set by the app, not the page"));
+    }
+    // A view's address carries its token: only the app opens views (stream.rs).
+    if path_only.starts_with("/api/remote-views") {
+        return Err(WaddFailure::new(403, "views of other machines are opened by the app, not the page"));
     }
     Ok(())
 }
@@ -305,6 +318,8 @@ mod tests {
         assert!(allowed(Method::Post, "/api/workspaces/writing/switch").is_ok());
         assert!(allowed(Method::Get, "/api/secrets").is_ok());
         assert_eq!(allowed(Method::Put, "/api/secrets/github_token").unwrap_err().status, 403);
+        assert_eq!(allowed(Method::Post, "/api/remote-views").unwrap_err().status, 403);
+        assert_eq!(allowed(Method::Delete, "/api/remote-views/ab12").unwrap_err().status, 403);
         for bad in ["/", "api/x", "/api/../etc", "/api/./x", "/api/x#y", "/api/a\\b", "/api/a\nb", "http://evil/api/x"]
         {
             assert_eq!(allowed(Method::Get, bad).unwrap_err().status, 400, "{bad:?}");

@@ -340,6 +340,20 @@ impl RsWadd {
                 self.v1(Post, "/v1/power", Some(&json!({"action": s(&b, "action")}))).await?;
                 ok()
             }
+            // Streams (the Rust wadd's own; the UI reads its shapes as they are).
+            (Get, ["api", "streams"]) => self.v1(Get, "/v1/streams", None).await?,
+            (Put, ["api", "streams", "settings"]) => self.v1(Put, "/v1/streams/settings", Some(&b)).await?,
+            (Post, ["api", "workspaces", id, "stream"]) => {
+                self.v1(Post, &format!("/v1/workspaces/{}/stream", enc(id)), Some(&b)).await?
+            }
+            (Delete, ["api", "workspaces", id, "stream"]) => {
+                self.v1(Delete, &format!("/v1/workspaces/{}/stream", enc(id)), None).await?
+            }
+            (Post, ["api", "remote-views"]) => self.v1(Post, "/v1/remote-views", Some(&b)).await?,
+            (Delete, ["api", "remote-views", id]) => {
+                self.v1(Delete, &format!("/v1/remote-views/{}", enc(id)), None).await?;
+                ok()
+            }
             // The HUD draws its own menus over the screen: nothing to put back.
             (Post, ["api", "hud", "closed"]) => ok(),
             (Get, ["api", "builds"]) => Value::Array(
@@ -523,7 +537,7 @@ impl RsWadd {
         match event {
             "build" => vec![("build".into(), flatten(build_py(s(data, "build")), data))],
             "launch" => vec![("launch".into(), flatten(launch_py(s(data, "launch")), data))],
-            "projects" | "notice" => vec![(event.into(), data.clone())],
+            "projects" | "notice" | "streams" => vec![(event.into(), data.clone())],
             _ => vec![],
         }
     }

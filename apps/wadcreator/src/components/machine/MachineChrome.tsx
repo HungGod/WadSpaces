@@ -6,13 +6,14 @@
 // whatever is on screen.
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Loader2, Power, Timer, Wifi } from "lucide-react";
+import { Cast, Loader2, Power, Timer, Wifi } from "lucide-react";
 import { useApp } from "@/lib/store";
 import { wadd, type Session } from "@/lib/wadd";
 import { Button, Modal } from "../ui";
 import { GithubSignInDialog } from "./GithubSignIn";
 import { onMachinePanel, type Panel } from "./panels";
 import { PowerPanel } from "./PowerPanel";
+import { StreamsPanel } from "./StreamsPanel";
 import { useWaddEvent, useWaddState } from "./useWadd";
 import { WifiPanel } from "./WifiPanel";
 
@@ -128,6 +129,18 @@ export function MachineChrome() {
         }
       >
         <PowerPanel />
+      </Modal>
+      <Modal
+        open={panel?.which === "streams"}
+        onClose={close}
+        width={600}
+        title={
+          <span className="flex items-center gap-2">
+            <Cast className="size-5" /> Viewing from other devices
+          </span>
+        }
+      >
+        <StreamsPanel />
       </Modal>
       <GithubSignInDialog open={panel?.which === "github"} onClose={close} />
       <FocusResume />
