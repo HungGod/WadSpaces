@@ -256,6 +256,12 @@ impl State {
             .and_then(|v| v.as_object().map(|o| o.keys().cloned().collect()))
             .unwrap_or_default()
     }
+
+    /// The digest (sha256, hex) of the value a secret was last seeded with.
+    pub fn seeded_digest(&self, name: &str) -> Option<String> {
+        read_json(&self.dir.join("seeded-secrets.json"))
+            .and_then(|v| v.get(name).and_then(|d| d.as_str()).map(String::from))
+    }
 }
 
 #[cfg(test)]

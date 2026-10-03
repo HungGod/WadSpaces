@@ -14,7 +14,8 @@
 //!
 //! The one that moves is the workspace list: /etc/wadspaces/workspaces.yaml
 //! (legacy.rs reads it) becomes state, `<state_dir>/workspaces.json`, at the
-//! cutover (migrate.rs plans that).
+//! cutover (migrate.rs plans that), and the image's own workspaces come in
+//! as updates to it (vendor.rs).
 
 pub mod folders;
 pub mod legacy;
@@ -22,6 +23,7 @@ pub mod migrate;
 pub mod projects;
 pub mod runs;
 pub mod state;
+pub mod vendor;
 
 pub use state::State;
 

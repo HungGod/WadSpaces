@@ -17,6 +17,7 @@ pub mod joblog;
 pub mod launches;
 pub mod logbuf;
 pub mod metrics;
+pub mod migrate;
 pub mod network;
 pub mod projects;
 pub mod pull;
@@ -111,23 +112,50 @@ fn cloud_settings(config: &Config) -> Option<(cloud::Settings, cloud::Endpoints)
     Some((settings, ends))
 }
 
-/// The machine's workspaces: `workspaces.json` in the state directory (the
-/// Rust wadd's own list) if there is one, else the Python wadd's
-/// workspaces.yaml.
-pub fn read_workspaces(daemon: &wad_config::Daemon) -> Result<Vec<Workspace>, String> {
+/// The machine's own list: `workspaces.json` in the state directory if there
+/// is one, else the Python wadd's workspaces.yaml (none: no workspaces).
+/// True when it came from the YAML.
+pub fn own_workspaces(daemon: &wad_config::Daemon) -> Result<(Vec<Workspace>, bool), String> {
     let own = daemon.state_dir.join("workspaces.json");
     match std::fs::read_to_string(&own) {
-        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", own.display())),
+        Ok(text) => serde_json::from_str(&text).map(|l| (l, false)).map_err(|e| format!("{}: {e}", own.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if !daemon.legacy_config.exists() {
+                return Ok((vec![], false));
+            }
             wad_store::legacy::read(&daemon.legacy_config, Some(&daemon.vendor_cloud))
-                .map(|c| c.workspaces)
+                .map(|c| (c.workspaces, true))
                 .map_err(|e| e.to_string())
         }
         Err(e) => Err(format!("{}: {e}", own.display())),
     }
 }
 
-fn now_secs() -> u64 {
+/// The machine's workspaces at start: its own list, with the image's
+/// workspaces that are new or changed applied (wad_store::vendor). Saved
+/// when that changed something, or `save` asks (the cutover's migration).
+pub fn read_workspaces(daemon: &wad_config::Daemon, save: bool) -> Result<Vec<Workspace>, String> {
+    let (mut list, _) = own_workspaces(daemon)?;
+    let vendor = wad_store::vendor::read(&daemon.vendor_workspaces).unwrap_or_else(|e| {
+        tracing::warn!("the image's workspaces: {e}");
+        vec![]
+    });
+    let mut book = wad_store::vendor::read_book(&daemon.state_dir);
+    let applied = wad_store::vendor::apply(&mut list, &mut book, &vendor);
+    for (id, why) in &applied.refused {
+        tracing::warn!("the image's workspace {id} wasn't applied: {why}");
+    }
+    if !applied.changed.is_empty() {
+        tracing::info!("from the image: {}", applied.changed.join(", "));
+    }
+    if save || !applied.changed.is_empty() {
+        registry::save_list(&daemon.state_dir, &list)?;
+        wad_store::vendor::write_book(&daemon.state_dir, &book).map_err(|e| e.to_string())?;
+    }
+    Ok(list)
+}
+
+pub(crate) fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
@@ -200,7 +228,7 @@ impl Server {
                 poll: Duration::from_secs(1),
             },
         );
-        let workspaces = read_workspaces(d).unwrap_or_else(|e| {
+        let workspaces = read_workspaces(d, false).unwrap_or_else(|e| {
             tracing::error!("no workspaces: {e}");
             vec![]
         });

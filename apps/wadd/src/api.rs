@@ -119,6 +119,7 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/workspaces", get(workspaces).post(workspace_create))
         .route("/v1/workspaces/{id}", get(workspace).put(workspace_put).delete(workspace_delete))
         .route("/v1/workspaces/{id}/state", get(workspace_state))
+        .route("/v1/workspaces/{id}/icon", get(workspace_icon))
         .route("/v1/workspaces/{id}/start", post(start))
         .route("/v1/workspaces/{id}/stop", post(stop))
         .route("/v1/workspaces/{id}/restart", post(restart))
@@ -192,6 +193,41 @@ async fn workspaces(State(app): State<Arc<AppState>>) -> Json<Vec<Workspace>> {
 
 async fn workspace(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Workspace>, Failure> {
     app.registry.workspaces().into_iter().find(|w| w.id == id).map(Json).ok_or_else(|| no_workspace(&id))
+}
+
+/// Where a workspace's icon may be: the image's icons, and wadd's own.
+pub const IMAGE_ICONS: &str = "/usr/share/wadspaces/icons";
+const ICON_MAX: u64 = 8 << 20;
+
+/// A workspace's icon, as a picture. Only from the icon folders (an icon is
+/// a path anyone who may edit workspaces can set, so not any file).
+async fn workspace_icon(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Response, Failure> {
+    let ws = app.registry.workspaces().into_iter().find(|w| w.id == id).ok_or_else(|| no_workspace(&id))?;
+    let none = || Failure(ApiError::new(ErrorCode::NotFound, format!("workspace {id:?} has no icon")));
+    let path = ws.icon.ok_or_else(none)?;
+    let (mime, bytes) = icon_file(std::path::Path::new(&path), &app.store.dir.join("icons")).ok_or_else(none)?;
+    Ok(([(axum::http::header::CONTENT_TYPE, mime), (axum::http::header::CACHE_CONTROL, "max-age=3600")], bytes)
+        .into_response())
+}
+
+/// The icon at `path` (its type and bytes), if it's a picture in an icon folder.
+pub fn icon_file(path: &std::path::Path, own_icons: &std::path::Path) -> Option<(&'static str, Vec<u8>)> {
+    let real = std::fs::canonicalize(path).ok()?;
+    let inside = |dir: &std::path::Path| std::fs::canonicalize(dir).is_ok_and(|d| real.starts_with(d));
+    if !(inside(std::path::Path::new(IMAGE_ICONS)) || inside(own_icons)) {
+        return None;
+    }
+    let ext = real.extension()?.to_str()?.to_ascii_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => return None,
+    };
+    let meta = std::fs::metadata(&real).ok()?;
+    (meta.is_file() && meta.len() <= ICON_MAX).then_some(())?;
+    Some((mime, std::fs::read(&real).ok()?))
 }
 
 /// Adds a workspace (refused if one has that id).

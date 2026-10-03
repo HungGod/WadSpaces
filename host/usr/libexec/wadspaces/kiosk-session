@@ -6,7 +6,7 @@ export XCURSOR_THEME=Adwaita
 export XCURSOR_SIZE=24
 
 for _ in $(seq 1 60); do
-    curl -fs -o /dev/null http://127.0.0.1:8080/api/health && break
+    curl -fs -o /dev/null --unix-socket /run/wadd/wadd.sock http://wadd/v1/health && break
     sleep 1
 done
 

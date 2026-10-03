@@ -1,5 +1,6 @@
 # WadSpaces host OS: Fedora bootc -> greetd -> sway -> Wad Creator (Tauri),
-# plus wadd (the workspace switcher). No browser: what the machine shows of
+# plus wadd (the machine daemon: workspaces, projects, the account link;
+# apps/wadd, Rust). No browser: what the machine shows of
 # the web (GitHub's sign-in, later other machines' streams) opens in Wad
 # Creator's own webview windows. Build from the repo root:
 #   host/build.sh image        (or: podman build -f host/Containerfile -t localhost/wadspaces-host .)
@@ -8,12 +9,11 @@ FROM quay.io/fedora/fedora-bootc:43
 RUN dnf -y install \
       sway greetd podman \
       webkit2gtk4.1 librsvg2 shared-mime-info \
-      python3 python3-fastapi python3-uvicorn python3-websockets python3-pyyaml \
-      python3-evdev python3-httpx \
+      python3 \
       mesa-dri-drivers libva-utils \
       adwaita-cursor-theme google-noto-sans-fonts google-noto-emoji-fonts liberation-fonts rsms-inter-vf-fonts \
       dbus-daemon dbus-tools wlr-randr NetworkManager-wifi NetworkManager-tui curl \
-      gtk4 gtk4-layer-shell python3-gobject \
+      gtk4 gtk4-layer-shell \
       git-core \
     && dnf clean all
 
@@ -28,8 +28,8 @@ RUN dnf -y install \
        else dnf -y install mesa-va-drivers-freeworld; fi \
     && dnf clean all
 
-# Tailscale, the trusted network between the owner's machines
-# (wadd/tailnet.py), from Tailscale's own repo. Its own layer, so the ones
+# Tailscale, the trusted network between the owner's machines, from
+# Tailscale's own repo. Its own layer, so the ones
 # above stay cached. tailscaled keeps its state in /var/lib/tailscale, which
 # bootc keeps across updates. Parked for now: installed, but masked below
 # (masked rather than just not enabled, because a machine that had it
@@ -38,17 +38,20 @@ RUN curl -fsSLo /etc/yum.repos.d/tailscale.repo https://pkgs.tailscale.com/stabl
     && dnf -y install tailscale \
     && dnf clean all
 
-COPY legacy/wadd-py/wadd/ /usr/lib/wadspaces/wadd/
 COPY host/etc/ /etc/
 COPY host/usr/ /usr/
-# Wad Creator, the Tauri app (built by host/build.sh from apps/wadcreator). Not
-# under /usr/lib/wadcreator: wadd adopts windows from that old Electron path
-# as a workspace, and this one is the shell.
+# Wad Creator, the Tauri app (built by host/build.sh from apps/wadcreator).
+# It's the shell: wadd keeps its window (app_id "wadcreator") on screen.
 COPY .build/wadcreator-app/wadcreator /usr/bin/wadcreator
+# wadd (apps/wadd), built by host/build.sh. It replaced the Python wadd: on
+# the first boot after that one, `wadd migrate` (wadd.service) moves its
+# state over; `bootc rollback` goes back to it (host/CUTOVER.md).
+COPY .build/wadd/wadd /usr/bin/wadd
 # The HUD (apps/hud, Rust + GTK4 layer-shell), built by host/build.sh.
 COPY .build/hud/hud /usr/libexec/wadspaces/hud
-# Staged by host/build.sh from host/secrets/. wadd seeds podman secrets from
-# here; the admin hash is applied by wadspaces-admin-password.service.
+# Staged by host/build.sh from host/secrets/: the admin password hash, which
+# wadspaces-admin-password.service applies. (No podman secrets are baked in:
+# a machine gets its GitHub token by signing in, or from the account.)
 COPY .build/secrets/ /usr/lib/wadspaces/secrets/
 COPY .build/ssh/ /usr/share/wadspaces/ssh/
 
@@ -61,9 +64,9 @@ RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd /usr/bin/wadcreator && \
       command -v "$b" > /dev/null || { echo "missing $b" >&2; exit 1; }; \
     done && \
     ls /usr/lib/firmware/mrvl/pcie8897_uapsta.bin* /usr/lib64/libgtk4-layer-shell.so.0 > /dev/null && \
-    PYTHONPATH=/usr/lib/wadspaces python3 -m wadd --config /etc/wadspaces/workspaces.yaml \
-      gen-quadlets --out /etc/containers/systemd && \
-    systemctl enable greetd.service podman.socket wadd.service wadspaces-admin-password.service wadspaces-import.service && \
+    /usr/bin/wadd version && \
+    systemctl enable greetd.service podman.socket wadd.socket wadd.service \
+      wadspaces-admin-password.service wadspaces-import.service && \
     systemctl mask tailscaled.service && \
     systemctl set-default graphical.target && \
     systemctl mask getty@tty1.service && \

@@ -271,13 +271,7 @@ impl Registry {
     /// The workspace list, as the Rust wadd's own (it wins over the Python
     /// wadd's workspaces.yaml from then on).
     fn save(&self, list: &[Workspace]) -> Result<(), String> {
-        let path = self.settings.state_dir.join("workspaces.json");
-        let tmp = path.with_extension("json.tmp");
-        let text = serde_json::to_string_pretty(list).map_err(|e| e.to_string())? + "\n";
-        std::fs::create_dir_all(&self.settings.state_dir)
-            .and_then(|_| std::fs::write(&tmp, text))
-            .and_then(|_| std::fs::rename(&tmp, &path))
-            .map_err(|e| format!("{}: {e}", path.display()))
+        save_list(&self.settings.state_dir, list)
     }
 
     pub fn workspaces(&self) -> Vec<Workspace> {
@@ -776,4 +770,15 @@ impl Registry {
             }
         })
     }
+}
+
+/// Writes the workspace list (`<state_dir>/workspaces.json`).
+pub fn save_list(state_dir: &std::path::Path, list: &[Workspace]) -> Result<(), String> {
+    let path = state_dir.join("workspaces.json");
+    let tmp = path.with_extension("json.tmp");
+    let text = serde_json::to_string_pretty(list).map_err(|e| e.to_string())? + "\n";
+    std::fs::create_dir_all(state_dir)
+        .and_then(|_| std::fs::write(&tmp, text))
+        .and_then(|_| std::fs::rename(&tmp, &path))
+        .map_err(|e| format!("{}: {e}", path.display()))
 }

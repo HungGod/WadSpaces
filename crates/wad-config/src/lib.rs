@@ -188,6 +188,9 @@ pub struct Daemon {
     pub legacy_config: PathBuf,
     /// The image's cloud settings (its keys win over the legacy file's).
     pub vendor_cloud: PathBuf,
+    /// The image's workspaces, one `<id>.toml` each: applied to the
+    /// machine's list when they're new or the image changes them.
+    pub vendor_workspaces: PathBuf,
     /// Podman's API socket.
     pub podman_socket: PathBuf,
     /// Where wadd writes the workspaces' quadlet units (rewritten at every
@@ -261,6 +264,7 @@ impl Daemon {
                 allow_groups: vec!["wad".into(), "wheel".into()],
                 legacy_config: "/etc/wadspaces/workspaces.yaml".into(),
                 vendor_cloud: "/usr/lib/wadspaces/cloud.yaml".into(),
+                vendor_workspaces: "/usr/lib/wadspaces/workspaces.d".into(),
                 podman_socket: "/run/podman/podman.sock".into(),
                 units_dir: "/run/containers/systemd".into(),
                 projects_dir: "/var/lib/wadspaces-projects".into(),
@@ -280,6 +284,7 @@ impl Daemon {
                 allow_groups: vec![],
                 legacy_config: config_home().join("wadspaces/workspaces.yaml"),
                 vendor_cloud: "/usr/lib/wadspaces/cloud.yaml".into(),
+                vendor_workspaces: "/usr/lib/wadspaces/workspaces.d".into(),
                 podman_socket: runtime_dir().join("podman/podman.sock"),
                 units_dir: runtime_dir().join("containers/systemd"),
                 projects_dir: home().join(".local/share/wadspaces-projects"),
@@ -470,6 +475,22 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    /// The image's own file (host/usr/lib/wadspaces/wadd.toml).
+    #[test]
+    fn the_images_settings() {
+        let f = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../host/usr/lib/wadspaces/wadd.toml");
+        let c = Config::load(Profile::System, &[f]).unwrap();
+        assert_eq!(c.machine.name, "wadspaces");
+        assert_eq!((c.daemon.prefetch, c.daemon.prefetch_min_free_gb), (Prefetch::None, 5));
+        assert_eq!(c.daemon.socket, Path::new("/run/wadd/wadd.sock"));
+        assert_eq!(c.daemon.vendor_workspaces, Path::new("/usr/lib/wadspaces/workspaces.d"));
+        assert_eq!(
+            (c.cloud.project_id.as_str(), c.cloud.functions_region.as_str()),
+            ("wad-spaces", "australia-southeast2")
+        );
+        assert!(c.keys.enabled && c.keys.home == ["KEY_0", "KEY_SPACE"]);
+    }
 
     fn write(dir: &Path, name: &str, text: &str) -> PathBuf {
         let p = dir.join(name);

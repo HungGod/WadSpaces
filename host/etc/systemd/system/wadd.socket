@@ -1,4 +1,4 @@
-# The Rust wadd's API socket (stage 2). systemd owns it, so clients can
+# wadd's API socket. systemd owns it, so clients can
 # connect while wadd (re)starts; it starts wadd on the first connection too.
 # Group `wad`: the kiosk user's group; admins in it (or wheel) may use it.
 [Unit]

@@ -1,0 +1,18 @@
+# Vanua Academy: a lean image, its desktop a window on this screen.
+# The image's copy: wadd applies it when it's new or changed (wad_store::vendor).
+name = "Vanua Academy"
+image = "ghcr.io/hunggod/wadspaces-vanua-academy:latest"
+display = "host"
+hotkey = 5
+icon = "/usr/share/wadspaces/icons/vanua-academy.jpg"
+secrets = ["github_token"]
+volumes = ["wad-vanua-academy-config:/config:z"]
+devices = ["/dev/dri"]
+shm_size = "1g"
+
+[env]
+PUID = "1000"
+PGID = "1000"
+TZ = "Pacific/Fiji"
+GIT_USER_NAME = "HungGod"
+GIT_USER_EMAIL = "throwupcow@gmail.com"

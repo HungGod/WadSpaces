@@ -1,6 +1,6 @@
 //! What moving a machine from the Python wadd to the Rust one does, worked
-//! out from what's there (`wadd migrate --dry-run` prints it; the cutover
-//! applies it on first boot). Most state stays exactly as it is, so the
+//! out from what's there (`wadd migrate --dry-run` prints it; `wadd migrate`,
+//! which wadd.service runs before it starts, does it: wadd's migrate.rs). Most state stays exactly as it is, so the
 //! Python wadd can still read it after a rollback.
 
 use std::path::Path;
@@ -62,7 +62,7 @@ pub fn plan(yaml: &Path, vendor_cloud: Option<&Path>) -> Plan {
             Action::Convert,
             "workspaces",
             format!(
-                "{} from {} become state: {}/workspaces.json ({}). The YAML stays, unused.",
+                "{} from {} become state: {}/workspaces.json ({}), with the image's workspaces (workspaces.d) applied over them. The YAML stays, unused.",
                 count(c.workspaces.len(), "workspace", "workspaces"),
                 yaml.display(),
                 state.dir.display(),
@@ -172,7 +172,7 @@ pub fn plan(yaml: &Path, vendor_cloud: Option<&Path>) -> Plan {
         steps.push(step(
             Action::Convert,
             "secrets",
-            "seeded-secrets.json forgets github_token: images don't bake one any more (machines sign in to GitHub), so the podman secret is the user's own from now on",
+            "github_token goes from podman if it's still the token old images baked in (it's revoked: machines sign in to GitHub now); one the machine signed in for stays. seeded-secrets.json stays, for the Python wadd",
         ));
     } else {
         steps.push(step(

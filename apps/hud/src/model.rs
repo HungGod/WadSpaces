@@ -1,10 +1,11 @@
-//! What the HUD shows, worked out from wadd's state (pure, so it's tested
-//! without a screen). wadd today is the Python one: its snapshot's `session`
-//! and `network`, and its `carousel` events.
+//! What the HUD shows, worked out from wadd's events (pure, so it's tested
+//! without a screen): `session`, `network` and `carousel` (wad_proto's v1
+//! types, read leniently).
 
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Session {
     #[serde(default = "focus")]
     pub mode: String,
@@ -35,7 +36,7 @@ fn yes() -> bool {
     true
 }
 
-/// The part of wadd's snapshot the HUD uses.
+/// What the HUD keeps of wadd's state (its `session` and `network` events).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct State {
     #[serde(default)]
@@ -93,12 +94,26 @@ pub fn network_label(n: Option<&Network>) -> Option<(String, bool)> {
 /// One switcher entry (wadd's `carousel` event).
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct CarouselItem {
+    /// "home" (Wad Creator), or the workspace's id.
+    #[serde(deserialize_with = "view")]
     pub view: String,
     pub name: String,
     #[serde(default)]
     pub icon: Option<String>,
     #[serde(default = "yes")]
     pub running: bool,
+}
+
+/// wadd's View: `{"kind":"home"}` or `{"kind":"workspace","id":...}`.
+fn view<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    #[derive(Deserialize)]
+    struct V {
+        kind: String,
+        #[serde(default)]
+        id: Option<String>,
+    }
+    let v = V::deserialize(d)?;
+    Ok(if v.kind == "home" { "home".into() } else { v.id.unwrap_or_default() })
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -111,7 +126,7 @@ pub struct Carousel {
     pub index: usize,
 }
 
-/// A network in range (GET /api/network/wifi).
+/// A network in range (GET /v1/network/wifi).
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct WifiNetwork {
     pub ssid: String,
@@ -234,16 +249,25 @@ mod tests {
     }
 
     #[test]
-    fn wadd_snapshot_parses() {
-        let s: State = serde_json::from_str(
-            r#"{"machine":"x","session":{"mode":"focus","workspaces":["a"],"minutes":25,"ends_at":null,"expired":false,"remaining_s":null},"network":{"available":true,"connectivity":"full","ssid":"Home","signal":70}}"#,
+    fn wadds_events_parse() {
+        let s: Option<Session> = serde_json::from_str(
+            r#"{"mode":"focus","workspaces":["a"],"minutes":25,"startedAt":1.0,"endsAt":1500.0,"expired":false}"#,
         )
         .unwrap();
-        assert!(locked(s.session.as_ref()));
+        assert!(locked(s.as_ref()));
+        assert_eq!(s.unwrap().ends_at, Some(1500.0));
+        let none: Option<Session> = serde_json::from_str("null").unwrap();
+        assert!(!locked(none.as_ref()));
+        let n: Network = serde_json::from_str(
+            r#"{"available":true,"state":"connected","connectivity":"full","wifiEnabled":true,"wifiDevice":"wlp1s0","ssid":"Home","signal":70}"#,
+        )
+        .unwrap();
+        assert_eq!(network_label(Some(&n)), Some(("Home".into(), true)));
         let c: Carousel = serde_json::from_str(
-            r#"{"open":true,"items":[{"view":"launcher","name":"Wad Creator","icon":null,"running":true}],"index":0}"#,
+            r#"{"open":true,"items":[{"view":{"kind":"home"},"name":"Wad Creator","icon":null,"running":true},
+                {"view":{"kind":"workspace","id":"writing"},"name":"Writing","icon":"/v1/workspaces/writing/icon","running":false}],"index":1}"#,
         )
         .unwrap();
-        assert_eq!(c.items[0].name, "Wad Creator");
+        assert_eq!((c.items[0].view.as_str(), c.items[1].view.as_str()), ("home", "writing"));
     }
 }

@@ -1,0 +1,18 @@
+# Wad Creator Dev: a lean image, its desktop a window on this screen.
+# The image's copy: wadd applies it when it's new or changed (wad_store::vendor).
+name = "Wad Creator Dev"
+image = "ghcr.io/hunggod/wadspaces-wad-c:latest"
+display = "host"
+hotkey = 3
+icon = "/usr/share/wadspaces/icons/wad-c.png"
+secrets = ["github_token"]
+volumes = ["wad-wad-c-config:/config:z"]
+devices = ["/dev/dri"]
+shm_size = "1g"
+
+[env]
+PUID = "1000"
+PGID = "1000"
+TZ = "Pacific/Fiji"
+GIT_USER_NAME = "HungGod"
+GIT_USER_EMAIL = "throwupcow@gmail.com"

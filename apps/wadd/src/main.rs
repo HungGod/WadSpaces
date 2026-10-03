@@ -39,11 +39,15 @@ enum Cmd {
         #[arg(long)]
         socket: Option<PathBuf>,
     },
-    /// What moving this machine's state to the Rust wadd would do.
+    /// Moves this machine over from the Python wadd (once; wadd.service runs
+    /// it before each start).
     Migrate {
-        /// Only say what would happen (all there is until the cutover).
+        /// Only say what would happen.
         #[arg(long)]
         dry_run: bool,
+        /// Run it again even though it's done.
+        #[arg(long)]
+        force: bool,
         /// As JSON.
         #[arg(long)]
         json: bool,
@@ -76,7 +80,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Cmd::Serve { user, config, socket } => serve(user, config, socket),
-        Cmd::Migrate { dry_run, json, from, user } => migrate(dry_run, json, from, user),
+        Cmd::Migrate { dry_run, force, json, from, user } => migrate(dry_run, force, json, from, user),
         Cmd::Keys { seconds, no_grab } => keys(seconds.min(120), !no_grab),
     }
 }
@@ -112,27 +116,51 @@ fn keys(seconds: u64, grab: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn migrate(dry_run: bool, json: bool, from: Option<PathBuf>, user: bool) -> ExitCode {
-    if !dry_run {
-        eprintln!("wadd migrate: only --dry-run for now (the cutover image migrates on its first boot)");
-        return ExitCode::from(2);
-    }
+fn migrate(dry_run: bool, force: bool, json: bool, from: Option<PathBuf>, user: bool) -> ExitCode {
     let profile = if user { Profile::User } else { Profile::System };
-    let cfg = match Config::load(profile, &Config::files(profile)) {
+    let mut cfg = match Config::load(profile, &Config::files(profile)) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("wadd: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let yaml = from.unwrap_or(cfg.daemon.legacy_config);
-    let plan = wad_store::migrate::plan(&yaml, Some(&cfg.daemon.vendor_cloud));
-    if json {
-        println!("{}", serde_json::to_string_pretty(&plan).expect("plans serialize"));
-    } else {
-        print!("{}", plan.text());
+    if let Some(f) = from {
+        cfg.daemon.legacy_config = f;
     }
-    ExitCode::SUCCESS
+    if dry_run {
+        let plan = wad_store::migrate::plan(&cfg.daemon.legacy_config, Some(&cfg.daemon.vendor_cloud));
+        if json {
+            println!("{}", serde_json::to_string_pretty(&plan).expect("plans serialize"));
+        } else {
+            print!("{}", plan.text());
+        }
+        return ExitCode::SUCCESS;
+    }
+    tracing_subscriber::fmt().with_env_filter(EnvFilter::new("info")).with_writer(std::io::stderr).init();
+    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("wadd: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = rt.block_on(async {
+        let backend = backend::connect(&cfg.daemon, profile).await.inspect_err(|e| eprintln!("wadd migrate: {e}")).ok();
+        wadd::migrate::apply(&cfg, backend.as_ref().map(|b| b as &dyn Backend), force).await
+    });
+    match result {
+        Ok(report) => {
+            for line in report {
+                println!("wadd migrate: {line}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("wadd migrate: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn serve(user: bool, config: Option<PathBuf>, socket: Option<PathBuf>) -> ExitCode {

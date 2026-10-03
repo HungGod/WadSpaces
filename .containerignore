@@ -6,7 +6,7 @@
 *
 !host/etc
 !host/usr
-!legacy/wadd-py/wadd
+!.build/wadd
 !.build/wadcreator-app
 !.build/hud
 !.build/secrets

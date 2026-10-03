@@ -24,9 +24,10 @@
 # needs Rust (rustup), Node, the WebKitGTK dev packages, and the Firebase web
 # config in WADCREATOR_DIR/.env.local.
 #
-# The HUD (apps/hud: the bar, power and Wi-Fi menus and the switcher above
-# every window) is built here too, into /usr/libexec/wadspaces/hud. It needs
-# gtk4-devel and gtk4-layer-shell-devel.
+# wadd (apps/wadd, the machine daemon) and the HUD (apps/hud: the bar, power
+# and Wi-Fi menus and the switcher above every window) are built here too,
+# into /usr/bin/wadd and /usr/libexec/wadspaces/hud. The HUD needs gtk4-devel
+# and gtk4-layer-shell-devel.
 #
 # Baked-in secrets come from host/secrets/ (gitignored, never in the build
 # context directly):
@@ -79,6 +80,14 @@ stage_wadcreator() {
     install -m 755 "${ROOT}/target/release/wadcreator" "${out}/wadcreator"
 }
 
+stage_wadd() {
+    local out="${ROOT}/.build/wadd"
+    rm -rf "${out}" && mkdir -p "${out}"
+    echo ">> building wadd (apps/wadd)"
+    (cd "${ROOT}" && cargo build --release --quiet -p wadd)
+    install -m 755 "${ROOT}/target/release/wadd" "${out}/wadd"
+}
+
 stage_hud() {
     local out="${ROOT}/.build/hud"
     rm -rf "${out}" && mkdir -p "${out}"
@@ -99,8 +108,7 @@ EOF
 
 stage_secrets() {
     local out="${ROOT}/.build/secrets"
-    # podman/: files wadd seeds as podman secrets (none baked in now).
-    rm -rf "${out}" && (umask 077 && mkdir -p "${out}/podman")
+    rm -rf "${out}" && (umask 077 && mkdir -p "${out}")
     local hash
     if [[ -f "${SECRETS_DIR}/admin_password_hash" ]]; then
         hash="$(< "${SECRETS_DIR}/admin_password_hash")"
@@ -189,13 +197,16 @@ workspace_dir() {
     echo "no workspace $1 in ${CONTAINERS_DIR}" >&2; return 1
 }
 
-# The image name wadd runs a workspace as (its image: in workspaces.yaml).
+# The image name wadd runs a workspace as (image = in the image's
+# workspaces.d/<id>.toml).
 workspace_target() {
     python3 -c '
-import sys, yaml
-ws = [w for w in yaml.safe_load(open(sys.argv[1]))["workspaces"] if w["id"] == sys.argv[2]]
-sys.exit(sys.argv[2] + " is not in workspaces.yaml") if not ws else print(ws[0]["image"])
-' "${ROOT}/host/etc/wadspaces/workspaces.yaml" "$1"
+import sys, tomllib
+try:
+    print(tomllib.load(open(sys.argv[1], "rb"))["image"])
+except FileNotFoundError:
+    sys.exit(sys.argv[2] + " is not one of the image'"'"'s workspaces (host/usr/lib/wadspaces/workspaces.d)")
+' "${ROOT}/host/usr/lib/wadspaces/workspaces.d/$1.toml" "$1"
 }
 
 stage_stick() {
@@ -262,6 +273,7 @@ case "${TARGET}" in
 esac
 
 stage_wadcreator
+stage_wadd
 stage_hud
 stage_secrets
 echo ">> building ${IMAGE}"

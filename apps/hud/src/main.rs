@@ -595,8 +595,8 @@ impl Hud {
             if i == c.index {
                 cell.add_css_class("selected");
             }
-            // Wad Creator (wadd's "launcher" view) is the WadSpaces logo.
-            let texture = if item.view == "launcher" {
+            // Wad Creator (wadd's "home" view) is the WadSpaces logo.
+            let texture = if item.view == "home" {
                 self.logo.borrow().clone()
             } else {
                 item.icon.as_ref().and_then(|p| self.icon(p))
@@ -654,12 +654,18 @@ impl Hud {
     // -------------------------------------------------------------- events
     fn on_event(self: &Rc<Self>, ev: Incoming) {
         match ev {
-            Incoming::Event(name, data) if name == "state" => {
-                if let Ok(s) = serde_json::from_value::<State>(data) {
-                    if !model::locked(s.session.as_ref()) {
+            Incoming::Event(name, data) if name == "session" => {
+                if let Ok(session) = serde_json::from_value::<Option<model::Session>>(data) {
+                    if !model::locked(session.as_ref()) {
                         self.show_left.set(false);
                     }
-                    self.state.replace(s);
+                    self.state.borrow_mut().session = session;
+                    self.update_bar();
+                }
+            }
+            Incoming::Event(name, data) if name == "network" => {
+                if let Ok(network) = serde_json::from_value::<model::Network>(data) {
+                    self.state.borrow_mut().network = Some(network);
                     self.update_bar();
                 }
             }
@@ -706,7 +712,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
         && let Some(t) =
             thumb::thumbnail(&bytes, 128).and_then(|b| gdk::Texture::from_bytes(&glib::Bytes::from(&b)).ok())
     {
-        hud.icons.borrow_mut().insert("/api/icons/writing".into(), Some(t));
+        hud.icons.borrow_mut().insert("/v1/workspaces/writing/icon".into(), Some(t));
     }
     hud.state.replace(State {
         session: None,
@@ -774,10 +780,10 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
             model::CarouselItem {
                 view: "workspace:writing".into(),
                 name: "Writing".into(),
-                icon: Some("/api/icons/writing".into()),
+                icon: Some("/v1/workspaces/writing/icon".into()),
                 running: true,
             },
-            model::CarouselItem { view: "launcher".into(), name: "Wad Creator".into(), icon: None, running: true },
+            model::CarouselItem { view: "home".into(), name: "Wad Creator".into(), icon: None, running: true },
             model::CarouselItem {
                 view: "workspace:iq-dev".into(),
                 name: "IntelligenceQuest Dev".into(),

@@ -1,29 +1,34 @@
 [Unit]
-Description=WadSpaces workspace switcher (wadd)
+Description=WadSpaces machine daemon (wadd)
+# Its API is wadd.socket (/run/wadd/wadd.sock): systemd holds it, so Wad
+# Creator and the HUD can connect while wadd (re)starts.
+Requires=wadd.socket
+After=wadd.socket network-online.target podman.socket
 Wants=network-online.target podman.socket
-After=network-online.target podman.socket
 
 [Service]
-Type=exec
-# --no-cdp: the shell is Wad Creator (a Tauri app), not a browser to steer.
-ExecStart=/usr/bin/wadd --config /etc/wadspaces/workspaces.yaml serve --no-cdp
+Type=notify
+NotifyAccess=main
+# Once, on the first boot after the Python wadd: its workspaces.yaml becomes
+# state, its units in /etc/containers/systemd go, the baked GitHub token
+# goes. "+": with full privileges (it writes /etc); "-": wadd starts anyway.
+ExecStartPre=-+/usr/bin/wadd migrate
+ExecStart=/usr/bin/wadd serve
 Restart=always
 RestartSec=2
 TimeoutStopSec=10
 StateDirectory=wadspaces
-# Root: it needs the rootful podman socket, systemctl for the quadlet units,
-# and /dev/input for hotkeys. Everything else is locked down.
+# Root: rootful podman, systemd for the workspace units, /dev/input and
+# /dev/uinput for the keys. Everything else is locked down.
 ProtectSystem=strict
 # read-only, not "yes": wadd connects to sway's IPC socket in the kiosk
-# session's /run/user/1000 (to put native workspaces on screen). That dir only
-# appears once greetd logs the kiosk in, after wadd has started; "yes" would
-# hide it for good. Connecting to a socket works on a read-only mount.
+# session's /run/user/1000, which appears after wadd has started.
 ProtectHome=read-only
-# wadspaces-projects: project folders (git imports, as uid 1000). Podman's
-# volumes: a launch moves a project an older image cloned into a workspace's
-# /config volume over to its folder (launches.py). "-": the volumes dir only
-# exists once podman has made a volume.
-ReadWritePaths=/var/lib/wadspaces /etc/wadspaces /etc/containers/systemd /run/podman
+# /run/containers/systemd: the workspaces' units, written at every start
+# (tmpfiles.d makes it). wadspaces-projects: project folders (git runs as
+# uid 1000 there). Podman's volumes: a launch adopts a project an older
+# image cloned into a workspace's /config volume.
+ReadWritePaths=/var/lib/wadspaces /run/containers/systemd
 ReadWritePaths=-/var/lib/wadspaces-projects -/var/lib/containers/storage/volumes
 PrivateTmp=yes
 NoNewPrivileges=yes

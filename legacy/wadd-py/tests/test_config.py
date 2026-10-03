@@ -54,7 +54,7 @@ def test_round_trip(tmp_path):
 
 
 def test_shipped_configs_are_valid():
-    for p in [REPO / "host/etc/wadspaces/workspaces.yaml", WADD / "dev/workspaces.dev.yaml"]:
+    for p in [WADD / "host/workspaces.yaml", WADD / "dev/workspaces.dev.yaml"]:
         assert len(load_config(p).workspaces) == 6
 
 
@@ -107,8 +107,8 @@ def test_the_image_decides_the_cloud_project(tmp_path):
 
 
 def test_the_shipped_host_config_links_to_wad_spaces():
-    cfg = load_config(REPO / "host/etc/wadspaces/workspaces.yaml",
-                      vendor_cloud=REPO / "host/usr/lib/wadspaces/cloud.yaml")
+    cfg = load_config(WADD / "host/workspaces.yaml",
+                      vendor_cloud=WADD / "host/cloud.yaml")
     assert cfg.cloud.project_id == "wad-spaces"
 
 

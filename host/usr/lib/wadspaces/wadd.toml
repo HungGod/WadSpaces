@@ -1,0 +1,24 @@
+# wadd's settings on a WadSpaces machine (the image's; wad_config reads this,
+# then /etc/wadspaces/wadd.toml if an admin made one). wadd never writes
+# either: what changes at run time is state, under /var/lib/wadspaces.
+# The rest are wad_config's defaults for a machine.
+
+[machine]
+name = "wadspaces"
+
+[daemon]
+# Images download from Wad Creator or on first use, never at boot: the six
+# images (~20 GB, sharing a 2.8 GB base) don't all fit a small disk.
+prefetch = "none"
+prefetch_min_free_gb = 5
+
+[keys]
+# wadd grabs the keyboards: Super+Tab switches, Super+1..9 jump, Super+0 or
+# Super+Space bring back Wad Creator, and `block` never reaches a workspace.
+home = ["KEY_0", "KEY_SPACE"]
+block = ["alt+f4", "ctrl+shift+q", "ctrl+alt+backspace"]
+
+[cloud]
+# The account this machine links to (Wad Creator links it at first sign-in).
+project_id = "wad-spaces"
+functions_region = "australia-southeast2"

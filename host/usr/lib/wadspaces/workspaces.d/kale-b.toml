@@ -1,0 +1,18 @@
+# Kale Browser: a lean image, its desktop a window on this screen.
+# The image's copy: wadd applies it when it's new or changed (wad_store::vendor).
+name = "Kale Browser"
+image = "ghcr.io/hunggod/wadspaces-kale-b:latest"
+display = "host"
+hotkey = 4
+icon = "/usr/share/wadspaces/icons/kale-b.png"
+secrets = ["github_token"]
+volumes = ["wad-kale-b-config:/config:z"]
+devices = ["/dev/dri"]
+shm_size = "1g"
+
+[env]
+PUID = "1000"
+PGID = "1000"
+TZ = "Pacific/Fiji"
+GIT_USER_NAME = "HungGod"
+GIT_USER_EMAIL = "throwupcow@gmail.com"
