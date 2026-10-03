@@ -121,3 +121,17 @@ fn the_images_workspaces_are_valid() {
     let new: Vec<_> = v.into_iter().map(|w| w.workspace).collect();
     assert_eq!(new, old);
 }
+
+#[test]
+fn a_line_break_in_a_value_is_refused() {
+    for raw in [
+        serde_json::json!({"id": "w", "name": "W\n[Service]", "image": "i", "display": "host"}),
+        serde_json::json!({"id": "w", "name": "W", "image": "i", "display": "host", "env": {"A": "1\nB=2"}}),
+        serde_json::json!({"id": "w", "name": "W", "image": "i", "display": "host", "volumes": ["a:/b\r"]}),
+    ] {
+        let e = crate::legacy::check_workspaces(vec![raw]).unwrap_err().to_string();
+        assert!(e.contains("control character"), "{e}");
+    }
+    let ok = serde_json::json!({"id": "w", "name": "Wad Creator – dev", "image": "i", "display": "host"});
+    assert!(crate::legacy::check_workspaces(vec![ok]).is_ok());
+}

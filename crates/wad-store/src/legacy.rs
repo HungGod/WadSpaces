@@ -114,6 +114,24 @@ pub fn read(path: &Path, vendor_cloud: Option<&Path>) -> Result<LegacyConfig, Er
     parse(&data)
 }
 
+/// Where a value (or a key) holds a control character, if anywhere: the
+/// key's name, or "a key".
+fn control_chars(v: &Value) -> Option<String> {
+    let bad = |s: &str| s.chars().any(char::is_control);
+    match v {
+        Value::String(s) if bad(s) => Some("a value".into()),
+        Value::Array(a) => a.iter().find_map(control_chars),
+        Value::Object(m) => m.iter().find_map(|(k, x)| {
+            if bad(k) {
+                Some("a key".into())
+            } else {
+                control_chars(x).map(|w| if w == "a value" { k.clone() } else { w })
+            }
+        }),
+        _ => None,
+    }
+}
+
 /// Python's `str(v)`, for env values written as YAML numbers or booleans.
 fn py_str(v: &Value) -> String {
     match v {
@@ -216,6 +234,11 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
         let where_ = format!("workspaces[{i}]");
         let raw = raw.as_object().cloned().ok_or_else(|| err(format!("{where_}: not a mapping")))?;
         check_known(&raw, WORKSPACE_KEYS, &where_)?;
+        // Each value becomes a line of a systemd unit: a line break would add
+        // lines of its own (a shared design's name running a command as root).
+        if let Some(key) = control_chars(&Value::Object(raw.clone())) {
+            return Err(err(format!("{where_}: {key} has a line break or another control character")));
+        }
         for req in ["id", "name", "image"] {
             if !raw.contains_key(req) {
                 return Err(err(format!("{where_}: missing {req}")));

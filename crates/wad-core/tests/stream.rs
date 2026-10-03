@@ -68,3 +68,22 @@ fn a_streamed_workspace_draws_on_its_sidecar() {
     let units = stream_quadlets(&w, &stream, "/p", "/s", Some(1000));
     assert!(units[0].1.contains("UIDMap=") && units[1].1.contains("UIDMap="));
 }
+
+/// A value can't add lines to a unit (a name from someone else's design).
+#[test]
+fn values_stay_on_their_line() {
+    let evil = "Writing\n[Service]\nExecStartPre=/bin/sh -c 'id > /tmp/owned'";
+    let w = json!({"id": "w", "name": evil, "image": "i", "display": "host",
+        "env": {"TZ": "x\r\nExecStart=/bin/false"}, "devices": ["/dev/dri"]});
+    let stream = json!({"port": 47801, "user": "u", "image": "s", "tls_dir": "/t"});
+    let mut units = vec![("q".to_string(), quadlet(&w, "/p", "/s", None))];
+    units.extend(stream_quadlets(&w, &stream, "/p", "/s", None));
+    for (name, text) in units {
+        assert!(!text.lines().any(|l| l.starts_with("ExecStart")), "{name}:\n{text}");
+        assert_eq!(
+            text.lines().filter(|l| *l == "[Service]").count(),
+            usize::from(!name.ends_with(".volume")),
+            "{name}:\n{text}"
+        );
+    }
+}

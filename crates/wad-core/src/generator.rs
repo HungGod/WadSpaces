@@ -259,7 +259,21 @@ fn id_maps(uid: u32) -> Vec<String> {
 /// wadd's quadlet unit for a workspace (wad-<id>.container). `rootless_uid`:
 /// the host user to map to uid 1000 inside (rootless podman only).
 pub fn quadlet(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: Option<u32>) -> String {
-    workspace_unit(w, projects_dir, state_dir, rootless_uid, None)
+    workspace_unit(&one_line(w), projects_dir, state_dir, rootless_uid, None)
+}
+
+/// The spec with every text on one line: control characters in a value (a
+/// name, an env value) become spaces, so no value can add lines of its own
+/// to a unit. (wadd refuses such values before they get here, too.)
+fn one_line(v: &Value) -> Value {
+    match v {
+        Value::String(s) => Value::String(s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()),
+        Value::Array(a) => Value::Array(a.iter().map(one_line).collect()),
+        Value::Object(m) => Value::Object(
+            m.iter().map(|(k, x)| (k.chars().filter(|c| !c.is_control()).collect(), one_line(x))).collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 /// The workspace's unit. `sidecar`: a native workspace draws on its stream
@@ -392,6 +406,7 @@ pub fn stream_quadlets(
     state_dir: &str,
     rootless_uid: Option<u32>,
 ) -> Vec<(String, String)> {
+    let (w, stream) = (&one_line(w), &one_line(stream));
     let id = js::field(w, "id");
     let display = format!("wad-{id}-display");
     let workspace = workspace_unit(w, projects_dir, state_dir, rootless_uid, Some(&display));
