@@ -84,6 +84,11 @@
 html,
 body {
   height: 100%;
+  /* The page never pans sideways or rubber-bands (a touch screen would drag
+     the whole UI); it still scrolls down where a page is taller than the
+     screen (sign-in on a phone). clip, not hidden: no scroll container. */
+  overflow-x: clip;
+  overscroll-behavior: none;
 }
 
 body {

@@ -110,7 +110,7 @@ export function Segmented<T extends string>({ value, options, onChange, classNam
           type="button"
           onClick={() => onChange(o.value)}
           className={clsx(
-            "relative flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
+            "relative flex min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors",
             value === o.value ? "text-fg" : "text-muted hover:text-fg",
           )}
         >

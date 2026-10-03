@@ -86,7 +86,7 @@ export function Catalog({ onAdd }: { onAdd: (app: DraggedApp) => void }) {
           <Plus className="size-3.5" /> Custom app
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-2 pb-3">
         {customShown.length > 0 && (
           <>
             <div className="px-2 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-faint">Custom</div>

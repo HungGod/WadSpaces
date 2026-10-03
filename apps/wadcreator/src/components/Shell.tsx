@@ -172,7 +172,7 @@ export function Shell({ user, children }: { user: PublicUser; children: React.Re
 
       <div className="flex min-w-0 flex-1 flex-col">
         <FocusBanner />
-        <main className="relative min-h-0 flex-1 overflow-y-auto">{children}</main>
+        <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">{children}</main>
       </div>
 
       <WadspaceDrawer />
