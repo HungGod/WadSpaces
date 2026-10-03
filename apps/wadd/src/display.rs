@@ -150,6 +150,16 @@ impl SwayDisplay {
         let tree = self.sway.tree().await?;
         if !self.windows.available() {
             tracing::info!("sway is up");
+            // Keep each screen at the scale sway chose now (wad_sway::scale_pins).
+            match self.sway.outputs().await {
+                Ok(outputs) => {
+                    for cmd in wad_sway::scale_pins(&outputs) {
+                        tracing::info!("sway: {cmd}");
+                        self.cmd(&cmd).await;
+                    }
+                }
+                Err(e) => tracing::warn!("sway's outputs: {e}"),
+            }
         }
         self.windows.set_available(true);
         let mut seen = vec![];

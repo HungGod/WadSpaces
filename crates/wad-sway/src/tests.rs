@@ -100,3 +100,15 @@ async fn commands_and_events_over_a_socket() {
     assert_eq!(ev["container"]["id"], 9);
     assert!(events.next().await.is_err()); // the fake hung up: sway went away
 }
+
+#[test]
+fn screens_are_pinned_at_their_scale() {
+    let outputs = json!([
+        {"name": "eDP-1", "active": true, "scale": 2.0},
+        {"name": "HDMI-A-1", "active": true, "scale": 1.5},
+        {"name": "DP-2", "active": false, "scale": -1.0},
+        {"name": "bad; exec x", "active": true, "scale": 1.0},
+    ]);
+    assert_eq!(scale_pins(&outputs), ["output eDP-1 scale 2", "output HDMI-A-1 scale 1.5"]);
+    assert!(scale_pins(&json!(null)).is_empty());
+}

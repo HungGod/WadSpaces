@@ -15,6 +15,7 @@ const MAGIC: &[u8; 6] = b"i3-ipc";
 const HEADER: usize = 14;
 pub const RUN_COMMAND: u32 = 0;
 pub const SUBSCRIBE: u32 = 2;
+pub const GET_OUTPUTS: u32 = 3;
 pub const GET_TREE: u32 = 4;
 pub const EVENT_WINDOW: u32 = 0x8000_0000 | 3;
 
@@ -137,6 +138,10 @@ impl Sway {
         Ok(!parts.is_empty() && parts.iter().all(|r| r.get("success").and_then(Value::as_bool) == Some(true)))
     }
 
+    pub async fn outputs(&self) -> Result<Value, Error> {
+        self.request(GET_OUTPUTS, "").await
+    }
+
     pub async fn tree(&self) -> Result<Value, Error> {
         self.request(GET_TREE, "").await
     }
@@ -156,6 +161,26 @@ impl Sway {
 }
 
 /// Every client window (a node with a pid) in a tree, tiled or floating.
+/// Commands that pin each active output at the scale it has now. sway works
+/// a screen's scale out from its reported size each time the screen comes up
+/// (after power saving, a GPU or panel reset, a hotplug); a panel that then
+/// reports no size gets scale 1 and everything shrinks. A scale set through
+/// IPC is kept and applied again instead.
+pub fn scale_pins(outputs: &Value) -> Vec<String> {
+    outputs
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|o| o.get("active").and_then(Value::as_bool) == Some(true))
+        .filter_map(|o| {
+            let name = o.get("name")?.as_str()?;
+            let scale = o.get("scale")?.as_f64().filter(|s| *s > 0.0)?;
+            let safe = name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+            safe.then(|| format!("output {name} scale {scale}"))
+        })
+        .collect()
+}
+
 pub fn windows(node: &Value) -> Vec<&Value> {
     let mut out = vec![];
     walk(node, &mut out);

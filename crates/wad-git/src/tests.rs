@@ -375,3 +375,39 @@ async fn the_fetch_alone_gets_the_token() {
     assert_eq!(fetch.1, "1");
     assert!(calls.iter().filter(|(a, _)| !a.contains(" fetch ")).all(|(_, n)| *n == "0"));
 }
+
+/// As root (wadd on a machine), git runs as the projects user: a clone and a
+/// fast-forward work, and the clone is theirs. Skipped unless root; on a
+/// laptop, root in a container is enough:
+///   podman run --rm -v ./target/debug/deps:/t:ro,z localhost/wadspaces-host \
+///     /t/wad_git-<hash> as_root
+#[tokio::test]
+async fn as_root_git_runs_as_the_projects_user() {
+    if !nix::unistd::geteuid().is_root() {
+        return;
+    }
+    const UID: u32 = 1000;
+    let r = Remote::new();
+    // The projects user reads the remote and writes its own folder.
+    std::fs::set_permissions(r._d.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    // A local remote must be theirs too (git won't read another user's
+    // repository); GitHub's over HTTPS isn't a folder at all.
+    let own = |who: &str| {
+        let ok = std::process::Command::new("chown").args(["-R", who]).arg(&r.bare).status().unwrap();
+        assert!(ok.success());
+    };
+    own("1000:1000");
+    let clones = r._d.path().join("clones");
+    std::fs::create_dir_all(&clones).unwrap();
+    nix::unistd::chown(&clones, Some(UID.into()), Some(UID.into())).unwrap();
+    let dest = clones.join("p2");
+    let git = Git::default();
+    git.clone_repo(r.bare.to_str().unwrap(), None, &dest, None, |_, _| {}, Some(UID), |_| {}).await.unwrap();
+    use std::os::unix::fs::MetadataExt;
+    assert_eq!(std::fs::metadata(dest.join("README.md")).unwrap().uid(), UID);
+    own("0:0"); // the test pushes as root
+    r.push_new(1);
+    own("1000:1000");
+    let u = git.update(&dest, None, Some(UID), FETCH_TIMEOUT).await;
+    assert_eq!(u, Update::Updated(1));
+}

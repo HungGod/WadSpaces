@@ -171,11 +171,11 @@ impl Git {
             .kill_on_drop(true);
         match as_user {
             Some(uid) => {
+                // std drops root's supplementary groups itself when it changes
+                // uid (setgroups before setuid). Not in a pre_exec: those run
+                // after the switch, as the user, where setgroups is refused
+                // ("Operation not permitted": every git run failed).
                 cmd.env("HOME", Self::home(projects_dir, uid)?).uid(uid).gid(uid);
-                // SAFETY: setgroups is async-signal-safe; nothing else runs here.
-                unsafe {
-                    cmd.pre_exec(|| nix::unistd::setgroups(&[]).map_err(std::io::Error::from));
-                }
             }
             None => {
                 cmd.env("HOME", std::env::var_os("HOME").unwrap_or_else(|| "/".into()));
