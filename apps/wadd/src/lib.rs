@@ -22,8 +22,11 @@ pub mod network;
 pub mod projects;
 pub mod pull;
 pub mod registry;
+pub mod remote;
 pub mod secrets;
+pub mod streams;
 pub mod systemd;
+pub mod tls;
 pub mod view;
 
 use std::os::unix::fs::PermissionsExt;
@@ -277,6 +280,14 @@ impl Server {
         let builds =
             builds::Builds::new(registry.clone(), backend.clone(), bus.clone(), &d.state_dir, d.build_min_free_gb);
         let secrets = Arc::new(secrets::Secrets::new(backend.clone(), &d.state_dir));
+        let streams = streams::Streams::new(
+            config.streams.clone(),
+            registry.clone(),
+            backend.clone(),
+            bus.clone(),
+            &d.state_dir,
+            &config.machine.name,
+        );
         let registry_backend = backend.clone();
         let cloud_cfg = cloud_settings(config);
         let github = github::GithubService::new(
@@ -301,6 +312,7 @@ impl Server {
                     secrets: secrets.clone(),
                     launches: launches.clone(),
                     github: github.clone(),
+                    streams: streams.clone(),
                     bus: bus.clone(),
                 },
             )
@@ -312,6 +324,8 @@ impl Server {
             power: None,
             github,
             secrets,
+            streams,
+            remote: remote::RemoteViews::new(Duration::from_secs(600)),
             cloud,
             bus,
             registry,
@@ -388,6 +402,8 @@ impl Server {
             tokio::spawn(placeholders(app));
         });
         tokio::spawn(placeholders(self.state.clone()));
+        self.state.streams.end_leftovers().await;
+        let streams = tokio::spawn(self.state.streams.clone().run(Duration::from_secs(10)));
         let relay = self.state.cloud.clone().map(|c| tokio::spawn(c.run()));
         let reconcile = registry.spawn_reconcile(self.reconcile_every);
         let netwatch = tokio::spawn(self.state.network.clone().run());
@@ -403,6 +419,7 @@ impl Server {
         let res = axum::serve(self.listener, app).with_graceful_shutdown(shutdown).await;
         reconcile.abort();
         netwatch.abort();
+        streams.abort();
         prefetch.abort();
         if let Some(r) = relay {
             r.abort();

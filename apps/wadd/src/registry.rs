@@ -61,6 +61,9 @@ pub struct Registry {
     /// Told when a bring-up finishes (the view shows a pending switch).
     on_ready: Mutex<Option<ReadyHook>>,
     on_list: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    /// Workspaces drawn on their stream sidecar instead of the screen, to be
+    /// viewed from other devices (wad_core's stream_quadlets `stream`).
+    streamed: Mutex<HashMap<String, Value>>,
     /// Itself, for the tasks it starts.
     me: std::sync::Weak<Registry>,
 }
@@ -132,6 +135,10 @@ pub fn unit_name(ws: &Workspace) -> String {
     format!("wad-{}.service", ws.id)
 }
 
+fn stream_port(stream: &Option<Value>) -> Option<u16> {
+    stream.as_ref().and_then(|s| s.get("port")).and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok())
+}
+
 fn stream_url(ws: &Workspace) -> Option<String> {
     (ws.display == Display::Stream).then(|| ws.port.map(|p| format!("http://127.0.0.1:{p}/"))).flatten()
 }
@@ -157,6 +164,7 @@ impl Registry {
             windows: Arc::default(),
             on_ready: Mutex::new(None),
             on_list: Mutex::new(None),
+            streamed: Mutex::default(),
         })
     }
 
@@ -170,10 +178,65 @@ impl Registry {
         )
     }
 
+    /// The units for these workspaces: one each, or three for a streamed one
+    /// (it, its sidecar, their display volume).
+    fn units(&self, list: &[Workspace]) -> Vec<(String, String)> {
+        let streamed = self.streamed.lock().unwrap().clone();
+        let mut out = Vec::new();
+        for w in list {
+            match streamed.get(&w.id) {
+                Some(stream) => out.extend(wad_core::generator::stream_quadlets(
+                    &wadd_spec(w),
+                    stream,
+                    &self.settings.projects_dir,
+                    &self.settings.state_dir.to_string_lossy(),
+                    self.settings.rootless_uid,
+                )),
+                None => out.push((format!("wad-{}.container", w.id), self.unit_text(w))),
+            }
+        }
+        out
+    }
+
+    /// Draws a workspace on its stream sidecar (`Some`), or on the screen
+    /// again (`None`): its units are written anew. It must be stopped first.
+    pub async fn set_stream(&self, id: &str, stream: Option<Value>) -> Result<(), String> {
+        {
+            let mut s = self.streamed.lock().unwrap();
+            match stream {
+                Some(v) => s.insert(id.into(), v),
+                None => s.remove(id),
+            };
+        }
+        self.backend.install_units(self.units(&self.workspaces())).await.map(drop)
+    }
+
+    /// The stream a workspace is drawn on, if it is.
+    pub fn stream_of(&self, id: &str) -> Option<Value> {
+        self.streamed.lock().unwrap().get(id).cloned()
+    }
+
+    pub fn streamed(&self) -> Vec<String> {
+        self.streamed.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// Back on the screen: a workspace that's streamed is stopped and drawn
+    /// on the screen from its next start (the person at the machine wins over
+    /// a viewer elsewhere).
+    pub async fn to_screen(self: &Arc<Self>, id: &str) -> Result<(), ApiError> {
+        if self.stream_of(id).is_none() {
+            return Ok(());
+        }
+        tracing::info!("{id}: back to the screen (its stream ends)");
+        self.stop(id).await?;
+        self.set_stream(id, None).await.map_err(|e| ApiError::new(ErrorCode::Internal, e))
+    }
+
     /// Takes on a list of workspaces: writes their units (and reloads systemd
     /// if any changed) and starts tracking their state.
     pub async fn load(&self, list: Vec<Workspace>) -> Result<(), String> {
-        let units = list.iter().map(|w| (format!("wad-{}.container", w.id), self.unit_text(w))).collect();
+        self.streamed.lock().unwrap().retain(|id, _| list.iter().any(|w| &w.id == id));
+        let units = self.units(&list);
         {
             let mut states = self.states.lock().unwrap();
             states.retain(|id, _| list.iter().any(|w| &w.id == id));
@@ -455,14 +518,33 @@ impl Registry {
             st.container = RUNNING.into();
             st.message = Some("waiting for the desktop".into());
         });
-        match stream_url(ws) {
-            Some(url) => self.wait_http(ws, &url).await?,
-            None if ws.display == Display::Host => self.wait_window(ws).await?,
-            None => {}
+        match (stream_url(ws), stream_port(&self.stream_of(&ws.id))) {
+            (_, Some(port)) => self.wait_port(ws, port).await?,
+            (Some(url), None) => self.wait_http(ws, &url).await?,
+            (None, None) if ws.display == Display::Host => self.wait_window(ws).await?,
+            (None, None) => {}
         }
         self.update(ws, |st| st.phase = Phase::Ready);
         tracing::info!("{} ready", ws.id);
         Ok(())
+    }
+
+    /// A streamed workspace is ready when its sidecar answers.
+    async fn wait_port(&self, ws: &Workspace, port: u16) -> Result<(), String> {
+        let deadline = Instant::now() + self.settings.ready_timeout;
+        loop {
+            if self.backend.port_open(port).await {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "{}'s stream didn't start within {} s",
+                    ws.name,
+                    self.settings.ready_timeout.as_secs()
+                ));
+            }
+            tokio::time::sleep(self.settings.poll).await;
+        }
     }
 
     async fn wait_http(&self, ws: &Workspace, url: &str) -> Result<(), String> {
@@ -603,7 +685,11 @@ impl Registry {
             st.phase = Phase::Stopping;
             st.message = Some("stopping".into());
         });
-        match self.backend.stop(&unit_name(&ws)).await {
+        let mut stopped = self.backend.stop(&unit_name(&ws)).await;
+        if stopped.is_ok() && self.stream_of(id).is_some() {
+            stopped = self.backend.stop(&format!("wad-{id}-display.service")).await;
+        }
+        match stopped {
             Ok(()) => {
                 let container = self.backend.container(&ws.container_name).await.unwrap_or_else(|_| "unknown".into());
                 self.update(&ws, |st| {
@@ -686,9 +772,10 @@ impl Registry {
             let present = if up { self.backend.image_exists(&ws.image).await.ok() } else { None };
             let phase = self.state(&ws.id).map(|s| s.phase).unwrap_or(Phase::Idle);
             let ready = if container == RUNNING && phase == Phase::Idle {
-                match stream_url(&ws) {
-                    Some(url) => self.backend.http_ok(&url).await,
-                    None => true,
+                match (stream_url(&ws), stream_port(&self.stream_of(&ws.id))) {
+                    (_, Some(port)) => self.backend.port_open(port).await,
+                    (Some(url), None) => self.backend.http_ok(&url).await,
+                    (None, None) => true,
                 }
             } else {
                 false

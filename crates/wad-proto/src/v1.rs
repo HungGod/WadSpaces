@@ -72,6 +72,8 @@ pub enum Event {
     Github(crate::github::SignIn),
     /// The network changed (joined, left, connectivity).
     Network(NetworkStatus),
+    /// Streams started or stopped, or their settings changed.
+    Streams(StreamsStatus),
     /// The workspace list changed (added, edited, removed, built).
     Workspaces(Vec<Workspace>),
     /// Something to tell whoever is watching.
@@ -95,6 +97,7 @@ impl Event {
             Event::Cloud(_) => "cloud",
             Event::Github(_) => "github",
             Event::Network(_) => "network",
+            Event::Streams(_) => "streams",
             Event::Workspaces(_) => "workspaces",
             Event::Notice { .. } => "notice",
         }
@@ -689,6 +692,74 @@ pub enum PowerAction {
 #[serde(rename_all = "camelCase")]
 pub struct PowerRequest {
     pub action: PowerAction,
+}
+
+/// GET /v1/streams: viewing this machine's workspaces from other devices
+/// (another machine's Wad Creator, a phone) on the local network.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamsStatus {
+    /// Allowed here (only ever turned on at the machine itself).
+    pub allow_remote: bool,
+    /// The account has a stream password long enough to use.
+    pub password_set: bool,
+    /// Why a stream can't start now, if it can't (for people).
+    pub problem: Option<String>,
+    /// The name to sign in to a stream with (the owner's WadSpaces username).
+    pub user: String,
+    /// The streams' certificate: SHA-256, lowercase hex. None until made.
+    pub sha256: Option<String>,
+    pub streams: Vec<StreamInfo>,
+}
+
+/// A workspace being streamed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamInfo {
+    pub ws_id: String,
+    pub name: String,
+    pub port: u16,
+    /// https://<this machine's LAN address>:<port>/, one per address.
+    pub urls: Vec<String>,
+    pub user: String,
+    pub sha256: String,
+    /// Its sidecar answers.
+    pub ready: bool,
+}
+
+/// POST /v1/remote-views: view another of the owner's machines' stream here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteViewRequest {
+    pub machine_id: String,
+    pub ws_id: String,
+}
+
+/// A view: the address for Wad Creator's viewer window (this machine only,
+/// good for that window alone).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteView {
+    pub id: String,
+    pub machine: String,
+    pub url: String,
+}
+
+/// PUT /v1/streams/settings
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamSettings {
+    pub allow_remote: bool,
+}
+
+/// POST /v1/workspaces/{id}/stream: show it on another device instead of the
+/// screen.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamRequest {
+    /// It's open on the screen: take it off (else that's refused).
+    #[serde(default)]
+    pub takeover: bool,
 }
 
 /// GET /v1/metrics: how busy the machine is.

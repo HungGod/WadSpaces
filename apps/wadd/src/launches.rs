@@ -87,6 +87,9 @@ fn commits(n: u32) -> &'static str {
 struct Job {
     launch: Launch,
     log: Lines,
+    /// To be viewed from another device: started on its stream sidecar
+    /// (streams.rs drew it there), not switched to on the screen.
+    stream: bool,
 }
 
 /// Where else a project is open: the owner's other machines (the cloud
@@ -152,6 +155,18 @@ impl Launches {
     // ------------------------------------------------------------- jobs
     /// Checks what can be checked up front, then starts.
     pub fn create(&self, ws_id: &str, project_ids: &[String], restart: bool) -> Result<Launch, ApiError> {
+        self.create_as(ws_id, project_ids, restart, false)
+    }
+
+    /// `stream`: for viewing elsewhere (the workspace is drawn on its stream
+    /// sidecar already): started, not switched to.
+    pub fn create_as(
+        &self,
+        ws_id: &str,
+        project_ids: &[String],
+        restart: bool,
+        stream: bool,
+    ) -> Result<Launch, ApiError> {
         let ws = self.registry.workspace(ws_id)?;
         let busy = |j: &Job| j.launch.ws_id == ws.id && !j.launch.status.finished();
         if self.jobs.lock().unwrap().iter().any(busy) {
@@ -225,7 +240,7 @@ impl Launches {
             line_count: 0,
         };
         let log = Lines::new(&self.log_dir, &launch.id, MAX_LINES);
-        self.jobs.lock().unwrap().push(Job { launch: launch.clone(), log });
+        self.jobs.lock().unwrap().push(Job { launch: launch.clone(), log, stream });
         self.trim();
         self.publish(&id, true);
         let me = self.me.upgrade().expect("launches outlive their calls");
@@ -683,8 +698,14 @@ impl Launches {
             let what = if mounts.is_empty() { "no projects".to_string() } else { mounts.join(", ") };
             self.line(id, &format!("{} now mounts {what}", ws.name));
         }
-        self.line(id, &format!("starting {}", ws.name));
-        self.view.switch(&ws.id).map_err(|e| e.message)?;
+        let stream = self.jobs.lock().unwrap().iter().any(|j| j.launch.id == id && j.stream);
+        if stream {
+            self.line(id, &format!("starting {} for viewing elsewhere", ws.name));
+            self.registry.start(&ws.id).map_err(|e| e.message)?;
+        } else {
+            self.line(id, &format!("starting {}", ws.name));
+            self.view.switch(&ws.id).map_err(|e| e.message)?;
+        }
         self.registry.settled(&ws.id).await;
         match self.registry.state(&ws.id) {
             Some(st) if st.phase == Phase::Error => {

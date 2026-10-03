@@ -217,6 +217,18 @@ impl View {
         if self.locked() && !self.session_ids().iter().any(|w| w == id) {
             return Err(locked());
         }
+        // Streamed to another device: back on the screen (the stream ends).
+        if self.registry.stream_of(id).is_some() {
+            self.inner.lock().unwrap().pending = Some(id.into());
+            self.publish_view();
+            let (registry, id) = (self.registry.clone(), id.to_string());
+            tokio::spawn(async move {
+                if let Err(e) = registry.to_screen(&id).await.and_then(|_| registry.start(&id)) {
+                    tracing::warn!("{id} back on the screen: {}", e.message);
+                }
+            });
+            return Ok(());
+        }
         let st = self.registry.state(id);
         if st.is_some_and(|s| s.phase == Phase::Ready && s.container == "running") {
             self.inner.lock().unwrap().pending = None;

@@ -13,7 +13,7 @@ use common::{Fake, ws};
 use serde_json::{Value, json};
 use wad_firebase::values::time;
 use wad_firebase::{Functions, Identity};
-use wad_proto::v1::{Display, MountedProject, View as V};
+use wad_proto::v1::{Display, MountedProject, Phase, View as V};
 use wadd::cloud::{CloudRelay, Endpoints, Parts, Settings};
 use wadd::display::NullDisplay;
 use wadd::drives::Drives;
@@ -33,6 +33,7 @@ struct Env {
     reg: Arc<Registry>,
     view: Arc<View>,
     projects: Arc<Projects>,
+    streams: Arc<wadd::streams::Streams>,
     relay: Arc<CloudRelay>,
     remake: Box<dyn Fn() -> Arc<CloudRelay> + Send + Sync>,
 }
@@ -115,8 +116,17 @@ async fn env() -> Env {
         },
     );
     let gh_keep = Arc::new(gh_server);
+    let streams = wadd::streams::Streams::new(
+        wad_config::Streams::default(),
+        reg.clone(),
+        Arc::new(fake.clone()),
+        bus.clone(),
+        &state,
+        "Surface",
+    );
     let make = {
-        let (reg, view, projects, state) = (reg.clone(), view.clone(), projects.clone(), state.clone());
+        let (reg, view, projects, state, streams) =
+            (reg.clone(), view.clone(), projects.clone(), state.clone(), streams.clone());
         move || {
             let http = reqwest::Client::new();
             let ends = Endpoints {
@@ -139,13 +149,14 @@ async fn env() -> Env {
                 secrets: secrets.clone(),
                 launches: launches.clone(),
                 github: github.clone(),
+                streams: streams.clone(),
                 bus: bus.clone(),
             };
             CloudRelay::new(settings, http, ends, parts)
         }
     };
     let relay = make();
-    Env { _d: d, state, fb, _github: gh_keep, fake, reg, view, projects, relay, remake: Box::new(make) }
+    Env { _d: d, state, fb, _github: gh_keep, fake, reg, view, projects, streams, relay, remake: Box::new(make) }
 }
 
 async fn linked() -> Env {
@@ -195,7 +206,21 @@ async fn heartbeats_say_only_what_the_rules_allow() {
     let doc = e.fb.doc("users/u1/machines/m1").unwrap();
     let mut keys: Vec<&String> = doc.as_object().unwrap().keys().collect();
     keys.sort();
-    assert_eq!(keys, ["daemonVersion", "hostname", "lastSeen", "mountedProjects", "name", "view", "workspaces"]); // name: the function's
+    assert_eq!(
+        keys,
+        [
+            "allowRemote",
+            "daemonVersion",
+            "hostname",
+            "lastSeen",
+            "mountedProjects",
+            "name",
+            "streams",
+            "view",
+            "workspaces"
+        ]
+    ); // name: the function's
+    assert_eq!((&doc["allowRemote"], &doc["streams"]), (&json!(false), &json!([])));
     assert_eq!(doc["view"], "workspace:a");
     assert_eq!(doc["mountedProjects"], json!(["p1"]));
     assert_eq!(doc["workspaces"][0]["phase"], "ready");
@@ -376,4 +401,48 @@ async fn the_repo_list_goes_to_the_account_when_it_changes() {
     assert_eq!(e.relay.sync_repos(true).await.unwrap(), Some(false)); // unchanged: not written again
     let r = e.relay.execute(&json!({"type": "projects-sync"})).await.unwrap();
     assert_eq!(r["repos"], json!({"written": false}));
+}
+
+#[tokio::test]
+async fn a_remote_launch_to_view_needs_this_machines_permission() {
+    let e = linked().await;
+    let mut list = e.reg.workspaces();
+    list.push(ws("n", "localhost/n:1", Display::Host, None));
+    e.reg.set_workspaces(list).await.unwrap();
+    e.fake.with(|m| {
+        m.images.insert("localhost/n:1".into());
+        m.images.insert("localhost/wadspaces-stream:trixie".into());
+        m.secrets.insert("stream_password".into(), b"a long enough password".to_vec());
+        m.open_ports.insert(47800);
+    });
+    let cmd = json!({"type": "launch", "wsId": "n", "view": "stream"});
+    // Not allowed on this machine: the account can ask, not decide.
+    let err = e.relay.execute(&cmd).await.unwrap_err();
+    assert!(err.contains("off on Surface"), "{err}");
+    assert!(e.reg.streamed().is_empty());
+    e.streams.set_allow_remote(true).await.unwrap();
+
+    // The stream user is the owner's WadSpaces username.
+    e.fb.put("profiles/u1", json!({"username": "hunggod", "displayName": "H"}));
+    e.relay.sync_profile().await.unwrap();
+    let r = e.relay.execute(&cmd).await.unwrap();
+    assert_eq!((&r["ok"], &r["port"]), (&json!(true), &json!(47800)));
+    for _ in 0..300 {
+        if e.reg.state("n").is_some_and(|s| s.phase == Phase::Ready) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // Started on its sidecar, not switched to on this screen.
+    assert_eq!(e.view.current(), V::Home);
+    e.relay.heartbeat().await.unwrap();
+    let doc = e.fb.doc("users/u1/machines/m1").unwrap();
+    assert_eq!(doc["allowRemote"], true);
+    let s = &doc["streams"][0];
+    assert_eq!(
+        (&s["wsId"], &s["port"], &s["user"], &s["ready"]),
+        (&json!("n"), &json!(47800), &json!("hunggod"), &json!(true))
+    );
+    assert_eq!(s["sha256"].as_str().unwrap().len(), 64);
+    assert!(!doc.to_string().contains("long enough"));
 }

@@ -39,6 +39,9 @@ pub struct AppState {
     pub launches: Arc<crate::launches::Launches>,
     pub builds: Arc<crate::builds::Builds>,
     pub secrets: Arc<crate::secrets::Secrets>,
+    pub streams: Arc<crate::streams::Streams>,
+    /// Other machines' streams viewed here.
+    pub remote: Arc<crate::remote::RemoteViews>,
     pub github: Arc<crate::github::GithubService>,
     pub network: Arc<crate::network::Network>,
     /// The machine the registry manages (podman), for diagnostics.
@@ -120,6 +123,11 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/workspaces/{id}", get(workspace).put(workspace_put).delete(workspace_delete))
         .route("/v1/workspaces/{id}/state", get(workspace_state))
         .route("/v1/workspaces/{id}/icon", get(workspace_icon))
+        .route("/v1/workspaces/{id}/stream", post(stream_start).delete(stream_stop))
+        .route("/v1/streams", get(streams))
+        .route("/v1/streams/settings", axum::routing::put(streams_settings))
+        .route("/v1/remote-views", post(remote_view_open))
+        .route("/v1/remote-views/{id}", delete(remote_view_close))
         .route("/v1/workspaces/{id}/start", post(start))
         .route("/v1/workspaces/{id}/stop", post(stop))
         .route("/v1/workspaces/{id}/restart", post(restart))
@@ -193,6 +201,68 @@ async fn workspaces(State(app): State<Arc<AppState>>) -> Json<Vec<Workspace>> {
 
 async fn workspace(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Workspace>, Failure> {
     app.registry.workspaces().into_iter().find(|w| w.id == id).map(Json).ok_or_else(|| no_workspace(&id))
+}
+
+async fn streams(State(app): State<Arc<AppState>>) -> Json<wad_proto::v1::StreamsStatus> {
+    Json(app.streams.status().await)
+}
+
+/// Viewing from other devices: allowed or not. Only through this machine's
+/// own API (Wad Creator on its screen, or an admin): the account can't.
+async fn streams_settings(
+    State(app): State<Arc<AppState>>,
+    Json(s): Json<wad_proto::v1::StreamSettings>,
+) -> Result<Json<wad_proto::v1::StreamsStatus>, Failure> {
+    Ok(Json(app.streams.set_allow_remote(s.allow_remote).await?))
+}
+
+async fn stream_start(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<Json<wad_proto::v1::StreamsStatus>, Failure> {
+    let req: wad_proto::v1::StreamRequest = if body.is_empty() {
+        Default::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|e| Failure(ApiError::new(ErrorCode::BadRequest, e.to_string())))?
+    };
+    Ok(Json(app.streams.start(&id, req.takeover).await?))
+}
+
+async fn stream_stop(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<wad_proto::v1::StreamsStatus>, Failure> {
+    Ok(Json(app.streams.stop(&id).await?))
+}
+
+/// Views another of the owner's machines' streams here: where it is and the
+/// certificate to pin come from the account (read by this machine), the
+/// password from this machine's secrets.
+async fn remote_view_open(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<wad_proto::v1::RemoteViewRequest>,
+) -> Result<Json<wad_proto::v1::RemoteView>, Failure> {
+    let relay = app
+        .cloud
+        .as_ref()
+        .ok_or_else(|| Failure(ApiError::new(ErrorCode::Conflict, "this machine isn't linked to an account")))?;
+    let target = relay
+        .sibling_stream(&req.machine_id, &req.ws_id)
+        .await
+        .map_err(|e| Failure(ApiError::new(ErrorCode::Conflict, e)))?;
+    let password = app
+        .registry_backend
+        .secret_value(crate::streams::PASSWORD)
+        .await
+        .map_err(|e| Failure(ApiError::new(ErrorCode::Internal, e)))?
+        .map(|p| p.trim().to_string())
+        .unwrap_or_default();
+    Ok(Json(app.remote.open(target, &password).await?))
+}
+
+async fn remote_view_close(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> StatusCode {
+    if app.remote.close(&id) { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND }
 }
 
 /// Where a workspace's icon may be: the image's icons, and wadd's own.

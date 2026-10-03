@@ -41,6 +41,8 @@ pub struct Machine {
     pub build_slow: bool,
     /// podman's secrets: name -> value.
     pub secrets: HashMap<String, Vec<u8>>,
+    /// Ports that answer on this machine.
+    pub open_ports: HashSet<u16>,
 }
 
 pub const TOKEN: &str = "ghp_TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT";
@@ -143,6 +145,12 @@ impl Backend for Fake {
         let mut n: Vec<String> = self.0.lock().unwrap().secrets.keys().cloned().collect();
         n.sort();
         Ok(n)
+    }
+    async fn secret_value(&self, name: &str) -> Result<Option<String>, String> {
+        Ok(self.0.lock().unwrap().secrets.get(name).map(|v| String::from_utf8_lossy(v).into_owned()))
+    }
+    async fn port_open(&self, port: u16) -> bool {
+        self.0.lock().unwrap().open_ports.contains(&port)
     }
     async fn create_secret(&self, name: &str, value: &[u8]) -> Result<(), String> {
         if value.is_empty() {

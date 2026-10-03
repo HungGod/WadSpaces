@@ -48,6 +48,36 @@ pub struct Config {
     pub display: Display,
     pub cloud: Cloud,
     pub github: Github,
+    pub streams: Streams,
+}
+
+/// Viewing a workspace from another device (another machine's Wad Creator,
+/// a phone) over the local network: its stream sidecar, behind TLS and a
+/// password. Off until it's allowed on the machine itself (wadd's state),
+/// and refused without a stream password in the account.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Streams {
+    pub enabled: bool,
+    /// The sidecar (Wadspaces-David's `_stream`).
+    pub image: String,
+    /// Streams get ports from here on (one per workspace, kept).
+    pub first_port: u16,
+    pub ports: u16,
+    /// The stream password must be at least this long.
+    pub min_password: usize,
+}
+
+impl Default for Streams {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            image: "localhost/wadspaces-stream:trixie".into(),
+            first_port: 47800,
+            ports: 100,
+            min_password: 12,
+        }
+    }
 }
 
 /// GitHub (where projects live).
@@ -311,6 +341,7 @@ impl Config {
             display: Display::for_profile(profile),
             cloud: Cloud::default(),
             github: Github::default(),
+            streams: Streams::default(),
         }
     }
 
