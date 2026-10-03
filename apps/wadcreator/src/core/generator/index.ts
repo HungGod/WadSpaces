@@ -1,14 +1,13 @@
 // Generators for a workspace bundle: wad-core's crates/wad-core/src/generator.rs,
-// run as WebAssembly. The output has the same shape as the hand-written
-// Wadspaces-David/<dir>/ directories:
+// run as WebAssembly. The output (a build folder) is:
 //
 //   Dockerfile  docker-compose.yml  README.md  wad-<id>.container  workspaces.yaml.snippet
 //   root/etc/wadspaces/layout.json                  (Builder desktops: icons in order)
 //   root/etc/wadspaces/kalebrowser-resources.json   (Kale Browser apps only)
 //   root/usr/share/backgrounds/wallpaper.<ext>      (when a wallpaper is set)
 //
-// and builds with `Wadspaces-David/build.sh --only <id>` after copying it into
-// Wadspaces-David/<id>/, or through wadd on the machine. Project files are
+// and builds through wadd on the machine, or with `podman build` in it on the
+// base image (images/build.sh in the monorepo). Project files are
 // never in it: wadd mounts the project folders when it launches the wadspace.
 import type { CreatorSpec, WaddSpec } from "../spec";
 import { call } from "../wasm";
@@ -33,7 +32,7 @@ export function compose(spec: CreatorSpec): string {
 export const PROJECTS_DIR = "/var/lib/wadspaces-projects";
 export const STATE_DIR = "/var/lib/wadspaces";
 
-/** Byte-identical to legacy/wadd-py/wadd/quadlet.py render_container_unit(). */
+/** Byte-identical to wadd's units (fixtures/quadlet). */
 export function quadlet(w: WaddSpec, projectsDir = PROJECTS_DIR, stateDir = STATE_DIR): string {
   return call("quadlet", w, projectsDir, stateDir);
 }

@@ -1,6 +1,6 @@
 // A workspace as the generator sees it: what goes into the image (build) and
 // how the machine runs it (run). The run half maps 1:1 onto wadd's
-// workspaces.yaml entries; the build half onto Wadspaces-David/<dir>/.
+// workspace entries; the build half onto a build folder (generator/).
 // The Builder's model (model.ts) becomes one of these through build.ts. The
 // functions are wad-core's (crates/wad-core/src/spec.rs), run as WebAssembly.
 
@@ -32,7 +32,7 @@ export interface Feature {
 
 // Order here is the order they are installed in, as wad-core's FEATURES has
 // them (a test checks); keep in sync with
-// Wadspaces-David/_common/root/usr/local/lib/wadspaces/features/.
+// images/base/root/usr/local/lib/wadspaces/features/ (the monorepo's).
 export const FEATURES: Feature[] = [
   { id: "git", label: "Git", description: "git and git-lfs" },
   { id: "cpp", label: "C/C++", description: "build-essential, CMake, Ninja, gdb" },
@@ -96,9 +96,9 @@ export interface Wallpaper {
 }
 
 // How a workspace is shown on the machine (wadd's `display`):
-//   host    a lean image (containers/_common) whose desktop is a window on
-//           the machine's own screen: local input, no stream. The same image
-//           runs remotely next to the stream sidecar (containers/_stream).
+//   host    a lean image (images/base) whose desktop is a window on the
+//           machine's own screen: local input, no stream. The same image is
+//           viewed from other devices on the stream sidecar (images/stream).
 //   stream  an all-in-one Selkies image (containers/_selkies) streamed into
 //           the kiosk.
 export type Display = "host" | "stream";
@@ -131,7 +131,7 @@ export interface CreatorSpec {
   updatedAt?: number;
 }
 
-// What wadd stores in workspaces.yaml (see legacy/wadd-py/wadd/config.py).
+// What wadd stores for a workspace (wad-proto's Workspace, workspaces.yaml's shape).
 export interface WaddSpec {
   id: string;
   name: string;

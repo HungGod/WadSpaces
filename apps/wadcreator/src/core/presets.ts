@@ -1,4 +1,4 @@
-// The six hand-written workspaces in Wadspaces-David, as generator specs and as
+// The six hand-written workspaces from before the Builder, as generator specs and as
 // Builder wadspaces: wad-core's crates/wad-core/src/presets.rs, run as
 // WebAssembly. Used when a workspace on the machine has no library copy yet.
 //

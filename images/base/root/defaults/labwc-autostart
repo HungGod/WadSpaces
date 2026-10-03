@@ -1,0 +1,22 @@
+# Run by labwc with /bin/sh (dash), so keep this POSIX — no bashisms.
+# labwc has set WAYLAND_DISPLAY/DISPLAY to its own nested display by now.
+
+# Wallpaper, then the per-workspace hooks (e.g. AUTOSTART_OBSIDIAN).
+. /defaults/autostart_wayland
+
+# Desktop icons and panel, the same shell the streamed workspaces show. The
+# shim makes it draw ~/Desktop in name order (wadspaces-layout numbers them).
+SHIM=/usr/local/lib/wadspaces/libsorted-desktop.so
+if [ -f "${SHIM}" ]; then
+  LD_PRELOAD="${SHIM}" selkies-desktop > /dev/null 2>&1 &
+else
+  selkies-desktop > /dev/null 2>&1 &
+fi
+
+# labwc is one window on the display; if that window is closed it would carry
+# on with no screen at all. Exit instead, and let svc-de decide what next.
+(
+  while sleep 2; do
+    [ -n "$(wlr-randr 2> /dev/null)" ] || { labwc --exit; break; }
+  done
+) > /dev/null 2>&1 &

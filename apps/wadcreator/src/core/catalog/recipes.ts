@@ -1,6 +1,6 @@
 // How each app in the catalog (apps.json) gets into a real wadspace image.
 //
-//   feature   an existing `wadspaces-feature` script in Wadspaces-David/_common;
+//   feature   an existing `wadspaces-feature` script in images/base;
 //             `desktop` is the launcher it writes (add_desktop_entry)
 //   apt       Debian trixie packages, installed by `wadspaces-apt`; `desktop`
 //             names the launcher to put on the desktop (otherwise the helper

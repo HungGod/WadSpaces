@@ -27,7 +27,7 @@ src/core/          shared with Cloud Functions: no React, DOM or import.meta.env
   catalog/         79 apps and how each installs (recipes.ts), bundled icons
   build.ts         wadspace → generator spec: install recipes, desktop order
   generator/       Dockerfile, root/ overlay, compose, quadlet (= wadd's, byte for byte)
-  presets.ts       the six hand-written workspaces in ../Wadspaces-David
+  presets.ts       the six hand-written workspaces from before the Builder
 src/data/          backend.ts + local/ (wadd) + cloud/ (Firebase, relay)
 src/pages/         Home, Wadspaces, Launch, Manager, Login/Signup/Welcome
 src/components/    Shell, Builder, the desktop editor, cards, dialogs
@@ -45,19 +45,16 @@ npm test                       # unit tests
 npm run test:rules             # firestore.rules against the emulator
 ```
 
-The offline UI needs `wadd`. From `../../legacy/wadd-py`:
-
-```bash
-PYTHONPATH=. .venv/bin/python -m wadd --config dev/workspaces.dev.yaml serve --dev --no-cdp --no-hotkeys
-```
+The offline UI needs `wadd`: `cargo run -p wadd -- serve --user` from the
+monorepo's root (the machine app finds its socket; the offline UI in a
+browser reaches only the old HTTP wadd, so use the machine app, `npm run app`).
 
 For the online UI copy `.env.example` to `.env.local` (Firebase console →
 Project settings → Web app). Set `VITE_USE_EMULATORS=1` to use
 `firebase emulators:start` instead of the real project.
 
-`REQUIRE_SIBLINGS=1 npm test` fails, rather than skips, when
-`Wadspaces-David` (next to the monorepo) is missing: the generator tests
-compare against its real Dockerfiles, and against the quadlet fixtures in
+The generator tests compare against the hand-written workspaces from before
+the Builder (`../../fixtures/presets/`), and against the quadlet fixtures in
 `fixtures/quadlet/` that wadd's tests share.
 
 ## Offline: the machine app
@@ -85,8 +82,8 @@ icons are downscaled in the browser and kept in the wadspace doc as data URLs
 
 Machines link to an account with a one-time code: **Manager → Add machine**
 online, then **Manager → Link to your account** in the machine app.
-wadd (`../../legacy/wadd-py/wadd/cloud.py`) then heartbeats every 30 s and runs
-the commands the web app queues (`switch`, `start`, `stop`, `restart`).
+wadd (`../wadd/src/cloud.rs`) then heartbeats every 30 s and runs the
+commands the web app queues (`switch`, `start`, `stop`, `restart`, `launch`).
 
 ## From desktop to image
 
@@ -109,7 +106,8 @@ drives, which wadd mounts at `~/Desktop/<folder>` when it launches the
 wadspace (`/api/launches`); the bundle's README names the defaults and its
 compose file lists them as mounts to fill in by hand.
 
-Build it with `../Wadspaces-David/build.sh --only <id>` after copying it
-there. Desktops with Debian-package or web apps need the base image's
+Build it with `podman build -t localhost/wadspaces-<id>:latest .` in the
+folder, with the base image built (`../../images/build.sh --only base`).
+Desktops with Debian-package or web apps need the base image's
 `wadspaces-apt`, `wadspaces-webapp --id` and `wadspaces-layout` helpers, which
 arrive with in-app builds on the machine.

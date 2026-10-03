@@ -1,4 +1,4 @@
-//! The six hand-written workspaces in Wadspaces-David, as generator specs, and
+//! The six hand-written workspaces from before the Builder, as generator specs, and
 //! as Builder wadspaces with their real desktops (src/core/presets.ts).
 
 use std::sync::OnceLock;

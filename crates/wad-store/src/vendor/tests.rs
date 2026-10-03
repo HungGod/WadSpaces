@@ -100,7 +100,7 @@ fn a_clash_with_the_machines_workspaces_is_left_out_and_retried() {
 }
 
 /// The image's own workspaces (host/usr/lib/wadspaces/workspaces.d) read
-/// and check, and are the ones the Python wadd's last image had.
+/// and check.
 #[test]
 fn the_images_workspaces_are_valid() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../host/usr/lib/wadspaces/workspaces.d");
@@ -115,11 +115,6 @@ fn the_images_workspaces_are_valid() {
             .join(w.icon.as_deref().unwrap().trim_start_matches('/'));
         assert!(icon.is_file(), "{}", icon.display());
     }
-    let yaml = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../legacy/wadd-py/host/workspaces.yaml");
-    let mut old = crate::legacy::read(&yaml, None).unwrap().workspaces;
-    old.sort_by(|a, b| a.id.cmp(&b.id));
-    let new: Vec<_> = v.into_iter().map(|w| w.workspace).collect();
-    assert_eq!(new, old);
 }
 
 #[test]

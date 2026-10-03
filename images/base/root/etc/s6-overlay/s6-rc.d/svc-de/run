@@ -1,0 +1,45 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+#
+# The desktop: labwc as one window on whatever Wayland compositor is mounted at
+# /run/wadspaces-display. The image doesn't care which:
+#   local   the machine's own compositor (wadd mounts sway's runtime dir; a
+#           laptop test mounts $XDG_RUNTIME_DIR)
+#   remote  the wadspaces-stream sidecar's pixelflux, streamed to a browser
+# WADSPACES_WAYLAND names the socket, else the first wayland-N found is used.
+
+DISPLAY_DIR="/run/wadspaces-display"
+
+find_socket() {
+    if [[ -n "${WADSPACES_WAYLAND:-}" ]]; then
+        [[ -S "${DISPLAY_DIR}/${WADSPACES_WAYLAND}" ]] && echo "${DISPLAY_DIR}/${WADSPACES_WAYLAND}"
+        return
+    fi
+    local s
+    for s in "${DISPLAY_DIR}"/wayland-*; do
+        [[ -S "${s}" ]] && { echo "${s}"; return; }
+    done
+}
+
+echo "[svc-de] waiting for a Wayland socket in ${DISPLAY_DIR}"
+until SOCKET="$(find_socket)" && [[ -n "${SOCKET}" ]]; do
+    sleep 0.5
+done
+echo "[svc-de] drawing on ${SOCKET}"
+
+cd "${HOME}"
+# Apps (Electron especially) abort when the display goes away under them,
+# which is how a closed window ends the session. No core dumps from that, as
+# in the Selkies base: on a laptop the host would pop a crash report for each.
+ulimit -c 0
+WAYLAND_DISPLAY="${SOCKET}" s6-setuidgid abc dbus-run-session -- labwc
+
+# labwc ended. Either its window was closed (the display is still there): the
+# workspace is done, so stop the container. Or the display went away (the
+# host session or the stream restarted): exit, and s6 runs this again, which
+# waits for the display to come back.
+if python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).connect(sys.argv[1])' "${SOCKET}" 2> /dev/null; then
+    echo "[svc-de] the desktop window was closed; stopping the workspace"
+    exec /run/s6/basedir/bin/halt
+fi
+echo "[svc-de] the display went away; waiting for it again"

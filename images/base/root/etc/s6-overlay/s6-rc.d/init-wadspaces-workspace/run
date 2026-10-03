@@ -1,0 +1,170 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+#
+# WadSpaces workspace init. Runs as root after init-config has seeded
+# ~/.config/labwc, and before init-services starts the desktop.
+#
+#   1. configures git to authenticate with the GitHub token secret (for
+#      pushing from inside; the image never fetches project files itself)
+#   2. sets up the projects wadd mounted under ~/Desktop (wadspaces-projects):
+#      git trust, their one-time setup command, a launcher each
+#   3. seeds ~/Desktop with the launchers named in the desktop-entries lists
+#   4. hands the paths in the chown lists to abc
+#   5. rebuilds the labwc right-click menu from those launchers
+#   6. nudges the Selkies panel to rescan
+#
+# Projects are folders on the host, bind-mounted read-write by wadd at
+# ~/Desktop/<name> and listed in /run/wadspaces-extra/projects.json. They are
+# the host's: this init never chowns into them or writes over them.
+#
+# Data files (all optional, '#' comments and blank lines ignored):
+#   /etc/wadspaces/desktop-entries.list    one .desktop basename per line
+#   /etc/wadspaces/desktop-entries.d/*.list  same, written by feature scripts
+#   /etc/wadspaces/chown.list, chown.d/*.list  one absolute path per line
+#
+# Deliberately does NOT use `set -e`: a failure here should log and continue,
+# not wedge the container in a boot loop with no way to look at it.
+
+DESKTOP_DIR="${DESKTOP_DIR:-/config/Desktop}"
+GITHUB_TOKEN_FILE="${GITHUB_TOKEN_FILE:-/run/secrets/github_token}"
+GIT_USER_NAME="${GIT_USER_NAME:-}"
+GIT_USER_EMAIL="${GIT_USER_EMAIL:-}"
+REFRESH_MENU="${REFRESH_MENU:-true}"
+
+CONF=/etc/wadspaces
+STATE_DIR=/config/.wadspaces
+CRED_HELPER="/usr/local/bin/git-credential-github-token"
+
+log() { echo "[wadspaces-workspace] $*"; }
+own() { lsiown -R abc:abc "$1"; }
+# The Desktop, but not into the projects mounted in it (they belong to the
+# host, and a recursive chown would walk every node_modules on every start).
+own_desktop() {
+    local entry
+    chown abc:abc "${DESKTOP_DIR}"
+    for entry in "${DESKTOP_DIR}"/* "${DESKTOP_DIR}"/.[!.]*; do
+        [[ -e "${entry}" ]] || continue
+        mountpoint -q "${entry}" || own "${entry}"
+    done
+}
+asabc() { s6-setuidgid abc "$@"; }
+
+# Print the non-comment, non-blank lines of the given files (missing ok).
+read_lists() {
+    local f
+    for f in "$@"; do
+        [[ -f "$f" ]] || continue
+        sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$f"
+    done
+}
+
+# The streamed base needs SELKIES_DESKTOP=true to draw ~/Desktop icons; the
+# lean base (no Selkies) always starts the desktop itself.
+if command -v selkies > /dev/null; then
+    if [[ "${SELKIES_DESKTOP,,}" != "true" ]]; then
+        log "NOTE: SELKIES_DESKTOP is not true — the session runs single-app, so"
+        log "      ~/Desktop icons will not be drawn. Set SELKIES_DESKTOP=true."
+    fi
+fi
+
+mkdir -p "${DESKTOP_DIR}" "${STATE_DIR}"
+own_desktop
+own "${STATE_DIR}"
+
+# ------------------------------------------------------------- git credentials
+# The token itself is never read here and never lands on disk; the helper reads
+# it from the secret mount each time git asks.
+if [[ -r "${GITHUB_TOKEN_FILE}" ]]; then
+    log "github token available at ${GITHUB_TOKEN_FILE}"
+elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    log "github token available from \$GITHUB_TOKEN"
+else
+    log "no github token at ${GITHUB_TOKEN_FILE} and \$GITHUB_TOKEN is empty —"
+    log "git push to private repos will fail. Create the secret with:"
+    log "  printf '%s' '<fine-grained PAT>' | podman secret create github_token -"
+fi
+
+asabc git config --global credential.https://github.com.helper "${CRED_HELPER}"
+asabc git config --global credential.https://github.com.username "x-access-token"
+[[ -n "${GIT_USER_NAME}" ]] && asabc git config --global user.name "${GIT_USER_NAME}"
+[[ -n "${GIT_USER_EMAIL}" ]] && asabc git config --global user.email "${GIT_USER_EMAIL}"
+
+# --------------------------------------------------------------- projects
+/usr/local/bin/wadspaces-projects "${DESKTOP_DIR}" "${STATE_DIR}"
+
+# ---------------------------------------------------------- desktop icons
+# selkies-desktop draws an icon for every .desktop file in $HOME/Desktop. The
+# entries are shipped in /usr/share/applications and copied here each boot.
+#
+# A wadspace designed in Wad Creator has /etc/wadspaces/layout.json: its icons
+# in order, with their labels, placed by wadspaces-layout. Hand-written images
+# list launchers in desktop-entries.list / desktop-entries.d/*.list instead.
+SEEDED="${STATE_DIR}/seeded-desktop-entries"
+if [[ -f "${CONF}/layout.json" ]]; then
+    mapfile -t ENTRIES < <(/usr/local/bin/wadspaces-layout "${DESKTOP_DIR}" "${STATE_DIR}" "${CONF}/layout.json")
+    log "desktop laid out from layout.json (${#ENTRIES[@]} launchers)"
+    LEGACY=()
+else
+    mapfile -t ENTRIES < <(read_lists "${CONF}/desktop-entries.list" "${CONF}"/desktop-entries.d/*.list | awk '!seen[$0]++')
+    LEGACY=("${ENTRIES[@]}")
+fi
+
+# Remove launchers this init seeded on an earlier boot that are no longer
+# wanted (all of them once a layout takes over); anything the user put on the
+# Desktop themselves is left alone.
+if [[ -f "${SEEDED}" ]]; then
+    while read -r OLD; do
+        [[ -n "${OLD}" ]] || continue
+        printf '%s\n' "${LEGACY[@]}" | grep -qxF "${OLD}" || {
+            rm -f "${DESKTOP_DIR}/${OLD}"
+            log "retired desktop launcher: ${OLD}"
+        }
+    done < "${SEEDED}"
+fi
+: > "${SEEDED}"
+
+for ENTRY in "${LEGACY[@]}"; do
+    SRC="/usr/share/applications/${ENTRY}"
+    if [[ -f "${SRC}" ]]; then
+        cp "${SRC}" "${DESKTOP_DIR}/${ENTRY}"
+        chmod 755 "${DESKTOP_DIR}/${ENTRY}"
+        echo "${ENTRY}" >> "${SEEDED}"
+        log "desktop launcher seeded: ${ENTRY}"
+    else
+        log "WARN: ${SRC} missing — no desktop icon for it"
+    fi
+done
+own_desktop
+own "${STATE_DIR}"
+
+# ------------------------------------------------------------ ownership
+while read -r P; do
+    [[ -e "${P}" ]] && own "${P}"
+done < <(read_lists "${CONF}/chown.list" "${CONF}"/chown.d/*.list | awk '!seen[$0]++')
+
+# --------------------------------------------------------------- labwc menu
+# init-selkies-config only copies /defaults/menu_wayland.xml when the user copy
+# is absent, so a persisted ~/.config would otherwise pin a stale menu forever.
+if [[ "${REFRESH_MENU,,}" == "true" ]]; then
+    # labwc (Wayland) in both the native base and PIXELFLUX_WAYLAND streams.
+    if [[ -x /usr/bin/labwc ]] && { [[ "${PIXELFLUX_WAYLAND,,}" == "true" ]] || ! command -v selkies > /dev/null; }; then
+        MENU_CONF_DIR="/config/.config/labwc"
+    else
+        MENU_CONF_DIR="/config/.config/openbox"
+    fi
+    mkdir -p "${MENU_CONF_DIR}"
+    if /usr/local/bin/wadspaces-menu "${ENTRIES[@]}" > "${MENU_CONF_DIR}/menu.xml.new" 2>/dev/null; then
+        mv "${MENU_CONF_DIR}/menu.xml.new" "${MENU_CONF_DIR}/menu.xml"
+        log "menu rebuilt from ${#ENTRIES[@]} launchers"
+    else
+        rm -f "${MENU_CONF_DIR}/menu.xml.new"
+        cp /defaults/menu_wayland.xml "${MENU_CONF_DIR}/menu.xml"
+        log "menu generation failed — using /defaults/menu_wayland.xml"
+    fi
+    own "${MENU_CONF_DIR}"
+fi
+
+# Nudge the Selkies panel to rescan ~/Desktop and the application list.
+mkdir -p /config/.config
+touch /config/.config/panel-reload
+own /config/.config

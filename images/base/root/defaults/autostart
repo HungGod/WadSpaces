@@ -1,0 +1,7 @@
+# Run by openbox with /bin/sh (dash), so keep this POSIX — no bashisms.
+#
+# X11 fallback: unused while PIXELFLUX_WAYLAND=true. swaybg is Wayland-only,
+# so there is no wallpaper on this path — see autostart_wayland.
+for hook in /etc/wadspaces/autostart.d/*.sh; do
+  [ -f "${hook}" ] && . "${hook}"
+done

@@ -42,3 +42,34 @@ fn all_cases_match_the_typescript_core() {
     }
     assert!(failures.is_empty(), "{} of {} cases differ:\n{}", failures.len(), cases.len(), failures.join("\n"));
 }
+
+/// After a deliberate change to an output (the build folder's README, say):
+/// `UPDATE_GOLDENS=1 cargo test -p wad-core goldens -- --ignored` rewrites the
+/// cases that differ now. Look at the diff before committing it.
+#[test]
+#[ignore = "rewrites fixtures/core/goldens.json; run on purpose"]
+fn rewrite_changed_goldens() {
+    if std::env::var("UPDATE_GOLDENS").as_deref() != Ok("1") {
+        return;
+    }
+    let mut cases: Vec<Value> = serde_json::from_str(GOLDENS).unwrap();
+    let mut n = 0;
+    for c in cases.iter_mut() {
+        let name = c["fn"].as_str().unwrap().to_string();
+        let args = c["args"].as_array().unwrap().clone();
+        if let (Ok(got), Some(want)) = (crate::call(&name, &args), c.get("out"))
+            && &got != want
+        {
+            c["out"] = got;
+            n += 1;
+        }
+    }
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/core/goldens.json");
+    // As JSON.stringify(cases, null, 1) wrote it.
+    let mut out = Vec::new();
+    let mut ser = serde_json::Serializer::with_formatter(&mut out, serde_json::ser::PrettyFormatter::with_indent(b" "));
+    serde::Serialize::serialize(&cases, &mut ser).unwrap();
+    out.push(b'\n');
+    std::fs::write(path, out).unwrap();
+    println!("rewrote {n} cases");
+}

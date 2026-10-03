@@ -59,7 +59,7 @@ pub struct Config {
 #[serde(default)]
 pub struct Streams {
     pub enabled: bool,
-    /// The sidecar (Wadspaces-David's `_stream`).
+    /// The sidecar (images/stream).
     pub image: String,
     /// Streams get ports from here on (one per workspace, kept).
     pub first_port: u16,

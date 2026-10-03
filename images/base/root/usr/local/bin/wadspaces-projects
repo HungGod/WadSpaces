@@ -1,0 +1,188 @@
+#!/usr/bin/python3
+"""Set up the projects wadd mounted into this wadspace.
+
+    wadspaces-projects <desktop-dir> <state-dir>
+
+Runs at every start (init-wadspaces-workspace), as root. A project is a folder
+on the host that wadd bind-mounts read-write at <desktop-dir>/<mount>, so
+edits live on the host and survive the container. wadd lists what it mounted
+in /run/wadspaces-extra/projects.json:
+
+    {"version": 1, "projects": [{"id": "<project id>", "name": "Writing", "mount": "Writing",
+                                 "setup": "npm install", "setupHash": "<hash of setup>"}, ...]}
+
+For each project it:
+  - lets git work in it as abc (safe.directory),
+  - runs its one-time setup command in the background, once per setupHash
+    (the marker is kept in <state-dir>, so a changed command runs again),
+  - places an NN-project-<id>.desktop launcher that opens the folder, at the
+    project's place in layout.json ({"project": "<id>"} icons) or after the rest.
+Launchers it placed on an earlier start for projects no longer mounted go, and
+so do the empty folders podman left in ~/Desktop as their mount points.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+MANIFEST = "/run/wadspaces-extra/projects.json"
+LAYOUT = "/etc/wadspaces/layout.json"
+ICON = "/usr/share/wadspaces/icons/folder.svg"
+MOUNT_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def log(msg: str) -> None:
+    print(f"[wadspaces-projects] {msg}", file=sys.stderr)
+
+
+def projects() -> list[dict]:
+    try:
+        with open(MANIFEST) as f:
+            entries = json.load(f).get("projects", [])
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as e:
+        log(f"unreadable {MANIFEST}: {e}")
+        return []
+    out = []
+    for p in entries:
+        if ID_RE.match(str(p.get("id", ""))) and MOUNT_RE.match(str(p.get("mount", ""))):
+            out.append(p)
+        else:
+            log(f"skipped a malformed entry: {p!r}")
+    return out
+
+
+def positions() -> dict[str, int]:
+    """project id -> place on the designed desktop (1-based), from layout.json."""
+    try:
+        with open(LAYOUT) as f:
+            icons = json.load(f).get("icons", [])
+    except (OSError, ValueError):
+        return {}
+    return {i["project"]: n + 1 for n, i in enumerate(icons) if i.get("project")}
+
+
+def read_set(path: str) -> set[str]:
+    try:
+        with open(path) as f:
+            return {l.strip() for l in f if l.strip()}
+    except OSError:
+        return set()
+
+
+def mount_points() -> set[str]:
+    """Where things are mounted, from the kernel. os.path.ismount compares
+    devices, and a bind mount from the host's own filesystem (a project) is on
+    the same device as /config, so it would say no."""
+    try:
+        with open("/proc/self/mountinfo") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return set()
+    # Field 5 is the mount point; spaces and the like are octal escapes (\040).
+    return {re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), l.split()[4])
+            for l in lines if len(l.split()) > 4}
+
+
+def as_abc(*cmd: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["s6-setuidgid", "abc", *cmd], capture_output=True, text=True)
+
+
+def trust(path: str) -> None:
+    """git refuses a repo owned by someone else; the host owns these as uid 1000."""
+    have = as_abc("git", "config", "--global", "--get-all", "safe.directory").stdout.split("\n")
+    if path not in have:
+        as_abc("git", "config", "--global", "--add", "safe.directory", path)
+
+
+def setup(project: dict, path: str, state: str) -> None:
+    """The project's one-time setup (e.g. npm install), in the background so a
+    slow one never delays the desktop. The marker is only written on success,
+    so a failed run retries on the next start."""
+    cmd = (project.get("setup") or "").strip()
+    if not cmd:
+        return
+    tag = f"{project['id']}-{project.get('setupHash') or 'x'}"
+    mark = os.path.join(state, f"setup-{tag}.done")
+    if os.path.exists(mark):
+        return
+    logf = os.path.join(state, f"setup-{project['id']}.log")
+    log(f"running setup for {project['mount']} in the background (log: {logf})")
+    script = 'cd "$1" && { eval "$2"; } > "$3" 2>&1 && touch "$4"'
+    # setsid + closed stdio so s6-rc does not wait on (or kill) it.
+    subprocess.Popen(["setsid", "s6-setuidgid", "abc", "bash", "-lc", script, "_", path, cmd, logf, mark],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def launcher(project: dict, path: str) -> str:
+    return (
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        f"Name={project.get('name') or project['mount']}\n"
+        f'Exec=/usr/local/bin/wadspaces-open "{path}"\n'
+        f"Icon={ICON}\n"
+        "Terminal=false\n"
+    )
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print(__doc__, file=sys.stderr)
+        return 2
+    desktop, state = sys.argv[1], sys.argv[2]
+    os.makedirs(state, exist_ok=True)
+    seeded_path = os.path.join(state, "seeded-projects")
+    mounts_path = os.path.join(state, "mounted-projects")
+    before, mounts_before = read_set(seeded_path), read_set(mounts_path)
+
+    pos = positions()
+    mounted = mount_points()
+    placed: list[str] = []
+    mounts_now: list[str] = []
+    extra = 80
+    for p in projects():
+        path = os.path.join(desktop, p["mount"])
+        if path not in mounted:
+            log(f"{path} is not mounted; skipped {p['id']}")
+            continue
+        trust(path)
+        setup(p, path, state)
+        n = pos.get(p["id"])
+        if n is None:
+            n, extra = extra, extra + 1
+        name = f"{n:02d}-project-{p['id']}.desktop"
+        with open(os.path.join(desktop, name), "w") as f:
+            f.write(launcher(p, path))
+        os.chmod(os.path.join(desktop, name), 0o755)
+        placed.append(name)
+        mounts_now.append(p["mount"])
+
+    for old in before - set(placed):
+        if "/" not in old:
+            try:
+                os.remove(os.path.join(desktop, old))
+                log(f"retired {old}")
+            except FileNotFoundError:
+                pass
+    # A project mounted last time but not now leaves its (empty) mount point
+    # in the config volume; rmdir only ever removes an empty one.
+    for old in mounts_before - set(mounts_now):
+        path = os.path.join(desktop, old)
+        if "/" not in old and path not in mounted:
+            try:
+                os.rmdir(path)
+            except OSError:
+                pass
+    with open(seeded_path, "w") as f:
+        f.write("".join(f"{n}\n" for n in placed))
+    with open(mounts_path, "w") as f:
+        f.write("".join(f"{m}\n" for m in mounts_now))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

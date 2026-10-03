@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Build-time installer for workspace tools.
+#
+#   RUN wadspaces-feature git python nodejs vscode claude-code
+#
+# Each name maps to /usr/local/lib/wadspaces/features/<name>.sh. Scripts are
+# sourced in order in one shell so they share helpers (below); a feature that
+# another depends on calls `need <name>`. Every feature runs at most once per
+# image, and apt caches are cleaned at the end.
+set -euo pipefail
+export CURL_HOME=/usr/local/lib/wadspaces  # .curlrc: retries
+
+FEATURES_DIR=/usr/local/lib/wadspaces/features
+DONE_DIR=/var/lib/wadspaces/features
+mkdir -p "${DONE_DIR}" /etc/wadspaces/desktop-entries.d /etc/wadspaces/chown.d /etc/wadspaces/autostart.d
+export DEBIAN_FRONTEND=noninteractive
+
+log() { echo "**** [wadspaces-feature] $* ****"; }
+
+_APT_UPDATED=""
+apt_install() {
+    if [[ -z "${_APT_UPDATED}" ]]; then
+        apt-get update
+        _APT_UPDATED=1
+    fi
+    apt-get install -y --no-install-recommends "$@"
+}
+
+# Mark that the apt lists changed (new repo added) so the next install updates.
+apt_repo_added() { _APT_UPDATED=""; }
+
+# add_desktop_entry <feature> <basename.desktop>
+add_desktop_entry() {
+    echo "$2" >> "/etc/wadspaces/desktop-entries.d/$1.list"
+}
+
+# add_chown <feature> <path>
+add_chown() {
+    echo "$2" >> "/etc/wadspaces/chown.d/$1.list"
+}
+
+# github_latest_asset <owner/repo> <regex> -> prints the first matching asset URL
+github_latest_asset() {
+    curl -fsSL "https://api.github.com/repos/$1/releases?per_page=20" \
+        | grep -oE "\"browser_download_url\": *\"[^\"]+\"" \
+        | sed -E 's/.*"(https[^"]+)"$/\1/' \
+        | grep -E "$2" | head -n1
+}
+
+need() {
+    local name="$1"
+    [[ -e "${DONE_DIR}/${name}" ]] && return 0
+    local script="${FEATURES_DIR}/${name}.sh"
+    if [[ ! -f "${script}" ]]; then
+        echo "unknown feature: ${name} (have: $(ls "${FEATURES_DIR}" | sed 's/\.sh$//' | tr '\n' ' '))" >&2
+        exit 1
+    fi
+    log "installing ${name}"
+    # shellcheck disable=SC1090
+    source "${script}"
+    touch "${DONE_DIR}/${name}"
+}
+
+[[ $# -gt 0 ]] || { echo "usage: wadspaces-feature <feature>..." >&2; exit 2; }
+for f in "$@"; do need "$f"; done
+
+log "cleanup"
+apt-get autoclean
+rm -rf /var/lib/apt/lists/* /var/tmp/* /tmp/* /root/.npm /root/.cache

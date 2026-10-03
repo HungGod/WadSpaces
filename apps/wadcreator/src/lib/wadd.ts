@@ -1,4 +1,6 @@
-// Client for wadd, the daemon on this machine (legacy/wadd-py/wadd/api.py).
+// Client for wadd, the daemon on this machine (apps/wadd). The calls keep the
+// old Python wadd's /api shapes: the app's Rust side (src-tauri/src/rswadd.rs)
+// turns them into wadd's /v1.
 // In the machine app (Tauri) every call goes through the app's Rust side
 // (src-tauri/src/wadd.rs); in a browser (offline dev against a dev wadd) it's
 // fetch to 127.0.0.1:8080. The online app never calls wadd: it reaches

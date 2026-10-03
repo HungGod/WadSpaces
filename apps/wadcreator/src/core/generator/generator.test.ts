@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { newSpec, toWaddSpec } from "../spec";
@@ -9,15 +9,12 @@ const here = (p: string) => resolve(__dirname, p);
 // fixtures there are shared with wadd's tests, so the two renderers can't drift.
 const REPO = here("../../../../..");
 const fixture = (name: string) => readFileSync(`${REPO}/fixtures/quadlet/${name}`, "utf8");
-// The image recipes live in their own checkout next to the monorepo. It's
-// optional, but REQUIRE_SIBLINGS=1 turns a missing one into a failure instead
-// of a silent skip.
-const containers = `${REPO}/../Wadspaces-David`;
-const has = (p: string) => process.env.REQUIRE_SIBLINGS === "1" || existsSync(p);
+// Hand-written workspaces from before the Builder (the old Wadspaces-David
+// recipes), kept as what the generator must still reproduce.
+const containers = `${REPO}/fixtures/presets`;
 
 describe("quadlet", () => {
   it("matches wadd's renderer byte for byte", () => {
-    // Same fixture as Wadspaces-Tools/tests/fixtures/wad-writing.container
     const expected = fixture("wad-writing.container");
     const got = quadlet({
       id: "writing",
@@ -52,7 +49,7 @@ describe("quadlet", () => {
   });
 
   it("matches wadd with projects mounted", () => {
-    // Same inputs as Wadspaces-Tools/tests/test_quadlet.py test_projects_match_fixture:
+    // Same inputs as wadd's tests (fixtures/quadlet/wad-writing-projects.container):
     // writing-host.yaml plus two projects.
     const expected = fixture("wad-writing-projects.container");
     const got = quadlet({
@@ -75,7 +72,7 @@ describe("quadlet", () => {
   });
 
   it("matches wadd with a folder project: its own path, no relabel, SELinux separation off", () => {
-    // Same inputs as Wadspaces-Tools/tests/fixtures/wad-writing-folder.container:
+    // Same inputs as fixtures/quadlet/wad-writing-folder.container:
     // writing.yaml plus a GitHub project and a folder project.
     const expected = fixture("wad-writing-folder.container");
     const got = quadlet({
@@ -129,18 +126,18 @@ const kaleB = newSpec({
 });
 
 describe("bundle matches the hand-written workspaces", () => {
-  it.runIf(has(containers))("kale-b resources", () => {
+  it("kale-b resources", () => {
     expect(kaleResourcesJson(kaleB)).toBe(
-      readFileSync(`${containers}/kale-b/root/etc/wadspaces/kalebrowser-resources.json`, "utf8"),
+      readFileSync(`${containers}/kale-b/kalebrowser-resources.json`, "utf8"),
     );
   });
 
-  it.runIf(has(containers))("kale-b Dockerfile instructions", () => {
+  it("kale-b Dockerfile instructions", () => {
     const body = (s: string) => s.split("\n").filter((l) => l && !l.startsWith("#"));
     expect(body(dockerfile(kaleB))).toEqual(body(readFileSync(`${containers}/kale-b/Dockerfile`, "utf8")));
   });
 
-  it.runIf(has(containers))("wad-c web apps", () => {
+  it("wad-c web apps", () => {
     const wadc = newSpec({
       id: "wad-c",
       name: "Wad Creator",

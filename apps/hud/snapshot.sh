@@ -5,13 +5,13 @@
 #   apps/hud/snapshot.sh [OUT_DIR] [ICON]
 #
 # ICON: an image to show as the switcher's Writing icon (default: the
-# Writing workspace's wallpaper, if Wadspaces-David is next to this repo).
+# Writing workspace's icon).
 # Build first: cargo build -p wadspaces-hud. Needs kwin_wayland.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "${HERE}/../.." && pwd)"
 OUT="${1:-${XDG_RUNTIME_DIR}/hud-snapshot}"
-ICON="${2:-${ROOT}/../Wadspaces-David/cosmic-bodybuilding/root/usr/share/backgrounds/wallpaper.png}"
+ICON="${2:-${ROOT}/host/usr/share/wadspaces/icons/writing.png}"
 mkdir -p "${OUT}"
 for theme in dark light; do
     mkdir -p "${OUT}/${theme}"

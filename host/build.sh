@@ -9,13 +9,14 @@
 #                                  in place: only changed layers are written, and
 #                                  the drive switches to it on its next boot (sudo)
 #
-#   --images writing,iq-dev        with install/update: also copy these locally
-#                                  built workspace images onto the drive, so the
+#   --images writing,iq-dev        with install/update: also copy these workspaces'
+#                                  images onto the drive (as their workspaces.d/<id>.toml
+#                                  names them, from this machine's podman), so the
 #                                  machine never downloads them
 #   --bases                        with install/update: also copy the base images
-#                                  (localhost/wadspaces-{base,stream,selkies}:trixie)
-#                                  onto the drive; the machine's own builds need
-#                                  them and it can't download them
+#                                  (localhost/wadspaces-{base,stream}:trixie, built by
+#                                  images/build.sh) onto the drive; the machine builds
+#                                  designs on the first and streams with the second
 #   --stage-only DIR               with update: write what would go onto the
 #                                  drive into DIR instead (for testing)
 #
@@ -60,8 +61,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 STICK_OCI="${ROOT}/.build/stick/oci"
-# The workspace images (their Dockerfiles and compose files).
-CONTAINERS_DIR="${CONTAINERS_DIR:-${ROOT}/../Wadspaces-David}"
 
 # Built here rather than in a container: this laptop runs Fedora 43 like the
 # image, so the app links against the same WebKitGTK. The image build runs
@@ -185,18 +184,6 @@ check_update_target() {
 # rsync then writes only new layers. On the drive, wadspaces-import.service
 # (host/usr/libexec/wadspaces/import-updates) imports them at the next boot.
 
-# "writing" -> "cosmic-bodybuilding" (the wadspaces.id label in its compose file)
-workspace_dir() {
-    local f
-    for f in "${CONTAINERS_DIR}"/*/docker-compose.yml; do
-        if grep -qE "^[[:space:]]*wadspaces\.id:[[:space:]]*$1[[:space:]]*$" "$f"; then
-            basename "$(dirname "$f")"; return
-        fi
-    done
-    [[ -f "${CONTAINERS_DIR}/$1/Dockerfile" ]] && { echo "$1"; return; }
-    echo "no workspace $1 in ${CONTAINERS_DIR}" >&2; return 1
-}
-
 # The image name wadd runs a workspace as (image = in the image's
 # workspaces.d/<id>.toml).
 workspace_target() {
@@ -217,21 +204,20 @@ stage_stick() {
         skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${IMAGE}" "oci:${STICK_OCI}:host"
         podman image inspect --format '{{.Id}}' "${IMAGE}" > "${STICK_OCI}/host.id"
     fi
-    local id dir src target
+    local id target
     for id in ${IMAGES//,/ }; do
-        dir="$(workspace_dir "${id}")"
-        src="localhost/wadspaces-${dir}:latest"
         target="$(workspace_target "${id}")"
-        podman image exists "${src}" || { echo "${src} is not built; run containers/build.sh --only ${id}" >&2; exit 1; }
-        echo ">> staging ${src} as ${target}"
-        skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${src}" "oci:${STICK_OCI}:ws-${id}"
+        podman image exists "${target}" || { echo "${target} isn't here: podman pull ${target}" >&2; exit 1; }
+        echo ">> staging ${target}"
+        skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${target}" "oci:${STICK_OCI}:ws-${id}"
         echo "ws-${id} ${target}" >> "${STICK_OCI}/import.list"
     done
     # Bases keep their own names: wadd builds on them as they are.
     local b
-    for b in ${BASES:+base stream selkies}; do
+    local b src
+    for b in ${BASES:+base stream}; do
         src="localhost/wadspaces-${b}:trixie"
-        podman image exists "${src}" || { echo "${src} is not built; run containers/build.sh --only _${b/base/common}" >&2; exit 1; }
+        podman image exists "${src}" || { echo "${src} is not built: images/build.sh --only ${b}" >&2; exit 1; }
         echo ">> staging ${src}"
         skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${src}" "oci:${STICK_OCI}:base-${b}"
         echo "base-${b} ${src}" >> "${STICK_OCI}/import.list"

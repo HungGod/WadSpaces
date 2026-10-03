@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Streams on this laptop (M11), as you: `wadd serve --user` streams a real
-# native workspace (localhost/wadspaces-cosmic-bodybuilding) on the real
+# native workspace (localhost/wadspaces-writing) on the real
 # `_stream` sidecar (localhost/wadspaces-stream:trixie), rootless.
 #
 #   apps/wadd/dev/try-stream.sh
@@ -24,8 +24,8 @@ port=47800
 mkdir -p "$dir/state" "$dir/projects"
 chmod 700 "$dir"
 
-for img in localhost/wadspaces-cosmic-bodybuilding:latest localhost/wadspaces-stream:trixie; do
-  podman image exists "$img" || { echo "needs $img (Wadspaces-David's build.sh)" >&2; exit 1; }
+for img in localhost/wadspaces-writing:latest localhost/wadspaces-stream:trixie; do
+  podman image exists "$img" || { echo "needs $img (images/build.sh)" >&2; exit 1; }
 done
 [ -S "$XDG_RUNTIME_DIR/podman/podman.sock" ] || { echo "needs podman.socket: systemctl --user start podman.socket" >&2; exit 1; }
 if podman secret exists stream_password; then
@@ -49,7 +49,7 @@ enabled = false
 enabled = false
 TOML
 cat >"$dir/state/workspaces.json" <<'JSON'
-[{"id":"writing","name":"Writing","image":"localhost/wadspaces-cosmic-bodybuilding:latest","display":"host","port":null,
+[{"id":"writing","name":"Writing","image":"localhost/wadspaces-writing:latest","display":"host","port":null,
   "hotkey":1,"icon":null,"enabled":true,"autostart":false,"containerName":"wad-writing","containerPort":3000,
   "env":[["PUID","1000"],["PGID","1000"],["TZ","Pacific/Fiji"]],"secrets":[],"volumes":[],"devices":["/dev/dri"],
   "shmSize":"1g","projects":[]}]

@@ -6,8 +6,8 @@
 #
 #   apps/wadd/dev/try-build.sh
 #
-# Needs localhost/wadspaces-base:trixie (../Wadspaces-David/build.sh --only
-# _common) and sway (see sway.sh). The image and units are removed afterwards.
+# Needs localhost/wadspaces-base:trixie (images/build.sh --only base) and sway
+# (see sway.sh). The image and units are removed afterwards.
 set -euo pipefail
 ulimit -c 0
 root=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -15,7 +15,7 @@ dir=$root/.build/wadd-try-build
 sock=$dir/wadd.sock
 rm -rf "$dir"
 mkdir -p "$dir/state" "$dir/projects"
-podman image exists localhost/wadspaces-base:trixie || { echo "no localhost/wadspaces-base:trixie: build it in Wadspaces-David first" >&2; exit 1; }
+podman image exists localhost/wadspaces-base:trixie || { echo "no localhost/wadspaces-base:trixie: images/build.sh --only base" >&2; exit 1; }
 . "$root/apps/wadd/dev/sway.sh"
 start_sway "$dir"
 

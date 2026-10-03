@@ -1,0 +1,14 @@
+[
+    {
+        "app_name": "Github",
+        "app_url": "https://github.com"
+    },
+    {
+        "app_name": "Claude",
+        "app_url": "https://claude.ai"
+    },
+    {
+        "app_name": "Open Router",
+        "app_url": "https://openrouter.ai/"
+    }
+]

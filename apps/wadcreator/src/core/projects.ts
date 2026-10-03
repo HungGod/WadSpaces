@@ -11,7 +11,7 @@
 //           it; it opens on whichever machine it's plugged into.
 //
 // The document is the same everywhere: wadd's project store on a machine
-// (legacy/wadd-py/wadd/projects.py) and users/{uid}/projects/{id} in
+// (wadd's projects, apps/wadd/src/projects.rs) and users/{uid}/projects/{id} in
 // Firestore, which wadd's cloud relay syncs both ways (last writer wins on
 // updatedAt). wadd's own `synced` and `legacy` flags never leave the machine.
 // The functions are wad-core's (crates/wad-core/src/projects.rs), run as

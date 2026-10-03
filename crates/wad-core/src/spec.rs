@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::js::{self, Obj};
 
-/// Features in install order (Wadspaces-David/_common's feature scripts).
+/// Features in install order (images/base's feature scripts).
 pub const FEATURES: &[&str] = &[
     "git",
     "cpp",

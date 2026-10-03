@@ -1,0 +1,16 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+#
+# Put pixelflux's Wayland socket where the workspace container can reach it.
+# init-selkies-config has just pointed XDG_RUNTIME_DIR at ~/.XDG; point it at
+# the volume shared with the workspace instead, before selkies starts and
+# creates wayland-1 there.
+
+DIR="/run/wadspaces-display"
+mkdir -p "${DIR}"
+# A socket left over from the last run would look live to the workspace.
+rm -f "${DIR}"/wayland-*
+chown abc:abc "${DIR}"
+chmod 700 "${DIR}"
+printf '%s' "${DIR}" > /run/s6/container_environment/XDG_RUNTIME_DIR
+echo "[stream-display] display socket goes in ${DIR}"

@@ -1,7 +1,7 @@
 //! Repo tasks, run as `cargo xtask <task>`:
 //!
 //! - `ci`: everything CI checks (Rust fmt, clippy and tests; the wasm is
-//!   current and in budget; the UI's typecheck and tests; wadd-py's tests).
+//!   current and in budget; the UI's typecheck and tests).
 //! - `bindings`: regenerate the UI's TypeScript bindings
 //!   (`apps/wadcreator/src/gen/bindings.ts`) from the Tauri commands.
 //! - `wasm`: build wad-core for the UI (`apps/wadcreator/src/gen/wasm/`):
@@ -61,8 +61,7 @@ fn ci() -> Result<(), String> {
     wasm()?;
     run(".", "git", &["diff", "--exit-code", "--stat", "apps/wadcreator/src/gen/"])?;
     run("apps/wadcreator", "npm", &["run", "typecheck"])?;
-    run("apps/wadcreator", "npm", &["test"])?;
-    run("legacy/wadd-py", ".venv/bin/python", &["-m", "pytest", "-q"])
+    run("apps/wadcreator", "npm", &["test"])
 }
 
 fn main() -> ExitCode {

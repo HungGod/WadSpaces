@@ -1,0 +1,16 @@
+# Run by labwc with /bin/sh (dash), so keep this POSIX — no bashisms.
+
+# Desktop background. selkies-desktop clears its own background surface to
+# fully transparent (CAIRO_OPERATOR_CLEAR) and only paints the icons and the
+# centre logo onto it, so a wallpaper drawn underneath shows through.
+if [ -n "${WALLPAPER}" ] && [ -f "${WALLPAPER}" ]; then
+  swaybg \
+    -m "${WALLPAPER_MODE:-center}" \
+    -c "${WALLPAPER_COLOR:-#0b0b14}" \
+    -i "${WALLPAPER}" > /dev/null 2>&1 &
+fi
+
+# Per-workspace and per-feature hooks (e.g. AUTOSTART_OBSIDIAN).
+for hook in /etc/wadspaces/autostart.d/*.sh; do
+  [ -f "${hook}" ] && . "${hook}"
+done

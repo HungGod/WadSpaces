@@ -1,0 +1,67 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+#
+# Writing-specific init. Runs after init-wadspaces-workspace (from the base
+# image) has set up the mounted Writing project (the vault) and seeded the
+# Obsidian desktop launcher. This only makes Obsidian open straight into the
+# vault:
+#
+#   1. seeds .obsidian/ so a bare repo is recognised as a vault
+#   2. registers the vault in obsidian.json with open: true
+#
+# Deliberately does NOT use `set -e`: log and continue rather than wedge the
+# container in a boot loop.
+
+DESKTOP_DIR="${DESKTOP_DIR:-/config/Desktop}"
+VAULT_DIR="${VAULT_DIR:-${DESKTOP_DIR}/Writing}"
+PIN_VAULT="${PIN_VAULT:-true}"
+
+log() { echo "[writing-vault] $*"; }
+own() { lsiown -R abc:abc "$1"; }
+
+# Obsidian treats any folder as a vault, but seeding .obsidian avoids the
+# "this folder is not a vault" prompt on a bare repo. The vault is normally
+# the host's (a mounted project, already owned by abc's uid): only what this
+# creates is chowned, never the whole tree.
+mkdir -p "${VAULT_DIR}"
+mountpoint -q "${VAULT_DIR}" || chown abc:abc "${VAULT_DIR}"
+[[ -d "${VAULT_DIR}/.obsidian" ]] || { mkdir -p "${VAULT_DIR}/.obsidian" && own "${VAULT_DIR}/.obsidian"; }
+
+# Obsidian has no "open this vault" CLI flag; the vault list lives in
+# ~/.config/obsidian/obsidian.json and the entry flagged `open: true` is the
+# one it opens at launch. The 16-char key is an arbitrary id.
+OB_CONF_DIR="/config/.config/obsidian"
+OB_JSON="${OB_CONF_DIR}/obsidian.json"
+VAULT_ID="$(printf '%s' "${VAULT_DIR}" | md5sum | cut -c1-16)"
+TS="$(date +%s)000"
+
+mkdir -p "${OB_CONF_DIR}"
+
+if [[ -s "${OB_JSON}" ]] && [[ "${PIN_VAULT}" != "true" ]]; then
+    log "obsidian.json exists and PIN_VAULT=false — leaving vault selection alone"
+else
+    [[ -s "${OB_JSON}" ]] || printf '{"vaults":{}}' > "${OB_JSON}"
+    TMP="$(mktemp)"
+    if jq --arg id "${VAULT_ID}" \
+          --arg path "${VAULT_DIR}" \
+          --argjson ts "${TS}" '
+            (.vaults // {})
+            | with_entries(.value.open = false)
+            | .[$id] = {path: $path, ts: $ts, open: true}
+            | {vaults: .}
+          ' "${OB_JSON}" > "${TMP}" 2>/dev/null && [[ -s "${TMP}" ]]; then
+        mv "${TMP}" "${OB_JSON}"
+    else
+        rm -f "${TMP}"
+        log "obsidian.json was unreadable — rewriting it"
+        printf '{"vaults":{"%s":{"path":"%s","ts":%s,"open":true}}}' \
+            "${VAULT_ID}" "${VAULT_DIR}" "${TS}" > "${OB_JSON}"
+    fi
+    log "vault ${VAULT_DIR} registered as ${VAULT_ID} and set to open on launch"
+fi
+
+own /config/.config
+
+# Drop launchers shipped by earlier versions of this image. /config survives a
+# restart, so without this the retired Dolphin shortcut would linger forever.
+rm -f "${DESKTOP_DIR}/writing-files.desktop"
