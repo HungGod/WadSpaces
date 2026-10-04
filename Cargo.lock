@@ -5770,6 +5770,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "wadbrowser"
+version = "0.1.0"
+dependencies = [
+ "gtk",
+ "javascriptcore-rs",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tracing",
+ "tracing-subscriber",
+ "webkit2gtk",
+]
+
+[[package]]
 name = "wadcreator"
 version = "0.1.0"
 dependencies = [

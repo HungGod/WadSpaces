@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- The chrome's menus and panels, drawn over the page in a transparent
+         view of their own (see browser.rs, popup_view). Talks back through
+         the "wb" script message handler. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font: 13px system-ui, sans-serif;
+        color: #e8eaed;
+        user-select: none;
+        -webkit-user-select: none;
+        /* No color-scheme here: a dark one paints the canvas, and this view
+           must stay see-through around its box. */
+      }
+      #box {
+        position: absolute;
+        inset: 0 6px 6px 0;
+        background: #2a2b2e;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+        padding: 6px;
+        overflow: hidden;
+      }
+      .item {
+        display: flex;
+        align-items: center;
+        height: 32px;
+        padding: 0 10px;
+        border-radius: 6px;
+        cursor: default;
+      }
+      .item:hover,
+      .item:focus {
+        background: rgba(255, 255, 255, 0.08);
+        outline: none;
+      }
+      .item .label {
+        flex: 1;
+      }
+      .item .key {
+        color: #9aa0a6;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="box" role="menu"></div>
+    <script>
+      "use strict";
+      const box = document.getElementById("box");
+      const send = (msg) => window.webkit.messageHandlers.wb.postMessage(JSON.stringify(msg));
+      window.wbPopup = {
+        show(kind, data) {
+          box.replaceChildren();
+          if (kind === "menu") {
+            for (const it of data.items || []) {
+              const el = document.createElement("div");
+              el.className = "item";
+              el.setAttribute("role", "menuitem");
+              el.tabIndex = 0;
+              const label = document.createElement("span");
+              label.className = "label";
+              label.textContent = it.label;
+              const key = document.createElement("span");
+              key.className = "key";
+              key.textContent = it.key || "";
+              el.append(label, key);
+              el.addEventListener("click", () => send({ kind: "menu", id: it.id }));
+              box.append(el);
+            }
+          }
+          box.firstElementChild && box.firstElementChild.focus();
+        },
+      };
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") send({ kind: "close" });
+        if (e.key === "Enter" && document.activeElement && document.activeElement.classList.contains("item"))
+          document.activeElement.click();
+      });
+    </script>
+  </body>
+</html>

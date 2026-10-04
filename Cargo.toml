@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/wadcreator/src-tauri", "apps/wadd", "apps/hud", "xtask"]
+members = ["crates/*", "apps/wadcreator/src-tauri", "apps/wadd", "apps/hud", "apps/wadbrowser", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -45,6 +45,10 @@ tauri-build = "2.7"
 tauri-plugin-single-instance = "2.5"
 tauri-plugin-dialog = "2.8"
 tauri-plugin-fs = "2.6"
+# WadBrowser drives WebKitGTK itself, beside Tauri: these must be the versions
+# wry uses, or the widgets Tauri hands back are of another type.
+gtk = "0.18"
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
 
 wiremock = "0.6"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "tower-log"] }

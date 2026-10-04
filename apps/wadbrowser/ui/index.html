@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WadBrowser</title>
+    <link rel="stylesheet" href="./chrome.css" />
+    <script type="module" src="./chrome.js"></script>
+  </head>
+  <body class="mode-full">
+    <!-- Full mode: the strip row, then the toolbar row. Focus and app modes:
+         one row, the toolbar's buttons first, then the strip. -->
+    <div id="strip" class="row" data-tauri-drag-region>
+      <div id="nav" class="group">
+        <button id="back" class="icon" title="Back (Alt+Left)" aria-label="Back">
+          <svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5" /></svg>
+        </button>
+        <button id="forward" class="icon" title="Forward (Alt+Right)" aria-label="Forward">
+          <svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5" /></svg>
+        </button>
+        <button id="reload" class="icon" title="Reload (Ctrl+R)" aria-label="Reload">
+          <svg class="reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" /></svg>
+          <svg class="stop" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+        </button>
+        <button id="home" class="icon" title="Home" aria-label="Home">
+          <svg viewBox="0 0 16 16"><path d="M2.5 7.5 8 3l5.5 4.5M4 6.5V13h3v-3.5h2V13h3V6.5" /></svg>
+        </button>
+      </div>
+      <div id="tabs" role="tablist" aria-label="Tabs"></div>
+      <button id="newtab" class="icon" title="New tab (Ctrl+T)" aria-label="New tab">
+        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+      </button>
+      <div id="appname" data-tauri-drag-region></div>
+      <div class="fill" data-tauri-drag-region></div>
+      <div id="winbtns" class="group">
+        <button id="min" class="win" title="Minimize" aria-label="Minimize">
+          <svg viewBox="0 0 16 16"><path d="M3.5 8.5h9" /></svg>
+        </button>
+        <button id="max" class="win" title="Maximize" aria-label="Maximize">
+          <svg viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1" /></svg>
+        </button>
+        <button id="close" class="win close" title="Close" aria-label="Close">
+          <svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+        </button>
+      </div>
+    </div>
+    <div id="toolbar" class="row">
+      <div id="nav-slot" class="group"></div>
+      <form id="urlform" autocomplete="off">
+        <input id="url" type="text" spellcheck="false" placeholder="Search or type an address" aria-label="Address" />
+      </form>
+      <button id="menu" class="icon" title="Menu" aria-label="Menu">
+        <svg viewBox="0 0 16 16"><circle cx="8" cy="3.5" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="8" cy="12.5" r="1" /></svg>
+      </button>
+    </div>
+    <div id="progress"></div>
+  </body>
+</html>

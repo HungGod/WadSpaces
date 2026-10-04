@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Every browser window's chrome: Tauri's core APIs, moving the window, and WadBrowser's own commands.",
+  "windows": ["w*"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
+}

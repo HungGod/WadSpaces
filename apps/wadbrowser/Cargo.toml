@@ -1,0 +1,29 @@
+[package]
+name = "wadbrowser"
+description = "WadBrowser: the WadSpaces web browser (Tauri chrome, WebKitGTK tabs)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+tauri.workspace = true
+gtk.workspace = true
+webkit2gtk.workspace = true
+# What WebKit hands back from scripts (the version webkit2gtk uses).
+javascriptcore-rs = "=1.1.2"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[features]
+default = ["custom-protocol"]
+# The chrome is static files in ui/, embedded in the binary: there is no dev server.
+custom-protocol = ["tauri/custom-protocol"]
+# A scripted run that checks the window layout, app ids and moving tabs between
+# windows (spike/run.sh). Never in the image.
+spike = []
