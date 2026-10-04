@@ -48,6 +48,18 @@ pub fn start(app: &AppHandle) -> bool {
     if let Ok(urls) = std::env::var("WADBROWSER_SPIKE_SITES") {
         return sites(app, dir, urls.split_whitespace().map(str::to_owned).collect());
     }
+    if std::env::var_os("WADBROWSER_SPIKE_CLOSE_SOURCE").is_some() {
+        return close_source(app, dir);
+    }
+    if std::env::var_os("WADBROWSER_SPIKE_DRAG").is_some() {
+        return drag(app, dir);
+    }
+    if std::env::var_os("WADBROWSER_SPIKE_DRAG_OUT").is_some() {
+        return drag_out(app, dir);
+    }
+    if std::env::var_os("WADBROWSER_SPIKE_EDGES").is_some() {
+        return edges(app);
+    }
     let w1 = match browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
     {
         Ok(l) => l,
@@ -374,4 +386,249 @@ fn chrome_report(label: &str) {
         Ok(v) => println!("SPIKE chrome {label} {}", v.to_str()),
         Err(e) => println!("SPIKE chrome-failed {label} {e}"),
     });
+}
+
+/// A tab moved out of a window that then closes (its last tab gone): the
+/// tab detached first, then the window's last tab moved after it.
+fn close_source(app: &AppHandle, dir: PathBuf) -> bool {
+    let Ok(w1) = browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
+    else {
+        return true;
+    };
+    // data: pages, so a page made again loads (spike.localhost doesn't).
+    let page = |name: &str, bg: &str| {
+        format!(
+            "data:text/html,<title>Page {name}</title><body style='background:{bg};font:40px sans-serif'><h1>{name}</h1><input id=i value='typed'><script>window.born=Date.now()</script>"
+        )
+    };
+    let x = probe::tabs(&w1)[0];
+    if let Some(v) = probe::view(&w1, x) {
+        v.load_uri(&page("X", "%23f4a4a4"));
+    }
+    let y = probe::new_tab(&w1, &page("Y", "%23a4c2f4")).unwrap_or_default();
+    let app2 = app.clone();
+    let (w1b, dir2) = (w1.clone(), dir.clone());
+    glib::timeout_add_local_once(Duration::from_millis(2500), move || {
+        let w2 = probe::open_with_tab(&app2, Opts::default(), &w1b, y).unwrap();
+        println!("SPIKE detached Y to {w2}");
+        let (app3, w1c) = (app2.clone(), w1b.clone());
+        glib::timeout_add_local_once(Duration::from_millis(2000), move || {
+            let r = browser::move_tab(&app3, &w1c, x, Some(&w2), None);
+            println!("SPIKE moved X into {w2}: {r:?}, windows {:?}", probe::labels());
+            let (w2b, dir3) = (w2.clone(), dir2.clone());
+            glib::timeout_add_local_once(Duration::from_millis(2500), move || {
+                eval(&w2b, x, "x-after-move");
+                shot(&dir3, "c1-moved");
+                if let Some(v) = probe::view(&w2b, x) {
+                    v.reload();
+                }
+                let (w2c, dir4) = (w2b.clone(), dir3.clone());
+                glib::timeout_add_local_once(Duration::from_millis(2500), move || {
+                    eval(&w2c, x, "x-after-reload");
+                    shot(&dir4, "c2-reloaded");
+                });
+            });
+        });
+    });
+    let app = app.clone();
+    glib::timeout_add_local_once(Duration::from_millis(14000), move || {
+        println!("SPIKE done");
+        app.exit(0);
+    });
+    true
+}
+
+thread_local! {
+    static POINTER: std::cell::RefCell<Option<crate::vpointer::VPointer>> =
+        std::cell::RefCell::new(crate::vpointer::VPointer::new((1280, 800)));
+}
+
+/// The virtual pointer: `set x y`, `press button1`, `release button1`.
+fn pointer(cmd: &str) {
+    POINTER.with_borrow_mut(|p| {
+        let Some(p) = p else {
+            println!("SPIKE no-virtual-pointer");
+            return;
+        };
+        let parts: Vec<&str> = cmd.split(' ').collect();
+        match parts.as_slice() {
+            ["set", x, y] => p.move_to(x.parse().unwrap_or(0), y.parse().unwrap_or(0)),
+            ["press", _] => p.button(true),
+            ["release", _] => p.button(false),
+            _ => {}
+        }
+    });
+}
+
+/// Steps one after another: (wait ms, what).
+fn steps(list: Vec<(u64, Box<dyn FnOnce()>)>) {
+    let mut at = 0;
+    for (wait, f) in list {
+        at += wait;
+        glib::timeout_add_local_once(Duration::from_millis(at), f);
+    }
+}
+
+fn press_drag_release(from: (i32, i32), to: (i32, i32), escape: bool) -> Vec<(u64, Box<dyn FnOnce()>)> {
+    let mut v: Vec<(u64, Box<dyn FnOnce()>)> = vec![
+        (100, Box::new(move || pointer(&format!("set {} {}", from.0, from.1)))),
+        (150, Box::new(|| pointer("press button1"))),
+    ];
+    // Moved in steps, as a hand would (GTK starts a drag past a threshold).
+    for i in 1..=10 {
+        let (x, y) = (from.0 + (to.0 - from.0) * i / 10, from.1 + (to.1 - from.1) * i / 10);
+        v.push((60, Box::new(move || pointer(&format!("set {x} {y}")))));
+    }
+    let _ = escape;
+    v.push((200, Box::new(|| pointer("release button1"))));
+    v
+}
+
+/// Real drags with sway's pointer: a tab dropped on the page (a window of its
+/// own), then one dropped on the other window's chrome away from its tabs
+/// (docked there).
+fn drag(app: &AppHandle, dir: PathBuf) -> bool {
+    let Ok(w1) = browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
+    else {
+        return true;
+    };
+    let a = probe::tabs(&w1)[0];
+    load(&w1, a, "A", "#9fd8a4");
+    let b = probe::new_tab(&w1, "").unwrap_or_default();
+    load(&w1, b, "B", "#a4c2f4");
+    let c = probe::new_tab(&w1, "").unwrap_or_default();
+    load(&w1, c, "C", "#f4d4a4");
+    let report = |what: &'static str| {
+        Box::new(move || {
+            let ws: Vec<String> = probe::labels().iter().map(|l| format!("{l}:{:?}", probe::tabs(l))).collect();
+            println!("SPIKE {what} {}", ws.join(" "));
+        }) as Box<dyn FnOnce()>
+    };
+    let mut list: Vec<(u64, Box<dyn FnOnce()>)> = vec![(2500, report("start"))];
+    // First a plain click on tab A (x≈100): does the pointer reach the chrome?
+    let w = w1.clone();
+    list.push((100, Box::new(move || println!("SPIKE active before click {:?}", probe::active(&w)))));
+    list.push((100, Box::new(|| pointer("set 100 19"))));
+    list.push((100, Box::new(|| pointer("press button1"))));
+    list.push((100, Box::new(|| pointer("release button1"))));
+    let w = w1.clone();
+    list.push((500, Box::new(move || println!("SPIKE active after click {:?}", probe::active(&w)))));
+    // Tab B (second in the strip, about x=310 y=19) down onto the page.
+    list.extend(press_drag_release((310, 19), (500, 500), false));
+    list.push((1500, report("after-drop-on-page")));
+    let d = dir.clone();
+    list.push((200, Box::new(move || shot(&d, "d1-detached"))));
+    // Now two windows side by side (sway tiles them): w1 on the left half,
+    // the new one on the right. Tab C (w1's second, x≈310) onto the right
+    // window's toolbar row, away from its tabs (x≈1100 y≈57).
+    list.extend(press_drag_release((310, 19), (1100, 57), false));
+    list.push((1500, report("after-drop-on-chrome")));
+    list.push((200, Box::new(move || shot(&dir, "d2-docked"))));
+    let app = app.clone();
+    list.push((
+        500,
+        Box::new(move || {
+            println!("SPIKE done");
+            app.exit(0);
+        }),
+    ));
+    steps(list);
+    true
+}
+
+/// A tab dragged off the window onto the bare desktop (run.sh floats the
+/// windows, so there is some): a window of its own.
+fn drag_out(app: &AppHandle, dir: PathBuf) -> bool {
+    let Ok(w1) = browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
+    else {
+        return true;
+    };
+    let a = probe::tabs(&w1)[0];
+    load(&w1, a, "A", "#9fd8a4");
+    let b = probe::new_tab(&w1, "").unwrap_or_default();
+    load(&w1, b, "B", "#a4c2f4");
+    let report = |what: &'static str| {
+        Box::new(move || {
+            let ws: Vec<String> = probe::labels().iter().map(|l| format!("{l}:{:?}", probe::tabs(l))).collect();
+            println!("SPIKE {what} {}", ws.join(" "));
+        }) as Box<dyn FnOnce()>
+    };
+    let mut list: Vec<(u64, Box<dyn FnOnce()>)> = vec![(2500, report("start"))];
+    let d = dir.clone();
+    list.push((100, Box::new(move || shot(&d, "o0-start"))));
+    // The window floats centred (1100×750 on 1280×800: from x 90, y 25);
+    // tab B is at about (310, 19) in it. Off to the bottom-left corner.
+    list.extend(press_drag_release((400, 44), (20, 790), false));
+    list.push((1500, report("after-drop-outside")));
+    let d = dir.clone();
+    list.push((200, Box::new(move || shot(&d, "o1-outside"))));
+    list.push((
+        100,
+        Box::new(move || {
+            for w in probe::labels() {
+                for t in probe::tabs(&w) {
+                    if let Some(v) = probe::view(&w, t) {
+                        let r = v.allocation();
+                        println!(
+                            "SPIKE view {w}/{t} visible={} mapped={} {}x{}",
+                            v.is_visible(),
+                            v.is_mapped(),
+                            r.width(),
+                            r.height()
+                        );
+                    }
+                }
+                layout(&w);
+            }
+        }),
+    ));
+    list.push((3000, Box::new(move || shot(&dir, "o2-later"))));
+    let app = app.clone();
+    list.push((
+        500,
+        Box::new(move || {
+            println!("SPIKE done");
+            app.exit(0);
+        }),
+    ));
+    steps(list);
+    true
+}
+
+/// Pressing and dragging at the bottom of the chrome (just under the URL bar)
+/// must not resize the window; at the window's bottom edge it must.
+fn edges(app: &AppHandle) -> bool {
+    let Ok(w1) = browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
+    else {
+        return true;
+    };
+    let size = {
+        let w1 = w1.clone();
+        move |what: &'static str| {
+            let w1 = w1.clone();
+            Box::new(move || {
+                if let Some(w) = probe::window(&w1) {
+                    let s = w.inner_size().unwrap();
+                    println!("SPIKE size {what} {}x{}", s.width, s.height);
+                }
+            }) as Box<dyn FnOnce()>
+        }
+    };
+    // Floating, centred: the window spans x 90..1190, y 25..775; its chrome's
+    // bottom is at y 25+76.
+    let mut list: Vec<(u64, Box<dyn FnOnce()>)> = vec![(2500, size("start"))];
+    list.extend(press_drag_release((600, 25 + 74), (600, 25 + 74 + 40), false));
+    list.push((800, size("after-chrome-bottom")));
+    list.extend(press_drag_release((600, 25 + 748), (600, 25 + 748 - 60), false));
+    list.push((800, size("after-window-bottom")));
+    let app = app.clone();
+    list.push((
+        300,
+        Box::new(move || {
+            println!("SPIKE done");
+            app.exit(0);
+        }),
+    ));
+    steps(list);
+    true
 }

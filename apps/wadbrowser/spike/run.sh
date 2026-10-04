@@ -29,6 +29,9 @@ cat > "${OUT}/sway.conf" <<CONF
 output HEADLESS-1 resolution 1280x800
 default_border none
 CONF
+# Windows float (centred, their own size) instead of tiling: a desktop with
+# room around them, to drag tabs out onto.
+[[ -n "${WADBROWSER_SPIKE_DRAG_OUT:-}${WADBROWSER_SPIKE_EDGES:-}" ]] && echo 'for_window [app_id=".*"] floating enable' >> "${OUT}/sway.conf"
 cat > "${OUT}/shot.sh" <<SHOT
 #!/usr/bin/env bash
 export XDG_RUNTIME_DIR="${RT}" WAYLAND_DISPLAY=wayland-1 ${LIBS:+LD_LIBRARY_PATH=${LIBS}}
@@ -53,7 +56,9 @@ env WAYLAND_DISPLAY="${RT_NAME}/wayland-1" GDK_BACKEND=wayland dbus-run-session 
     XDG_DATA_HOME="${OUT}/data" XDG_CACHE_HOME="${OUT}/cache" XDG_CONFIG_HOME="${OUT}/config" \
     WAYLAND_DEBUG=client \
     WADBROWSER_SPIKE_DIR="${OUT}" WADBROWSER_SPIKE_SHOT="${OUT}/shot.sh" \
+    ${WADBROWSER_SPIKE_DRAG:+WADBROWSER_SPIKE_DRAG=1} ${WADBROWSER_SPIKE_DRAG_OUT:+WADBROWSER_SPIKE_DRAG_OUT=1} ${WADBROWSER_SPIKE_EDGES:+WADBROWSER_SPIKE_EDGES=1} \
     ${WADBROWSER_SPIKE_SITES:+WADBROWSER_SPIKE_SITES="${WADBROWSER_SPIKE_SITES}"} \
+    ${WADBROWSER_SPIKE_CLOSE_SOURCE:+WADBROWSER_SPIKE_CLOSE_SOURCE=1} \
     HOME="${OUT}" bash -c '
         ulimit -c 0
         timeout 240 "$0"

@@ -78,16 +78,19 @@ pub fn tab_drop(app: AppHandle, window: WebviewWindow, index: usize) -> Result<(
     browser::move_tab(&app, &from, id, Some(window.label()), Some(index))
 }
 
-/// The drag ended. With `detach` (no strip took it), the tab gets a window of
-/// its own, unless it's its window's only tab. A drop on another window may
-/// still be on its way, so this waits a moment for it.
+/// The page's dragend: the same as GTK's (`drag_ended`), whichever comes first.
 #[tauri::command]
-pub fn tab_drag_end(app: AppHandle, detach: bool) {
-    if !detach {
-        DRAG.set(None);
-        return;
-    }
-    glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
+pub fn tab_drag_end(app: AppHandle) {
+    drag_ended(&app);
+}
+
+/// A tab drag ended. If no tab strip took it (a drop anywhere else: the
+/// page, the desktop, another app), the tab gets a window of its own, unless
+/// it's its window's only tab. A drop on a strip may still be on its way (an
+/// IPC call from that window's page), so this waits a moment for it.
+pub fn drag_ended(app: &AppHandle) {
+    let app = app.clone();
+    glib::timeout_add_local_once(std::time::Duration::from_millis(250), move || {
         let Some((from, id)) = DRAG.take() else { return };
         if with(&from, |b| b.tabs.len() > 1) == Some(true)
             && let Err(e) = browser::move_tab(&app, &from, id, None, None)
@@ -95,6 +98,11 @@ pub fn tab_drag_end(app: AppHandle, detach: bool) {
             tracing::warn!(%e, "can't detach the tab");
         }
     });
+}
+
+/// Esc during a tab drag: it goes nowhere.
+pub fn drag_cancelled() {
+    DRAG.set(None);
 }
 
 // ---- menus and panels ----

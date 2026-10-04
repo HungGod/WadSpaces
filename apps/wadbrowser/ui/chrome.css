@@ -420,9 +420,12 @@ body.mode-app #identity {
   display: flex;
 }
 body.mode-app.single #tabs,
-body.mode-app #newtab,
 body.no-newtab #newtab {
   display: none;
+}
+/* A dragged tab over this window: it can be dropped anywhere here. */
+body.docking {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 body.mode-app:not(.single) #appname {
   display: none;

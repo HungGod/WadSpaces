@@ -38,6 +38,8 @@ mod session;
 mod spike;
 mod tab;
 mod urlbar;
+#[cfg(feature = "spike")]
+mod vpointer;
 mod zoom;
 
 pub use browser::Mode;

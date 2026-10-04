@@ -173,11 +173,12 @@ function tabEl(id) {
     if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
     invoke("tab_drag_begin", { id });
   });
-  el.addEventListener("dragend", (e) => {
+  el.addEventListener("dragend", () => {
     el.classList.remove("dragging");
     clearDropMarks();
-    // Dropped where no tab strip took it: the tab gets a window of its own.
-    invoke("tab_drag_end", { detach: e.dataTransfer?.dropEffect === "none" });
+    // Rust decides: dropped where no window's chrome took it (the page, the
+    // desktop, another app), the tab gets a window of its own.
+    invoke("tab_drag_end");
   });
   return el;
 }
@@ -225,18 +226,22 @@ function tabMenu(id, x, y) {
 }
 
 // ---- dropping tabs (from this window or another) ----
+// The whole chrome takes a dragged tab, not just the strip: it lands where
+// the pointer is along the tabs, or after them.
 
 /** @param {DragEvent} e */
 function dropIndex(e) {
-  const tabs = [...tabsEl.children];
+  const tabs = [...tabsEl.children].filter((el) => /** @type {HTMLElement} */ (el).offsetParent !== null);
+  if (!tabs.length) return tabsEl.children.length;
   const i = tabs.findIndex((el) => {
     const r = el.getBoundingClientRect();
     return e.clientX < r.left + r.width / 2;
   });
-  return i < 0 ? tabs.length : i;
+  return i < 0 ? tabsEl.children.length : [...tabsEl.children].indexOf(tabs[i]);
 }
 
 function clearDropMarks() {
+  document.body.classList.remove("docking");
   for (const el of tabsEl.children) el.classList.remove("drop-before", "drop-after");
 }
 
@@ -245,20 +250,22 @@ function isTabDrag(e) {
   return !!e.dataTransfer?.types.includes("application/x-wadbrowser-tab");
 }
 
-$("strip").addEventListener("dragover", (e) => {
+document.addEventListener("dragover", (e) => {
   if (!isTabDrag(e)) return;
   e.preventDefault();
   if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
   clearDropMarks();
+  document.body.classList.add("docking");
   const i = dropIndex(e);
   const tabs = tabsEl.children;
   if (i < tabs.length) tabs[i].classList.add("drop-before");
   else tabs[tabs.length - 1]?.classList.add("drop-after");
 });
-$("strip").addEventListener("dragleave", (e) => {
-  if (!$("strip").contains(/** @type {Node | null} */ (e.relatedTarget))) clearDropMarks();
+document.addEventListener("dragleave", (e) => {
+  // Out of the chrome altogether (not just from one element to another).
+  if (!e.relatedTarget) clearDropMarks();
 });
-$("strip").addEventListener("drop", (e) => {
+document.addEventListener("drop", (e) => {
   if (!isTabDrag(e)) return;
   e.preventDefault();
   clearDropMarks();

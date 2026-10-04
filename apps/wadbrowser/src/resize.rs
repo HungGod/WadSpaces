@@ -10,6 +10,34 @@ use gtk::prelude::*;
 
 const INSET: f64 = 5.0;
 
+/// Takes the edge-resizing on `widget` over from Tauri's handlers (its
+/// undecorated_resizing, on the view it made): they're disconnected, then
+/// ours attached.
+pub fn replace(widget: &gtk::Widget) {
+    use gtk::glib::gobject_ffi;
+    use gtk::glib::translate::{IntoGlib, ToGlibPtr};
+    for signal in ["motion-notify-event", "button-press-event", "touch-event"] {
+        let Some(id) = gtk::glib::subclass::signal::SignalId::lookup(signal, gtk::Widget::static_type()) else {
+            continue;
+        };
+        let instance: *mut gtk::glib::gobject_ffi::GObject = widget.upcast_ref::<gtk::glib::Object>().to_glib_none().0;
+        // SAFETY: a live widget; only the handlers connected to these three
+        // signals on it go (WebKit's own are class handlers, not these).
+        unsafe {
+            gobject_ffi::g_signal_handlers_disconnect_matched(
+                instance as *mut _,
+                gobject_ffi::G_SIGNAL_MATCH_ID,
+                id.into_glib(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+        }
+    }
+    attach(widget);
+}
+
 pub fn attach(widget: &gtk::Widget) {
     widget.add_events(
         gdk::EventMask::POINTER_MOTION_MASK | gdk::EventMask::BUTTON_PRESS_MASK | gdk::EventMask::LEAVE_NOTIFY_MASK,
