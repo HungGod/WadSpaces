@@ -17,7 +17,9 @@ OUT="${1:-${XDG_RUNTIME_DIR}/wadbrowser-spike}"
 RT_NAME=wadbrowser-spike-sway
 RT="${XDG_RUNTIME_DIR}/${RT_NAME}"
 rm -rf "${OUT}" "${RT}"
-mkdir -p "${OUT}"/{data,cache,config}
+mkdir -p "${OUT}"/{data,cache,config,downloads}
+# Downloads land here, not in your own Downloads folder.
+echo "XDG_DOWNLOAD_DIR=\"${OUT}/downloads\"" > "${OUT}/config/user-dirs.dirs"
 mkdir -m 700 "${RT}"
 
 if command -v sway > /dev/null && command -v grim > /dev/null; then BIN=""; LIBS=""
@@ -52,7 +54,7 @@ env WAYLAND_DISPLAY="${RT_NAME}/wayland-1" GDK_BACKEND=wayland dbus-run-session 
     WAYLAND_DEBUG=client \
     WADBROWSER_SPIKE_DIR="${OUT}" WADBROWSER_SPIKE_SHOT="${OUT}/shot.sh" \
     ${WADBROWSER_SPIKE_SITES:+WADBROWSER_SPIKE_SITES="${WADBROWSER_SPIKE_SITES}"} \
-    bash -c '
+    HOME="${OUT}" bash -c '
         ulimit -c 0
         timeout 240 "$0"
         unset WAYLAND_DEBUG

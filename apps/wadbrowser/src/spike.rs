@@ -195,6 +195,49 @@ pub fn start(app: &AppHandle) -> bool {
             Box::new(move || shot(&dir, "5-woken"))
         }),
         (14000, {
+            let w1 = w1.clone();
+            Box::new(move || {
+                // A download (to the Downloads folder run.sh sets) and a find.
+                probe::new_tab(
+                    &w1,
+                    "data:text/html,<title>Dl</title><p>Lorem one, Lorem two, lorem three</p>\
+                     <a id=d download=hello.txt href='data:text/plain,hello'>x</a>\
+                     <script>setTimeout(() => document.getElementById('d').click(), 300)</script>",
+                );
+            })
+        }),
+        (16000, {
+            let (w1, app) = (w1.clone(), app.clone());
+            Box::new(move || {
+                let items: Vec<String> = crate::downloads::list()
+                    .iter()
+                    .map(|i| format!("{}:{:?}:{}", i.name, i.state, i.received))
+                    .collect();
+                println!("SPIKE downloads {items:?}");
+                crate::actions::run(&app, &w1, crate::actions::Action::Find);
+                if let Some(c) = probe::chrome(&w1) {
+                    // Typed into the find row: it shows the count for what's in it.
+                    let w1 = w1.clone();
+                    c.evaluate_javascript(
+                        r#"const f = document.getElementById("findtext"); f.value = "lorem"; f.dispatchEvent(new Event("input"));"#,
+                        None,
+                        None,
+                        None::<&gtk::gio::Cancellable>,
+                        move |_| {
+                            let _ = &w1;
+                        },
+                    );
+                }
+            })
+        }),
+        (17500, {
+            let (w1, dir) = (w1.clone(), dir.clone());
+            Box::new(move || {
+                chrome_report(&w1);
+                shot(&dir, "6-find");
+            })
+        }),
+        (18500, {
             let app = app.clone();
             Box::new(move || {
                 println!("SPIKE done");
@@ -324,7 +367,8 @@ fn sites(app: &AppHandle, dir: PathBuf, urls: Vec<String>) -> bool {
 fn chrome_report(label: &str) {
     let Some(c) = probe::chrome(label) else { return };
     let js = r#"JSON.stringify({ body: document.body.className, tabs: document.getElementById("tabs").children.length,
-        url: document.getElementById("url").value, errors: window.__wbErrors, vis: document.visibilityState, focus: document.hasFocus() })"#;
+        url: document.getElementById("url").value, errors: window.__wbErrors,
+        find: document.getElementById("findcount").textContent, downloads: !document.getElementById("downloads").hidden })"#;
     let label = label.to_owned();
     c.evaluate_javascript(js, None, None, None::<&gtk::gio::Cancellable>, move |r| match r {
         Ok(v) => println!("SPIKE chrome {label} {}", v.to_str()),
