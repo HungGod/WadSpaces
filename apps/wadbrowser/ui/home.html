@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- wadbrowser://home: new tabs and Home when no home page is set
+         (pages.rs fills in the logo, the search box and its hint). -->
+    <title>New tab</title>
+    <meta name="color-scheme" content="dark light" />
+    <style>
+      :root {
+        --bg: #202124;
+        --field: #2a2b2e;
+        --text: #e8eaed;
+        --muted: #9aa0a6;
+        --ring: rgba(255, 255, 255, 0.12);
+        --accent: #d4ff3d;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f6f6f7;
+          --field: #ffffff;
+          --text: #202124;
+          --muted: #5f6368;
+          --ring: rgba(0, 0, 0, 0.14);
+          --accent: #202124;
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px system-ui, sans-serif;
+      }
+      main {
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        padding: 0 24px 12vh;
+        box-sizing: border-box;
+      }
+      .logo svg {
+        display: block;
+        width: 132px;
+        height: 132px;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      form {
+        width: min(580px, 100%);
+        margin: 0;
+      }
+      input {
+        width: 100%;
+        height: 48px;
+        box-sizing: border-box;
+        border: 1px solid var(--ring);
+        border-radius: 24px;
+        padding: 0 22px;
+        background: var(--field);
+        color: var(--text);
+        font: inherit;
+        font-size: 16px;
+        outline: none;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+      }
+      input::placeholder {
+        color: var(--muted);
+      }
+      input:focus {
+        border-color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="logo" aria-hidden="true">{logo}</div>
+      {search}
+    </main>
+    <script>
+      "use strict";
+      const form = document.getElementById("search");
+      if (form) {
+        const q = document.getElementById("q");
+        q.focus();
+        // WadBrowser decides what it is (an address, or a search), as the
+        // URL bar does: wadbrowser-action:go is caught before it loads.
+        form.addEventListener("submit", (e) => {
+          e.preventDefault();
+          if (q.value.trim()) location.href = "wadbrowser-action:go?q=" + encodeURIComponent(q.value);
+        });
+      }
+    </script>
+  </body>
+</html>

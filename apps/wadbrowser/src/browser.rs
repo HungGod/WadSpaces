@@ -55,12 +55,21 @@ impl Opts {
         self.profile.as_deref().unwrap_or(profile::DEFAULT)
     }
 
-    /// Where Home and a new tab go: the app's start page, or the configured home.
+    /// Where Home and a new tab go: the app's start page, the configured
+    /// home, or WadBrowser's own page (with no search box in Focus).
     pub fn home(&self) -> String {
-        match (self.mode, &self.start) {
-            (Mode::App, Some(start)) => start.clone(),
-            _ => config::get().home.clone(),
+        match (self.mode, &self.start, &config::get().home) {
+            (Mode::App, Some(start), _) => start.clone(),
+            (_, _, Some(home)) => home.clone(),
+            (Mode::Focus, ..) => crate::pages::HOME_PLAIN.into(),
+            _ => crate::pages::HOME.into(),
         }
+    }
+
+    /// Focus windows only open new tabs at a page the workspace chose: its
+    /// own page has no way to go anywhere.
+    pub fn can_new_tab(&self) -> bool {
+        self.mode != Mode::Focus || config::get().home.is_some()
     }
 }
 
@@ -526,7 +535,7 @@ impl Browser {
         let Some(mut tab) = self.take(id) else { return };
         tab.refresh();
         let saved = tab.live.as_ref().and_then(|v| v.session_state()).and_then(|s| s.serialize()).or(tab.saved.take());
-        if !tab.url.is_empty() && tab.url != "about:blank" {
+        if !tab.url.is_empty() && tab.url != "about:blank" && !crate::pages::is_home(&tab.url) {
             self.closed.push(Closed { url: tab.url.clone(), saved });
             if self.closed.len() > CLOSED_KEPT {
                 self.closed.remove(0);
@@ -651,7 +660,7 @@ impl Browser {
             name: self.opts.name.as_deref(),
             app_icon: self.opts.icon.as_deref().and_then(crate::tab::icon_data_url),
             home_host,
-            can_new_tab: self.opts.mode != Mode::Focus || self.opts.home() != "about:blank",
+            can_new_tab: self.opts.can_new_tab(),
             tabs,
             active: self.active,
             zoom: self.state_zoom(),

@@ -66,6 +66,9 @@ pub fn start(app: &AppHandle) -> bool {
     if std::env::var_os("WADBROWSER_SPIKE_ROUNDTRIP").is_some() {
         return roundtrip(app, dir);
     }
+    if std::env::var_os("WADBROWSER_SPIKE_HOME").is_some() {
+        return home(app, dir);
+    }
     let w1 = match browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
     {
         Ok(l) => l,
@@ -807,6 +810,67 @@ fn roundtrip(app: &AppHandle, dir: PathBuf) -> bool {
     let app = app.clone();
     list.push((
         800,
+        Box::new(move || {
+            println!("SPIKE done");
+            app.exit(0);
+        }),
+    ));
+    steps(list);
+    true
+}
+
+/// The home page (no home set): its look, and its search box (an address, and
+/// a search); then a Focus window's, which has no search box.
+fn home(app: &AppHandle, dir: PathBuf) -> bool {
+    let Ok(w1) = browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![])) else {
+        return true;
+    };
+    let typed = |label: String, text: &'static str| {
+        Box::new(move || {
+            let Some(v) = probe::active(&label).and_then(|t| probe::view(&label, t)) else { return };
+            let js = format!(
+                "{{ const q = document.getElementById('q'); q.value = {text:?}; q.form.requestSubmit(); }} 'sent'"
+            );
+            v.evaluate_javascript(&js, None, None, None::<&gtk::gio::Cancellable>, |r| {
+                if let Err(e) = r {
+                    println!("SPIKE type-failed {e}");
+                }
+            });
+        }) as Box<dyn FnOnce()>
+    };
+    let at = |label: String, what: &'static str| {
+        Box::new(move || {
+            let Some(v) = probe::active(&label).and_then(|t| probe::view(&label, t)) else { return };
+            println!("SPIKE {what} {} \"{}\"", v.uri().unwrap_or_default(), v.title().unwrap_or_default());
+        }) as Box<dyn FnOnce()>
+    };
+    let mut list: Vec<(u64, Box<dyn FnOnce()>)> = vec![(2500, at(w1.clone(), "home"))];
+    let d = dir.clone();
+    list.push((100, Box::new(move || shot(&d, "h1-home"))));
+    list.push((100, typed(w1.clone(), "example.com")));
+    list.push((2500, at(w1.clone(), "typed-address")));
+    let w = w1.clone();
+    list.push((
+        100,
+        Box::new(move || {
+            if let Some(v) = probe::active(&w).and_then(|t| probe::view(&w, t)) {
+                v.go_back();
+            }
+        }),
+    ));
+    list.push((1500, typed(w1.clone(), "wadspaces browser")));
+    list.push((3000, at(w1.clone(), "typed-search")));
+    let app2 = app.clone();
+    list.push((
+        100,
+        Box::new(move || {
+            let _ = browser::open(&app2, Opts { mode: Mode::Focus, ..Default::default() }, First::Urls(vec![]));
+        }),
+    ));
+    list.push((2500, Box::new(move || shot(&dir, "h2-focus"))));
+    let app = app.clone();
+    list.push((
+        500,
         Box::new(move || {
             println!("SPIKE done");
             app.exit(0);

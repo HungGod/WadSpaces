@@ -11,6 +11,68 @@ use std::collections::HashMap;
 use webkit2gtk::{NetworkError, PolicyError, WebContextExt, WebProcessTerminationReason, WebView, WebViewExt};
 
 pub const ACTION_SCHEME: &str = "wadbrowser-action";
+/// WadBrowser's own pages (served by `serve`).
+pub const SCHEME: &str = "wadbrowser";
+/// The home page: the WadSpaces logo and a search box.
+pub const HOME: &str = "wadbrowser://home";
+/// The same without the search box (Focus windows: nowhere to go from it).
+pub const HOME_PLAIN: &str = "wadbrowser://home?search=0";
+
+pub fn is_home(uri: &str) -> bool {
+    uri == HOME || uri.starts_with("wadbrowser://home?") || uri == "wadbrowser://home/"
+}
+
+/// Serves wadbrowser:// pages (registered on each profile's context).
+pub fn serve(req: &webkit2gtk::URISchemeRequest) {
+    use webkit2gtk::URISchemeRequestExt;
+    let uri = req.uri().map(String::from).unwrap_or_default();
+    if !is_home(&uri) {
+        let mut e = glib::Error::new(gio::IOErrorEnum::NotFound, &format!("no page {uri}"));
+        req.finish_error(&mut e);
+        return;
+    }
+    let html = home_html(!uri.contains("search=0"));
+    let bytes = glib::Bytes::from_owned(html.into_bytes());
+    let len = bytes.len() as i64;
+    req.finish(&gio::MemoryInputStream::from_bytes(&bytes), len, Some("text/html"));
+}
+
+const LOGO: &str = include_str!("../icons/hicolor/scalable/apps/wadbrowser.svg");
+
+/// The home page, with or without its search box.
+pub fn home_html(search: bool) -> String {
+    let logo = LOGO.find("<svg").map_or(LOGO, |i| &LOGO[i..]);
+    let search = if search {
+        format!(
+            r#"<form id="search" autocomplete="off"><input id="q" type="text" spellcheck="false" aria-label="Search or type an address" placeholder="{}"></form>"#,
+            esc(&format!("Search {} or type an address", engine_name(&crate::config::get().search)))
+        )
+    } else {
+        String::new()
+    };
+    include_str!("../ui/home.html").replace("{logo}", logo).replace("{search}", &search)
+}
+
+/// "DuckDuckGo" for https://duckduckgo.com/?q=%s, else the search's host.
+fn engine_name(template: &str) -> String {
+    let host = tauri::Url::parse(&template.replace("%s", "x"))
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_owned()))
+        .unwrap_or_default();
+    for (key, name) in [
+        ("duckduckgo.", "DuckDuckGo"),
+        ("google.", "Google"),
+        ("bing.", "Bing"),
+        ("startpage.", "Startpage"),
+        ("kagi.", "Kagi"),
+        ("ecosia.", "Ecosia"),
+    ] {
+        if host.starts_with(key) {
+            return name.into();
+        }
+    }
+    if host.is_empty() { "the web".into() } else { host }
+}
 
 thread_local! {
     /// A certificate the user may accept, by tab view: (cert, host, address).
@@ -70,6 +132,13 @@ pub fn action(view: &WebView, uri: &str) {
                 view.load_uri(&u);
             }
         }
+        // The home page's search box: an address, or a search (as the URL bar).
+        a if a.starts_with("go?q=") => {
+            let q = percent_decode(&a["go?q=".len()..]);
+            if let Some(url) = urlbar::resolve(&q, &crate::config::get().search) {
+                view.load_uri(&url);
+            }
+        }
         "allow-tls" => {
             if let Some((cert, host, uri)) = TLS.with_borrow_mut(|t| t.remove(&crate::tab::key(view)))
                 && let Some(ctx) = view.context()
@@ -91,6 +160,25 @@ fn show(view: &WebView, uri: &str, title: &str, body: &str, buttons: &[(&str, &s
     view.load_alternate_html(&html, uri, None);
 }
 
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            out.push(v);
+            i += 3;
+        } else {
+            out.push(if b[i] == b'+' { b' ' } else { b[i] });
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
@@ -104,3 +192,17 @@ h1 { font-size: 24px; margin: 0 0 12px; }
 .detail { color: var(--muted); font-size: 13px; word-break: break-word; }
 .btn { display: inline-block; margin: 12px 10px 0 0; padding: 8px 18px; border-radius: 18px; background: var(--btn); color: var(--btnfg); text-decoration: none; }
 </style></head><body><main><h1>{title}</h1>{body}<div>{buttons}</div></main></body></html>"#;
+
+#[cfg(test)]
+mod tests {
+    use super::percent_decode;
+
+    #[test]
+    fn decodes_what_the_home_page_sends() {
+        assert_eq!(percent_decode("rust%20%2B%20gtk"), "rust + gtk");
+        assert_eq!(percent_decode("a+b"), "a b");
+        assert_eq!(percent_decode("caf%C3%A9"), "café");
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz%é"), "%zz%é");
+    }
+}

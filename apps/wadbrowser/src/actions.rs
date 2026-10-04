@@ -108,7 +108,7 @@ fn act(b: &mut browser::Browser, label: &str, action: Action) {
         let _ = b.window.emit_to(label, event, ());
     };
     match action {
-        NewTab if b.opts.mode != Mode::Focus || b.opts.home() != "about:blank" => {
+        NewTab if b.opts.can_new_tab() => {
             b.new_tab(None, false);
         }
         NewTab => {}

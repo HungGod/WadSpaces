@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! default = focus            # what links open in: full (URL bar) or focus
-//! home = https://example.com # new tabs and the home button
+//! home = https://example.com # new tabs and the home button (unset: WadBrowser's own page)
 //! search = https://duckduckgo.com/?q=%s
 //! hibernate_after_minutes = 15   # 0: never
 //! gpu = auto                 # auto | on | off
@@ -19,7 +19,8 @@ pub const SYSTEM: &str = "/etc/wadspaces/wadbrowser.conf";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub default_mode: Mode,
-    pub home: String,
+    /// None: WadBrowser's own page (wadbrowser://home).
+    pub home: Option<String>,
     pub search: String,
     pub hibernate_after_minutes: u64,
     pub gpu: Option<String>,
@@ -29,7 +30,7 @@ impl Default for Config {
     fn default() -> Config {
         Config {
             default_mode: Mode::Focus,
-            home: "about:blank".into(),
+            home: None,
             search: crate::urlbar::DEFAULT_SEARCH.into(),
             hibernate_after_minutes: 15,
             gpu: None,
@@ -83,7 +84,7 @@ fn apply(c: &mut Config, text: &str, file: &Path) {
                 "focus" | "lite" => c.default_mode = Mode::Focus,
                 _ => tracing::warn!(value, "default: full or focus"),
             },
-            "home" if !value.is_empty() => c.home = crate::urlbar::normalize(value),
+            "home" if !value.is_empty() => c.home = Some(crate::urlbar::normalize(value)),
             "search" if value.contains("%s") => c.search = value.to_owned(),
             "hibernate_after_minutes" => match value.parse() {
                 Ok(m) => c.hibernate_after_minutes = m,
@@ -110,7 +111,7 @@ mod tests {
             .unwrap();
         let c = load(&[system, user, dir.path().join("missing.conf")]);
         assert_eq!(c.default_mode, Mode::Full);
-        assert_eq!(c.home, "https://example.com");
+        assert_eq!(c.home.as_deref(), Some("https://example.com"));
         assert_eq!(c.hibernate_after_minutes, 0);
         assert_eq!(c.search, "https://s.example/?q=%s");
     }
@@ -120,5 +121,6 @@ mod tests {
         let c = load(&[]);
         assert_eq!(c.default_mode, Mode::Focus);
         assert_eq!(c.hibernate_after_minutes, 15);
+        assert_eq!(c.home, None);
     }
 }

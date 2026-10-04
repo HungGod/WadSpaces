@@ -104,7 +104,7 @@ function placeToolbar(mode) {
 
 /** @param {string} u */
 function display(u) {
-  return u === "about:blank" ? "" : u;
+  return u === "about:blank" || u.startsWith("wadbrowser://home") ? "" : u;
 }
 
 /** @param {string} u */

@@ -7,7 +7,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use webkit2gtk::{CacheModel, MemoryPressureSettings, WebContext, WebContextExt, WebsiteDataManager};
+use webkit2gtk::{
+    CacheModel, MemoryPressureSettings, SecurityManagerExt, WebContext, WebContextExt, WebsiteDataManager,
+};
 
 pub const DEFAULT: &str = "default";
 
@@ -29,6 +31,11 @@ fn make(name: &str) -> WebContext {
         .build();
     let context = WebContext::builder().website_data_manager(&manager).memory_pressure_settings(&pressure()).build();
     context.set_cache_model(CacheModel::WebBrowser);
+    context.register_uri_scheme(crate::pages::SCHEME, crate::pages::serve);
+    if let Some(sec) = context.security_manager() {
+        // Its own pages: treated like https (no mixed-content warnings).
+        sec.register_uri_scheme_as_secure(crate::pages::SCHEME);
+    }
     crate::downloads::watch(&context);
     context.set_favicon_database_directory(Some(&data.join("favicons").to_string_lossy()));
     context

@@ -233,7 +233,7 @@ fn decide_policy(view: &WebView, decision: &PolicyDecision, kind: PolicyDecision
             }
             if !matches!(
                 scheme.as_str(),
-                "http" | "https" | "about" | "data" | "blob" | "file" | "javascript" | "webkit"
+                "http" | "https" | "about" | "data" | "blob" | "file" | "javascript" | "webkit" | pages::SCHEME
             ) {
                 decision.ignore();
                 if let Err(e) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {

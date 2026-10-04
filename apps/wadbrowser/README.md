@@ -46,7 +46,9 @@ wadbrowser --app <id> --name <name> --url <start> [URL...]
 
 Settings: `/etc/wadspaces/wadbrowser.conf`, then
 `~/.config/wadbrowser/wadbrowser.conf` (`default`, `home`, `search`,
-`hibernate_after_minutes`, `gpu`). `WADBROWSER_DEVTOOLS=1` adds the inspector
+`hibernate_after_minutes`, `gpu`). With no `home`, new tabs and Home show
+`wadbrowser://home`: the WadSpaces mark and a search box (the mark alone in
+Focus, which has no address bar). `WADBROWSER_DEVTOOLS=1` adds the inspector
 (F12); `WADBROWSER_LOG=debug` says more.
 
 ## Building and trying it
@@ -58,7 +60,7 @@ Settings: `/etc/wadspaces/wadbrowser.conf`, then
   its windows, tabs moved between windows, a tab put to sleep and woken, a
   download, find in page): `cargo build -p wadbrowser --features spike` first.
   `WADBROWSER_SPIKE_SITES="https://… …"` checks real sites and what WebKit
-  supports.
+  supports; `WADBROWSER_SPIKE_HOME=1` checks the home page and its search box.
 - `spike/ipc.sh` checks the hand-off from a second launch, timed.
 - `apps/wadd/dev/try-build.sh` builds a design with web apps through wadd and
   opens one, and a link, in a real workspace.
