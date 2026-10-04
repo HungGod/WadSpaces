@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: rgba(0,0,0,0.82); color: #bdc1c6; font: 11px system-ui, sans-serif; overflow: hidden; border-radius: 4px; }
+      #text { padding: 4px 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div id="text"></div>
+    <script>
+      (function() {
+        const el = document.getElementById("text");
+        function onLinkStatus(data) {
+          const url = (data && data.url) || "";
+          el.textContent = url;
+          el.title = url;
+        }
+        const api = window.wadbrowser;
+        if (api) {
+          api.on("app:linkStatus", onLinkStatus);
+        } else {
+          window.addEventListener("DOMContentLoaded", function once() {
+            window.removeEventListener("DOMContentLoaded", once);
+            if (window.wadbrowser) window.wadbrowser.on("app:linkStatus", onLinkStatus);
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

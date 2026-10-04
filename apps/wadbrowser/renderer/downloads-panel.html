@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Downloads</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
+      body { margin: 0; padding: 0; background: #1f2023; color: #e8eaed; font-family: system-ui, sans-serif; overflow: hidden; display: flex; flex-direction: column; height: 100%; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+      #downloadsHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); flex-shrink: 0; }
+      #downloadsHeader button { background: transparent; border: 0; color: #bdc1c6; cursor: pointer; font-size: 16px; }
+      #downloadsList { overflow-y: auto; overflow-x: hidden; max-height: 165px; }
+    </style>
+  </head>
+  <body>
+    <div id="downloadsHeader">
+      <div>Downloads</div>
+      <button id="btnClose" title="Close">✕</button>
+    </div>
+    <div id="downloadsList"></div>
+    <script src="./downloads-panel.js"></script>
+  </body>
+</html>

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WadBrowser</title>
+    <style>
+      :root {
+        --bg: #202124;
+        --panel: #2a2b2e;
+        --text: #e8eaed;
+        --muted: #bdc1c6;
+        --faint: #9aa0a6;
+        --border: rgba(255, 255, 255, 0.1);
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, sans-serif;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+      }
+      main {
+        max-width: 520px;
+        width: 100%;
+        text-align: center;
+      }
+      .mark {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 20px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 26px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+      }
+      h1 {
+        font-size: 19px;
+        font-weight: 600;
+        margin: 0 0 10px;
+        letter-spacing: -0.01em;
+      }
+      p {
+        margin: 0 0 16px;
+        font-size: 14px;
+        line-height: 1.55;
+        color: var(--muted);
+      }
+      .url {
+        display: block;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--faint);
+        word-break: break-all;
+        text-align: left;
+        margin-bottom: 18px;
+      }
+      .note {
+        font-size: 12.5px;
+        color: var(--faint);
+        margin: 0;
+      }
+      button {
+        font: inherit;
+        font-size: 13px;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 18px;
+        cursor: pointer;
+      }
+      button:hover { background: rgba(255, 255, 255, 0.1); }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" id="mark">✕</div>
+      <h1 id="title">Link blocked</h1>
+      <p id="message">WadBrowser only opens sign-in pages from other apps.</p>
+      <code class="url" id="url" hidden></code>
+      <p class="note" id="note" hidden></p>
+      <button id="close" hidden>Close</button>
+    </main>
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var state = params.get("state") || "blocked";
+        var url = params.get("url") || "";
+        var reason = params.get("reason") || "";
+
+        var mark = document.getElementById("mark");
+        var title = document.getElementById("title");
+        var message = document.getElementById("message");
+        var urlEl = document.getElementById("url");
+        var note = document.getElementById("note");
+        var closeBtn = document.getElementById("close");
+
+        var VIEWS = {
+          blocked: {
+            icon: "✕",
+            title: "Link blocked",
+            message: "WadBrowser only opens sign-in pages from other apps.",
+            note: "If you need this page, open it from an app you packaged for it.",
+            showUrl: true,
+            showClose: true,
+          },
+          complete: {
+            icon: "✓",
+            title: "Sign-in complete",
+            message: "This window was opened to finish a sign-in, so it does not browse past it.",
+            note: "You can close this window and return to the app you started from.",
+            showUrl: false,
+            showClose: true,
+          },
+        };
+
+        var view = VIEWS[state] || VIEWS.blocked;
+        title.textContent = view.title;
+        message.textContent = reason && state === "blocked" ? "Blocked because " + reason + "." : view.message;
+        mark.textContent = view.icon;
+
+        if (view.showUrl && url) {
+          urlEl.textContent = url;
+          urlEl.hidden = false;
+        }
+        if (view.note) {
+          note.textContent = view.note;
+          note.hidden = false;
+        }
+        if (view.showClose) {
+          closeBtn.hidden = false;
+          closeBtn.addEventListener("click", function () {
+            if (window.wadbrowser) window.wadbrowser.send("win:close");
+            else window.close();
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>
