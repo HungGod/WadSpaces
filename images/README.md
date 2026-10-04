@@ -6,7 +6,7 @@ workspace.
 
 | Directory | Image | What it is |
 |---|---|---|
-| `base/` | `localhost/wadspaces-base:trixie` | The lean desktop (labwc, the icon panel, Xwayland) and the build helpers designs use: `wadspaces-feature`, `wadspaces-apt`, `wadspaces-webapp`, `wadspaces-layout`. Its window goes on whatever compositor is mounted at `/run/wadspaces-display`. |
+| `base/` | `localhost/wadspaces-base:trixie` | The lean desktop (labwc, the icon panel, Xwayland), WadBrowser (the browser, every web app's window, and what links open in) and the build helpers designs use: `wadspaces-feature`, `wadspaces-apt`, `wadspaces-webapp`, `wadspaces-layout`. Its window goes on whatever compositor is mounted at `/run/wadspaces-display`. `build.sh` builds WadBrowser for it first, in `builder/` (a Debian container with Rust and WebKitGTK's headers). |
 | `stream/` | `localhost/wadspaces-stream:trixie` | The stream sidecar (Selkies): the compositor a workspace draws on when it's viewed from another device. |
 | `examples/` | `localhost/wadspaces-<name>:latest` | Two hand-written workspaces, `writing` and `iq-dev`, as examples of an image on the base. |
 

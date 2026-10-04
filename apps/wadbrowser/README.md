@@ -1,119 +1,65 @@
-# KaleBrowser
+# WadBrowser
 
-Chromium-based minimal browser (Electron) with no URL bar, WebRTC, drag-and-drop tabs, download manager, and packager integration for turning web addresses into desktop apps.
+The web browser in every WadSpaces workspace (formerly KaleBrowser, an
+Electron app). It's three things in one program:
 
-## Running the browser
+- **WadBrowser**: a browser with tabs and an address bar;
+- **WadBrowser Focus**: tabs, no address bar; pages arrive by links;
+- **every web app's window** (`wadspaces-webapp`): one site, its own name,
+  icon and window class (`wadspaces-webapp-<id>`), no address bar.
 
-**Prerequisites:** Node.js 18+ and npm.
+Links from other apps (`xdg-open`) open in whichever of the first two the
+workspace's design has on its desktop (`/etc/wadspaces/wadbrowser.conf`).
 
-```bash
-# Install dependencies (once)
-npm install
+## How it's put together
 
-# Run the browser
-npm run start
+Tauri 2 on WebKitGTK 4.1. Tauri owns each window and its one webview, the
+chrome (`ui/`: plain HTML, CSS and JS, embedded in the binary). The pages
+are WebKitGTK views WadBrowser makes itself, in a stack under the chrome:
+Tauri's own child webviews can't be laid out on Wayland, and pages never get
+Tauri's IPC this way. Menus and panels are a transparent view in a popup
+surface of their own, which the compositor blends over the page.
 
-# Run and open a specific URL
-npm run start -- --url "https://google.com"
+- **One process per user** (`ipc.rs`): a later launch hands its request to
+  the running browser over `$XDG_RUNTIME_DIR/wadbrowser/ctl.sock` and exits,
+  so a link opens in the window already there and tabs move between windows
+  live (drag one off the strip, or onto another window's).
+- **Memory**: one shared profile (one network process and cache for every
+  web app); tabs idle for 15 minutes sleep (their history kept) and wake
+  where they were; WebKit sheds caches under memory pressure.
+- **GPU**: on when the container has a usable `/dev/dri` (`gpu.rs`), video
+  decoded with VA-API.
+- **What WebKitGTK can't do**: DRM (EME) and video calls (WebRTC). Spotify,
+  Discord, Zoom and Slack are Chrome web apps in Wad Creator for that reason.
 
-# Run with a packager-generated config (app name, home URL, icon)
-npm run start -- --config /path/to/config.json
+## Command line
+
+```
+wadbrowser [URL...]                       a browser window
+wadbrowser --no-urlbar [URL...]           WadBrowser Focus
+wadbrowser --default [URL...]             what the workspace chose (links)
+wadbrowser --app <id> --name <name> --url <start> [URL...]
+  --new-window  --profile <p>  --gpu auto|on|off  --icon <png>  --config <kalebrowser.json>
 ```
 
-**Build (Linux AppImage):**
+Settings: `/etc/wadspaces/wadbrowser.conf`, then
+`~/.config/wadbrowser/wadbrowser.conf` (`default`, `home`, `search`,
+`hibernate_after_minutes`, `gpu`). `WADBROWSER_DEVTOOLS=1` adds the inspector
+(F12); `WADBROWSER_LOG=debug` says more.
 
-```bash
-npm run build
-# Output: dist/KaleBrowser.AppImage
-```
+## Building and trying it
 
-Run the AppImage with an optional URL: `./dist/KaleBrowser.AppImage "https://example.com"` or `./dist/KaleBrowser.AppImage --url "https://example.com"`.
+- `cargo build -p wadbrowser` builds it for this laptop (Fedora's WebKitGTK).
+- `images/build.sh --only base` builds it for workspaces, in a Debian trixie
+  container (`images/builder/`), and bakes it into the base image.
+- `spike/run.sh` runs a scripted session on a headless sway (screenshots of
+  its windows, tabs moved between windows, a tab put to sleep and woken, a
+  download, find in page): `cargo build -p wadbrowser --features spike` first.
+  `WADBROWSER_SPIKE_SITES="https://… …"` checks real sites and what WebKit
+  supports.
+- `spike/ipc.sh` checks the hand-off from a second launch, timed.
+- `apps/wadd/dev/try-build.sh` builds a design with web apps through wadd and
+  opens one, and a link, in a real workspace.
 
-## Packager
-
-The packager generates `config.json`, launcher scripts, and `.desktop` files so you can create desktop apps that open a specific site in kaleBrowser.
-
-**Prerequisites:** Python 3.9+ and the packager dependencies.
-
-```bash
-cd packager
-python -m venv .venv
-source .venv/bin/activate 
-pip install -r requirements.txt
-```
-
-**Run the packager:**
-
-```bash
-# From project root (recommended)
-python3 packager/packager.py
-
-# Or from inside packager/
-cd packager
-python3 packager.py
-```
-
-Use `--project-dir` to point at the kaleBrowser project root (so generated launchers run the Electron app). See `python3 packager/packager.py --help` for options. Input apps are listed in `packager/resources.json`.
-
-### System install (container images)
-
-`--system` installs the mini-apps for every user instead of the current one. It is what the WadSpaces workspace images use, where the checkout lives at `/opt/kalebrowser` and the desktop is drawn from `.desktop` files copied into `~/Desktop` at container start.
-
-```bash
-python3 packager/packager.py --system \
-    --project-dir /opt/kalebrowser \
-    --output /opt/kalebrowser/packager/generated \
-    --electron-args=--no-sandbox \
-    --wayland-auto \
-    --entries-list /etc/wadspaces/desktop-entries.list
-```
-
-| Output | Default location | Override |
-|---|---|---|
-| Launcher `kale-<slug>` | `/usr/local/bin` | `--bin-dir` |
-| Icon `WADspaces-<slug>.png`, referenced by name | `/usr/share/icons/hicolor/512x512/apps` | `--icons-dir` |
-| `WADspaces-<slug>.desktop` | `/usr/share/applications` | `--apps-dir` |
-| `~/Desktop` copy | none | `--desktop-dir` |
-
-- Launchers call `<project-dir>/node_modules/.bin/electron` directly rather than `npx electron`, so run `npm ci` first. `--electron-bin` overrides this.
-- `--electron-args` is appended to every launch. Use the `=` form, because the value starts with a dash. `--no-sandbox` is needed when running as a non-root user inside a container.
-- `--wayland-auto` adds `--ozone-platform=wayland` at launch time when `/dev/dri` exists and `labwc` is running, and uses X11 otherwise.
-- `--entries-list` appends each generated `.desktop` name to a file, one per line, so the image's init can seed `~/Desktop`. The url-redirect handler is not listed, since it is not an app.
-
-Without `--system` the packager behaves exactly as before.
-
-## Login screening (url-redirect mode)
-
-The generated **url-redirect** app registers kaleBrowser as the system `http`/`https` handler, so any link opened by another application lands here. Because that destination is arbitrary, redirect launches are screened and only sign-in pages open.
-
-This applies **only** to redirect launches (`--url` with no `--config`). Packaged mini-apps (`--config`) have a URL chosen at package time and are opened as-is.
-
-**What gets through.** The link is judged from its address alone, so the verdict is instant and nothing is loaded before it is allowed. A link opens if it carries at least one clear sign-in signal:
-
-- a known identity provider (`accounts.google.com`, `login.microsoftonline.com`, `*.okta.com`, …) or an auth hostname (`login.`, `sso.`, `auth.`, …)
-- a login-shaped path — `/login`, `/users/sign_in`, `/oauth2/authorize`, `/mfa`, and camelCase or hyphenated forms like `/loginDeepControl` and `/Service-Login`
-- OAuth/OIDC/SAML parameters, or a query naming the flow (`?mode=login`)
-
-Anything else — `reddit.com/r/all`, a video, a file download, a non-http scheme — is blocked with a screen explaining why. There is no in-app override.
-
-**Denylisted sites are refused before any of that.** A sign-in page on a social feed is still a doorway to the feed, so Reddit, X/Twitter, Facebook, Instagram, Threads, TikTok, YouTube, Snapchat, Pinterest, Tumblr, Twitch, LinkedIn, and similar are blocked even when the link is a real login page. Routes *through* an allowed host are caught too — `accounts.google.com/signin?service=youtube` and `?continue=https://youtube.com/` are both refused, while ordinary Google sign-in still works.
-
-One consequence: a site's own OAuth endpoint is blocked with it, so "Continue with Facebook" on a third-party site will not complete. "Continue with Google" is unaffected — `accounts.google.com` is a separate host from `youtube.com`. Edit `BLOCKED_HOSTS` in `shared/login-screening.js` to fit; it is a plain list of domains and matches subdomains automatically.
-
-**Judging by address is deliberately loose.** A page that merely looks like a login URL (`/wiki/Login`, a blog post about auth) will open. That is the accepted trade: waiting seconds on every link, or wrongly blocking a real sign-in, is worse than letting an uninteresting page through.
-
-**Navigation is confined to the sign-in flow**, which is what keeps a loose match from becoming a browsing session. Once open, the window follows the login only: the auth host, its sign-in steps, and the identity provider's callback. When the flow reaches an ordinary page — the site's home page after a successful login — it stops and shows "Sign-in complete" instead of the page. These windows also have no new tabs, and cannot detach or dock tabs into a regular window.
-
-To tune what counts as a login link, edit `shared/login-screening.js`.
-
-## Features
-
-- No search/URL bar (toolbar: back, forward, reload, home, downloads)
-- Tabs: reorder by drag; drag to another window to dock or open in a new window; close last tab to close the window
-- Download manager (list, progress, open folder, cancel)
-- Context menu: Open link in new tab, Copy link, Copy
-- Fullscreen (F11), minimize to tray when closing the last window
-- Window: drag top bar to move; resize from bottom-right corner
-- WebRTC supported
-- Fedora KDE Plasma supported
-- Redirected links are screened so only sign-in pages open (see Login screening)
+The icon is the light WadSpaces mark (`icons/`, from
+`apps/wadcreator/public/brand/wadspaces-icon-light-transparent.svg`).

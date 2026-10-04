@@ -61,6 +61,8 @@ fn ci() -> Result<(), String> {
     wasm()?;
     run(".", "git", &["diff", "--exit-code", "--stat", "apps/wadcreator/src/gen/"])?;
     run("apps/wadcreator", "npm", &["run", "typecheck"])?;
+    // WadBrowser's chrome: plain JS with JSDoc types (Wad Creator's tsc).
+    run("apps/wadcreator", "npx", &["tsc", "-p", "../wadbrowser/ui"])?;
     run("apps/wadcreator", "npm", &["test"])
 }
 

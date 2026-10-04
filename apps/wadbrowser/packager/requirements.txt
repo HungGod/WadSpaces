@@ -1,8 +1,0 @@
-# Dependencies for packager/packager.py
-requests>=2.28.0
-beautifulsoup4>=4.11.0
-Pillow>=9.0.0
-cairosvg>=2.7.0
-
-# Optional: faster HTML parsing (pip install lxml)
-# lxml>=4.9.0

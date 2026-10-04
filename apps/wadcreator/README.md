@@ -89,15 +89,25 @@ commands the web app queues (`switch`, `start`, `stop`, `restart`, `launch`).
 
 Each desktop icon installs the way its catalog recipe says
 (`src/core/catalog/recipes.ts`): an existing `wadspaces-feature`, Debian
-packages (`wadspaces-apt`), a Chrome web app (`wadspaces-webapp`), or "coming
-soon". The icons' order and labels go into `/etc/wadspaces/layout.json`. The
-Builder's Dockerfile view shows the result and downloads the build folder:
+packages (`wadspaces-apt`), a web app (`wadspaces-webapp`: a WadBrowser window
+of its own; a Chrome one for the few sites that need DRM or video calls), or
+"coming soon". The icons' order and labels go into
+`/etc/wadspaces/layout.json`; a WadBrowser or WadBrowser Focus icon also says
+what links open in (`/etc/wadspaces/wadbrowser.conf`). The Builder's
+Dockerfile view shows the result and downloads the build folder:
 
 ```
 Dockerfile  docker-compose.yml  README.md  wad-<id>.container  workspaces.yaml.snippet
-root/etc/wadspaces/{layout.json,kalebrowser-resources.json}
+root/etc/wadspaces/{layout.json,wadbrowser.conf}
 root/usr/share/backgrounds/wallpaper.{png,jpg}
+root/usr/share/icons/hicolor/512x512/apps/wadspaces-webapp-<id>.png
 ```
+
+Web apps' icons are made on the machine before the image builds (wadd, with
+`crates/wad-icons`: the site's icon as a silhouette card, or your picture),
+and kept there; the Builder asks for them as you add web apps, so a build
+finds them ready. A downloaded folder has none: the image's helper writes a
+card with the site's name instead. Nothing is fetched while an image builds.
 
 Project files are never in it. Projects (the Projects page, and the Builder's
 Projects step for a wadspace's defaults) are GitHub repositories (cloned onto

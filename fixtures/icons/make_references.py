@@ -4,9 +4,12 @@ KaleBrowser's packager.py made of them (its process_icon_to_card).
 
     python3 fixtures/icons/make_references.py <path to packager.py>
 
-packager.py went with the Electron app; it's in git history under
-apps/wadbrowser/packager/ (and HungGod/KaleBrowser). Needs Pillow only: the
-packager's network modules are stubbed, nothing is fetched.
+packager.py went with the Electron app; it's in git history:
+
+    git show 83818d3:apps/wadbrowser/packager/packager.py > /tmp/packager.py
+
+Needs Pillow only: the packager's network modules are stubbed, nothing is
+fetched.
 """
 import importlib.util
 import os
