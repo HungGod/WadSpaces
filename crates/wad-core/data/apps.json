@@ -1,5 +1,19 @@
 [
   {
+    "id": "wadbrowser",
+    "name": "WadBrowser",
+    "domain": "wadspaces.app/browser",
+    "color": "#d9d9d9",
+    "iconUrl": "/catalog/wadbrowser.png"
+  },
+  {
+    "id": "wadbrowser-focus",
+    "name": "WadBrowser Focus",
+    "domain": "wadspaces.app/browser",
+    "color": "#d9d9d9",
+    "iconUrl": "/catalog/wadbrowser-focus.png"
+  },
+  {
     "id": "chrome",
     "name": "Chrome",
     "domain": "google.com/chrome",

@@ -1,7 +1,9 @@
 //! A Builder wadspace → what the generator needs (src/core/build.ts). Desktop
 //! icons become, in order, /etc/wadspaces/layout.json entries, and each app is
 //! installed the way its catalog recipe says; apps that can't be yet come
-//! back in `skipped`.
+//! back in `skipped`. Web apps are WadBrowser windows; their icons are made
+//! before the image builds (wadd, wad-icons), from the site or the user's
+//! own picture (`iconUrl`).
 
 use serde_json::{Value, json};
 
@@ -11,20 +13,21 @@ use crate::recipes::{Recipe, recipe_for};
 use crate::spec::{DEFAULT_IMAGE_PREFIX, base_image_for};
 use crate::url;
 
-/// The launcher KaleBrowser's packager writes for an app (packager.py slugify).
-pub fn kale_desktop(app_name: &str) -> String {
-    let lower = js::trim(app_name).to_lowercase();
-    let kept: String =
-        lower.chars().filter(|&c| c.is_ascii_alphanumeric() || c == '_' || js::is_space(c) || c == '-').collect();
-    let slug = js::replace_runs(&kept, |c| js::is_space(c) || c == '_' || c == '-', "-");
-    format!("WADspaces-{}.desktop", js::trim_dashes(&slug))
-}
-
 fn safe_id(s: &str) -> String {
     let lower = s.to_lowercase();
     let id = js::replace_runs(&lower, |c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'), "-");
     let id = js::ascii_prefix(js::trim_dashes(&id), 60);
     if id.is_empty() { "app".into() } else { id.into() }
+}
+
+/// The picture the user chose for a web app's icon (an upload, or a picture's
+/// address), if it isn't one of the catalog's own or a stock favicon. wadd
+/// puts it in the image instead of the site's icon.
+fn custom_icon(icon: &Value) -> Option<String> {
+    let u = icon.get("iconUrl").and_then(Value::as_str)?;
+    let mine = u.starts_with("data:image/")
+        || (u.starts_with("https://") && url::host(u, "local").is_some_and(|h| h != "www.google.com"));
+    mine.then(|| u.to_string())
 }
 
 /// The site a web icon opens: its own url, else the domain of its favicon URL.
@@ -50,7 +53,8 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
     }
     let mut apt_apps = Vec::new();
     let mut webapps = Vec::new();
-    let mut kale_from_icons: Vec<Value> = Vec::new();
+    // What links open in: the WadBrowser on the desktop (with an address bar wins).
+    let mut default_browser: Option<&str> = None;
     let mut layout = Vec::new();
     let mut skipped = Vec::new();
     let mut seen: Vec<String> = Vec::new();
@@ -82,7 +86,14 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
                 add_feature(&mut features, feature.into());
                 layout.push(entry(desktop.first().map(|d| d.to_string())));
             }
-            Recipe::Builtin { desktop } => layout.push(entry(Some(desktop.into()))),
+            Recipe::Builtin { desktop } => {
+                match app_id.as_str() {
+                    "wadbrowser" => default_browser = Some("full"),
+                    "wadbrowser-focus" if default_browser.is_none() => default_browser = Some("focus"),
+                    _ => {}
+                }
+                layout.push(entry(Some(desktop.into())));
+            }
             Recipe::Apt { packages, desktop } => {
                 let mut a = Obj::new();
                 a.insert("id".into(), app.clone().into());
@@ -93,22 +104,21 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
                 apt_apps.push(Value::Object(a));
                 layout.push(entry(desktop.map(String::from)));
             }
-            Recipe::Webapp { url } => {
-                if icon.get("launcher").and_then(Value::as_str) == Some("kale") {
-                    let name = label.as_ref().map(js::string).unwrap_or_else(|| "undefined".into());
-                    let mut k = Obj::new();
-                    js::put(&mut k, "app_name", label.as_ref());
-                    k.insert("app_url".into(), url.into());
-                    kale_from_icons.push(Value::Object(k));
-                    layout.push(entry(Some(kale_desktop(&name))));
-                } else {
-                    let mut w = Obj::new();
-                    w.insert("id".into(), app.clone().into());
-                    js::put(&mut w, "name", label.as_ref());
-                    w.insert("url".into(), url.into());
-                    webapps.push(Value::Object(w));
-                    layout.push(entry(Some(format!("wadspaces-webapp-{app}.desktop"))));
+            Recipe::Webapp { url, chrome } => {
+                // (Designs from before WadBrowser may say launcher: "kale":
+                // every web app is a WadBrowser window now.)
+                let mut w = Obj::new();
+                w.insert("id".into(), app.clone().into());
+                js::put(&mut w, "name", label.as_ref());
+                w.insert("url".into(), url.into());
+                if chrome {
+                    w.insert("chrome".into(), true.into());
                 }
+                if let Some(i) = custom_icon(icon) {
+                    w.insert("iconUrl".into(), i.into());
+                }
+                webapps.push(Value::Object(w));
+                layout.push(entry(Some(format!("wadspaces-webapp-{app}.desktop"))));
             }
             Recipe::Soon { reason } => {
                 let mut s = Obj::new();
@@ -119,12 +129,22 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
         }
     }
 
-    let own = js::arr(&adv, "kaleResources").to_vec();
-    let mut kale_resources = own.clone();
-    for k in kale_from_icons {
-        if !own.iter().any(|x| x.get("app_url") == k.get("app_url")) {
-            kale_resources.push(k);
+    // Designs from before WadBrowser kept Kale Browser apps in advanced: web
+    // apps now, in the app menu (they never had desktop icons of their own).
+    for k in js::arr(&adv, "kaleResources") {
+        let url = k.get("app_url").map(js::string).unwrap_or_default();
+        if url.is_empty() || webapps.iter().any(|w| w["url"] == url.as_str()) {
+            continue;
         }
+        let name = k.get("app_name").map(js::string).unwrap_or_else(|| url.clone());
+        let base = safe_id(&name);
+        let mut id = base.clone();
+        let mut n = 2;
+        while webapps.iter().any(|w| w["id"] == id.as_str()) {
+            id = format!("{base}-{n}");
+            n += 1;
+        }
+        webapps.push(json!({ "id": id, "name": name, "url": url }));
     }
     let user_projects = js::arr(opts, "projects");
     let projects: Vec<Value> = js::arr(&adv, "projects")
@@ -152,7 +172,9 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
     spec.insert("features".into(), Value::Array(features));
     spec.insert("aptApps".into(), Value::Array(apt_apps));
     spec.insert("webapps".into(), Value::Array(webapps));
-    spec.insert("kaleResources".into(), Value::Array(kale_resources));
+    if let Some(d) = default_browser {
+        spec.insert("defaultBrowser".into(), d.into());
+    }
     if let Some(f) = opts.get("wallpaperFile").filter(|f| js::truthy(f)) {
         spec.insert("wallpaper".into(), json!({ "fileName": f, "mode": "fill", "color": "#0b0b14" }));
     }

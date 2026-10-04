@@ -152,6 +152,9 @@ fn body_for(m: &str, path: &str) -> Option<Value> {
         ("PUT", "/api/streams/settings") => json!({"allowRemote": false}),
         ("POST", "/api/workspaces/writing/stream") => json!({"takeover": false}),
         ("POST", "/api/builds") => json!({"workspace": {}, "base_image": "x"}),
+        ("POST", "/api/icons/prefetch") => json!({"apps": []}),
+        // On this network: a card with its name, nothing fetched.
+        ("POST", "/api/icons/webapp") => json!({"site": "http://127.0.0.1:9/"}),
         ("POST", "/api/projects") | ("PUT", "/api/projects/writing") => {
             json!({"name": "N", "mountName": "N", "source": {"kind": "git", "url": "https://github.com/o/n"}})
         }

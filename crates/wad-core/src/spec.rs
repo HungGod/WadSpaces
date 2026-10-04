@@ -16,7 +16,6 @@ pub const FEATURES: &[&str] = &[
     "vscode",
     "claude-code",
     "chrome",
-    "kalebrowser",
     "tiled",
     "android-studio",
     "hplip",
@@ -57,7 +56,6 @@ pub fn new_spec(partial: &Value) -> Value {
         "baseImage": base_image_for(Some(&display)),
         "features": ["git", "vscode", "claude-code"],
         "webapps": [],
-        "kaleResources": [],
         "image": image,
         "port": 3160,
         "hotkey": null,
@@ -84,14 +82,12 @@ pub fn slugify(s: &str) -> String {
     js::ascii_prefix(js::trim_dashes(&slug), 63).to_string()
 }
 
-/// Features in install order: web apps bring chrome, Kale Browser apps kalebrowser.
+/// Features in install order. Web apps run in WadBrowser (the base has it);
+/// only those that need Chrome (DRM, video calls) bring chrome.
 pub fn resolve_features(spec: &Value) -> Vec<&'static str> {
     let mut want = js::strs(spec, "features");
-    if !js::arr(spec, "webapps").is_empty() {
+    if js::arr(spec, "webapps").iter().any(|w| js::truthy(w.get("chrome").unwrap_or(&Value::Null))) {
         want.push("chrome".into());
-    }
-    if !js::arr(spec, "kaleResources").is_empty() {
-        want.push("kalebrowser".into());
     }
     FEATURES.iter().copied().filter(|f| want.iter().any(|w| w == f)).collect()
 }
@@ -201,10 +197,7 @@ pub fn validate(spec: &Value) -> Vec<String> {
             errs.push("Hotkey must be 1 to 9.".into());
         }
     }
-    let urls = js::arr(spec, "webapps")
-        .iter()
-        .map(|w| w.get("url"))
-        .chain(js::arr(spec, "kaleResources").iter().map(|k| k.get("app_url")));
+    let urls = js::arr(spec, "webapps").iter().map(|w| w.get("url"));
     for u in urls {
         // A missing one is tested as "undefined", and shown as "(empty)".
         let tested = u.map(js::string).unwrap_or_else(|| "undefined".into());

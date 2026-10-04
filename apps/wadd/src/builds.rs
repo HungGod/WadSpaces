@@ -1,8 +1,9 @@
 //! Building a design's image on this machine (builds.py, with the build
 //! folder made here): Wad Creator sends the design and its wallpaper (the
 //! app draws it); wad-core turns that into the build folder (Dockerfile,
-//! root/), which podman builds as localhost/wadspaces-<id>:latest on the
-//! design's base. The workspace is then added, or the one already here
+//! root/), with its web apps' icons made here first (icons.rs: nothing is
+//! fetched inside the build), which podman builds as
+//! localhost/wadspaces-<id>:latest on the design's base. The workspace is then added, or the one already here
 //! updated: it keeps its own icon, extra volumes and projects, and takes the
 //! design's settings for the rest.
 //!
@@ -27,6 +28,7 @@ use wad_proto::{ApiError, ErrorCode};
 
 use crate::backend::Backend;
 use crate::events::Bus;
+use crate::icons::{IconJob, Icons};
 use crate::joblog::Lines;
 use crate::registry::Registry;
 
@@ -61,13 +63,58 @@ fn step(line: &str) -> Option<(u32, u32)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-/// What a design makes: the build folder (as a tar), the workspace entry
-/// (workspaces.yaml's shape) and what it left out.
+/// What a design makes: its build spec (the build folder's makings), the
+/// workspace entry (workspaces.yaml's shape), what it left out, and the
+/// icons its web apps need.
 pub struct Made {
-    pub context: Vec<u8>,
+    pub spec: Value,
+    wallpaper: Option<Vec<u8>>,
+    dockerfile: Option<String>,
     pub workspace: Value,
     pub base_image: String,
     pub skipped: Vec<Skipped>,
+    pub icons: Vec<IconJob>,
+}
+
+impl Made {
+    /// The build folder as a tar, with the web apps' icons (PNG, by app id).
+    pub fn context(&self, icons: &[(String, Vec<u8>)]) -> Result<Vec<u8>, ApiError> {
+        let files =
+            wad_core::generator::bundle_files(&self.spec, self.wallpaper.as_deref(), self.dockerfile.as_deref(), icons);
+        let entries: Vec<wad_core::tar::Entry> = files
+            .iter()
+            .map(|(path, c)| wad_core::tar::Entry {
+                path,
+                content: match c {
+                    Content::Text(t) => t.as_bytes(),
+                    Content::Bytes(b) => b,
+                },
+            })
+            .collect();
+        let context = wad_core::tar::tar(&entries).map_err(bad)?;
+        if context.len() > MAX_CONTEXT_BYTES {
+            return Err(bad("build folder too big (64 MB max)"));
+        }
+        Ok(context)
+    }
+}
+
+/// The icons a spec's web apps need: their sites, and the user's pictures.
+fn icon_jobs(spec: &Value) -> Vec<IconJob> {
+    spec["webapps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|w| {
+            let id = w["id"].as_str().filter(|i| wad_core::spec::is_id(i))?;
+            let site = w["url"].as_str()?;
+            Some(IconJob {
+                id: id.to_string(),
+                site: site.to_string(),
+                custom: w["iconUrl"].as_str().map(String::from),
+            })
+        })
+        .collect()
 }
 
 /// The build folder and workspace entry for a design (the app's
@@ -106,26 +153,23 @@ pub fn make(req: &BuildRequest) -> Result<Made, ApiError> {
     if !is_local_base(&base_image) && !base_image.contains('/') {
         return Err(bad(format!("bad base image {base_image:?}")));
     }
-    let dockerfile = req.design.get("dockerfile").and_then(Value::as_str).filter(|d| !d.trim().is_empty());
-    let files = wad_core::generator::bundle_files(spec, wallpaper.as_ref().map(|(_, b)| b.as_slice()), dockerfile);
-    let entries: Vec<wad_core::tar::Entry> = files
-        .iter()
-        .map(|(path, c)| wad_core::tar::Entry {
-            path,
-            content: match c {
-                Content::Text(t) => t.as_bytes(),
-                Content::Bytes(b) => b,
-            },
-        })
-        .collect();
-    let context = wad_core::tar::tar(&entries).map_err(bad)?;
-    if context.len() > MAX_CONTEXT_BYTES {
-        return Err(bad("build folder too big (64 MB max)"));
-    }
+    let dockerfile =
+        req.design.get("dockerfile").and_then(Value::as_str).filter(|d| !d.trim().is_empty()).map(String::from);
     let mut workspace = wad_core::spec::to_wadd_spec(spec);
     let id = workspace.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
     workspace["image"] = format!("localhost/wadspaces-{id}:latest").into();
-    Ok(Made { context, workspace, base_image, skipped })
+    let made = Made {
+        icons: icon_jobs(spec),
+        spec: spec.clone(),
+        wallpaper: wallpaper.map(|(_, b)| b),
+        dockerfile,
+        workspace,
+        base_image,
+        skipped,
+    };
+    // Too big already without its icons: say so now, not when it runs.
+    made.context(&[])?;
+    Ok(made)
 }
 
 /// The workspace list with `fresh` added, or merged into the one already
@@ -167,7 +211,7 @@ struct Job {
     build: Build,
     log: Lines,
     /// Taken when it starts.
-    context: Option<Vec<u8>>,
+    made: Option<Made>,
     workspace: Value,
 }
 
@@ -176,6 +220,7 @@ pub struct Builds {
     registry: Arc<Registry>,
     backend: Arc<dyn Backend>,
     bus: Bus,
+    icons: Arc<Icons>,
     log_dir: PathBuf,
     min_free_gb: u64,
     jobs: Mutex<Vec<Job>>,
@@ -193,11 +238,23 @@ impl Builds {
         state_dir: &Path,
         min_free_gb: u64,
     ) -> Arc<Self> {
+        Self::with_icons(registry, backend, bus, state_dir, min_free_gb, Icons::new(&state_dir.join("webapp-icons")))
+    }
+
+    pub fn with_icons(
+        registry: Arc<Registry>,
+        backend: Arc<dyn Backend>,
+        bus: Bus,
+        state_dir: &Path,
+        min_free_gb: u64,
+        icons: Arc<Icons>,
+    ) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
             registry,
             backend,
             bus,
+            icons,
             log_dir: state_dir.join("builds"),
             min_free_gb,
             jobs: Mutex::default(),
@@ -206,6 +263,11 @@ impl Builds {
             last_publish: Mutex::default(),
             one_at_a_time: tokio::sync::Mutex::new(()),
         })
+    }
+
+    /// Web apps' icons (the API's prefetch and preview use them too).
+    pub fn icons(&self) -> Arc<Icons> {
+        self.icons.clone()
     }
 
     /// Makes the build folder and checks the workspace it would add, then
@@ -227,20 +289,21 @@ impl Builds {
             progress: 0.0,
             error: None,
             image: made.workspace["image"].as_str().unwrap_or_default().to_string(),
-            base_image: made.base_image,
+            base_image: made.base_image.clone(),
             created: now(),
             started: None,
             finished: None,
             updated,
             restart_required: false,
-            skipped: made.skipped,
+            skipped: made.skipped.clone(),
             line_count: 0,
         };
         let mut log = Lines::new(&self.log_dir, &id, MAX_LINES);
         for s in &build.skipped {
             log.push(&format!("⚠ left out {}: {}", s.label, s.reason));
         }
-        let job = Job { build: build.clone(), log, context: Some(made.context), workspace: made.workspace };
+        let workspace = made.workspace.clone();
+        let job = Job { build: build.clone(), log, made: Some(made), workspace };
         self.jobs.lock().unwrap().push(job);
         self.trim();
         self.publish(&id, true);
@@ -368,13 +431,13 @@ impl Builds {
 
     /// The build and its install; the image's tag when it's done.
     async fn go(&self, id: &str) -> Result<String, String> {
-        let (context, workspace, tag, base) = {
+        let (made, workspace, tag, base) = {
             let mut jobs = self.jobs.lock().unwrap();
             let j = jobs.iter_mut().find(|j| j.build.id == id).ok_or("the build is gone")?;
             j.build.status = BuildStatus::Building;
             j.build.started = Some(now());
             (
-                j.context.take().ok_or("the build already ran")?,
+                j.made.take().ok_or("the build already ran")?,
                 j.workspace.clone(),
                 j.build.image.clone(),
                 j.build.base_image.clone(),
@@ -392,6 +455,23 @@ impl Builds {
                 if is_local_base(&base) { " — update the drive with host/build.sh update --bases" } else { "" };
             return Err(format!("base image {base} is not on this machine{hint}"));
         }
+        let icons = if made.icons.is_empty() {
+            vec![]
+        } else {
+            let (icons, how) = self.icons.for_build(&made.icons).await;
+            self.line(
+                id,
+                &format!(
+                    "» icons for {} web apps: {} from their sites, {} chosen, {} with their names",
+                    icons.len(),
+                    how.site,
+                    how.custom,
+                    how.fallback
+                ),
+            );
+            icons
+        };
+        let context = made.context(&icons).map_err(|e| e.message)?;
         self.line(id, &format!("» building {tag} on {base}"));
         let me = self.me.upgrade().ok_or("wadd is stopping")?;
         let line_id = id.to_string();

@@ -13,6 +13,7 @@ pub mod display;
 pub mod drives;
 pub mod events;
 pub mod github;
+pub mod icons;
 pub mod joblog;
 pub mod launches;
 pub mod logbuf;

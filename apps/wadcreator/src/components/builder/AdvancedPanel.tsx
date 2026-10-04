@@ -1,4 +1,3 @@
-import { Plus, X } from "lucide-react";
 import clsx from "clsx";
 import { FEATURES, type FeatureId } from "@core/spec";
 import type { Advanced } from "@/lib/types";
@@ -13,24 +12,6 @@ function Heading({ children, hint }: { children: React.ReactNode; hint?: string 
     <div className="mb-2.5">
       <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">{children}</h3>
       {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
-    </div>
-  );
-}
-
-function Rows<T>({ items, onChange, blank, add, render }: { items: T[]; onChange: (v: T[]) => void; blank: () => T; add: string; render: (item: T, set: (v: T) => void) => React.ReactNode }) {
-  return (
-    <div className="space-y-2">
-      {items.map((it, i) => (
-        <div key={i} className="relative space-y-1.5 rounded-xl bg-surface-2 p-2 pr-9 ring-1 ring-line">
-          {render(it, (v) => onChange(items.map((x, j) => (j === i ? v : x))))}
-          <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-md text-faint hover:bg-surface-3 hover:text-fg" aria-label="Remove">
-            <X className="size-3.5" />
-          </button>
-        </div>
-      ))}
-      <button type="button" onClick={() => onChange([...items, blank()])} className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted hover:bg-surface-2 hover:text-fg">
-        <Plus className="size-3.5" /> {add}
-      </button>
     </div>
   );
 }
@@ -67,22 +48,6 @@ export function AdvancedPanel({ value, onChange, offline }: { value: Advanced; o
             );
           })}
         </div>
-      </section>
-
-      <section>
-        <Heading hint="Sites as single-purpose Kale Browser apps. Web icons on the desktop can also open this way.">Kale Browser apps</Heading>
-        <Rows
-          items={value.kaleResources}
-          onChange={(kaleResources) => set({ kaleResources })}
-          blank={() => ({ app_name: "", app_url: "" })}
-          add="Add Kale Browser app"
-          render={(k, setK) => (
-            <>
-              <Input className="h-8 text-xs" placeholder="Name" value={k.app_name} onChange={(e) => setK({ ...k, app_name: e.target.value })} />
-              <Input className="h-8 font-mono text-xs" placeholder="https://…" value={k.app_url} onChange={(e) => setK({ ...k, app_url: e.target.value })} />
-            </>
-          )}
-        />
       </section>
 
       <section>

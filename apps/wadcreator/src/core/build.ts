@@ -27,11 +27,6 @@ export interface BuildPlan {
   skipped: { label: string; reason: string }[];
 }
 
-/** The launcher KaleBrowser's packager writes for an app: WADspaces-<slug>.desktop (packager.py slugify). */
-export function kaleDesktop(appName: string): string {
-  return call("kaleDesktop", appName);
-}
-
 export function toBuildSpec(ws: WadspaceSpec, opts: BuildOptions = {}): BuildPlan {
   return call("toBuildSpec", ws, opts);
 }

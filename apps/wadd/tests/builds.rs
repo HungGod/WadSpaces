@@ -12,6 +12,7 @@ use wad_proto::ErrorCode;
 use wad_proto::v1::{BuildLog, BuildRequest, BuildStatus, Display, MountedProject, Wallpaper};
 use wadd::builds::Builds;
 use wadd::events::Bus;
+use wadd::icons::Icons;
 use wadd::registry::{Registry, Settings};
 
 const BASE: &str = "localhost/wadspaces-base:trixie";
@@ -25,6 +26,10 @@ struct Env {
 }
 
 async fn env() -> Env {
+    env_with(None).await
+}
+
+async fn env_with(icons: Option<Arc<Icons>>) -> Env {
     let d = tempfile::tempdir().unwrap();
     let state = d.path().join("state");
     let fake = Fake::default();
@@ -53,14 +58,17 @@ async fn env() -> Env {
     let mut writing = ws("writing", "ghcr.io/o/writing:1", Display::Stream, Some(3100));
     writing.hotkey = Some(1);
     reg.load(vec![writing]).await.unwrap();
-    let builds = Builds::new(reg.clone(), Arc::new(fake.clone()), bus, &state, 8);
+    let builds = match icons {
+        Some(i) => Builds::with_icons(reg.clone(), Arc::new(fake.clone()), bus, &state, 8, i),
+        None => Builds::new(reg.clone(), Arc::new(fake.clone()), bus, &state, 8),
+    };
     Env { _d: d, state, fake, reg, builds }
 }
 
 /// A design as Wad Creator keeps it: no apps, a colour wallpaper.
 fn design(id: &str) -> Value {
     json!({"id": id, "name": "Try build", "description": "", "layout": {"wallpaper": {"type": "color", "value": "#000"}, "icons": [], "grid": true},
-        "advanced": {"display": "host", "port": null, "hotkey": 2, "tools": ["git"], "projects": [], "kaleResources": [],
+        "advanced": {"display": "host", "port": null, "hotkey": 2, "tools": ["git"], "projects": [],
             "env": {"PUID": "1000", "PGID": "1000", "TZ": "Pacific/Fiji"}, "secrets": [], "devices": ["/dev/dri"], "shmSize": "1g",
             "persistConfig": true, "autostart": false}})
 }
@@ -262,4 +270,51 @@ async fn what_the_build_leaves_out_is_logged() {
     let l = wait(&e, &b.id).await;
     assert!(l.lines[0].starts_with("⚠ left out "), "{:?}", l.lines);
     assert_eq!(l.build.status, BuildStatus::Done);
+}
+
+/// A 1×1 PNG.
+const DOT: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+fn web_icon(app: &str, row: u32, url: &str, icon_url: &str) -> Value {
+    json!({"id": format!("{app}-{row}"), "appId": app, "label": app, "iconUrl": icon_url, "color": "#000",
+        "x": 0, "y": 0, "cell": {"col": 0, "row": row}, "url": url})
+}
+
+#[tokio::test]
+async fn web_apps_get_their_icons_before_the_build() {
+    use wiremock::matchers::path;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let site = MockServer::start().await;
+    Mock::given(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html><head></head></html>"))
+        .mount(&site)
+        .await;
+    let favicon = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, DOT).unwrap();
+    Mock::given(path("/favicon.ico"))
+        .respond_with(ResponseTemplate::new(200).insert_header("content-type", "image/png").set_body_bytes(favicon))
+        .mount(&site)
+        .await;
+
+    let e = env_with(Some(Icons::for_tests())).await;
+    let mut d = design("webby");
+    d["layout"]["icons"] = json!([
+        web_icon("custom-site", 0, &site.uri(), ""),
+        web_icon("custom-mine", 1, "https://mine.invalid", &format!("data:image/png;base64,{DOT}")),
+        // Nobody answers there: a card with its name.
+        web_icon("custom-gone", 2, "http://127.0.0.1:9/", ""),
+    ]);
+    let b = e.builds.create(&request(d)).unwrap();
+    let l = wait(&e, &b.id).await;
+    assert_eq!(l.build.status, BuildStatus::Done, "{l:?}");
+    assert!(
+        l.lines.iter().any(|x| x == "» icons for 3 web apps: 1 from their sites, 1 chosen, 1 with their names"),
+        "{:?}",
+        l.lines
+    );
+    let (_, _, context) = e.fake.0.lock().unwrap().builds[0].clone();
+    let files = names(&context);
+    for id in ["custom-site", "custom-mine", "custom-gone"] {
+        let want = format!("root/usr/share/icons/hicolor/512x512/apps/wadspaces-webapp-{id}.png");
+        assert!(files.contains(&want), "{want} not in {files:?}");
+    }
 }

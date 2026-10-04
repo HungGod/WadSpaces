@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { newSpec, toWaddSpec } from "../spec";
-import { bundleFiles, compose, dockerfile, kaleResourcesJson, quadlet, readme } from "./index";
+import { bundleFiles, compose, dockerfile, quadlet, readme, wadbrowserConf } from "./index";
 
 const here = (p: string) => resolve(__dirname, p);
 // The monorepo root (apps/wadcreator/src/core/generator → five up). Unit-file
@@ -117,21 +117,15 @@ const kaleB = newSpec({
   display: "host",
   features: ["git", "python", "nodejs", "vscode", "claude-code"],
   projects: [{ id: "kaleb00000000000000a", name: "KaleBrowser", mount: "KaleBrowser" }],
-  kaleResources: [
-    { app_name: "Github", app_url: "https://github.com" },
-    { app_name: "Claude", app_url: "https://claude.ai" },
-    { app_name: "Open Router", app_url: "https://openrouter.ai/" },
+  webapps: [
+    { name: "Github", url: "https://github.com" },
+    { name: "Claude", url: "https://claude.ai" },
+    { name: "Open Router", url: "https://openrouter.ai/" },
   ],
   port: 3130,
 });
 
 describe("bundle matches the hand-written workspaces", () => {
-  it("kale-b resources", () => {
-    expect(kaleResourcesJson(kaleB)).toBe(
-      readFileSync(`${containers}/kale-b/kalebrowser-resources.json`, "utf8"),
-    );
-  });
-
   it("kale-b Dockerfile instructions", () => {
     const body = (s: string) => s.split("\n").filter((l) => l && !l.startsWith("#"));
     expect(body(dockerfile(kaleB))).toEqual(body(readFileSync(`${containers}/kale-b/Dockerfile`, "utf8")));
@@ -164,9 +158,20 @@ describe("bundleFiles", () => {
       "README.md",
       "wad-kale-b.container",
       "workspaces.yaml.snippet",
-      "root/etc/wadspaces/kalebrowser-resources.json",
     ]);
     expect(toWaddSpec(kaleB).volumes).toEqual(["wad-kale-b-config:/config:z"]);
+  });
+
+  it("puts web apps' icons and what links open in into the image", () => {
+    const png = new Uint8Array([137, 80, 78, 71]);
+    const spec = { ...kaleB, webapps: [{ id: "claude", name: "Claude", url: "https://claude.ai" }], defaultBrowser: "full" as const };
+    const files = bundleFiles(spec, undefined, undefined, { claude: png, stranger: png });
+    expect(files.map((f) => f.path).slice(5)).toEqual([
+      "root/etc/wadspaces/wadbrowser.conf",
+      "root/usr/share/icons/hicolor/512x512/apps/wadspaces-webapp-claude.png",
+    ]);
+    expect(wadbrowserConf(spec)).toContain("default = full\n");
+    expect(wadbrowserConf(kaleB)).toBeNull();
   });
 
   it("names the default projects and leaves them out of the image", () => {

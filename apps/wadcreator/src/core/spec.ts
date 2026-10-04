@@ -16,7 +16,6 @@ export type FeatureId =
   | "chrome"
   | "firebase"
   | "electron-deps"
-  | "kalebrowser"
   | "tiled"
   | "android-studio"
   | "hplip"
@@ -42,8 +41,7 @@ export const FEATURES: Feature[] = [
   { id: "electron-deps", label: "Electron libraries", description: "shared libraries for Electron apps", hidden: true },
   { id: "vscode", label: "VS Code", description: "Microsoft VS Code", needs: ["electron-deps"] },
   { id: "claude-code", label: "Claude Code", description: "Claude Code CLI with a desktop launcher", needs: ["nodejs"] },
-  { id: "chrome", label: "Chrome", description: "Google Chrome; needed for web apps", needs: ["electron-deps"] },
-  { id: "kalebrowser", label: "Kale Browser", description: "needed for Kale Browser apps", needs: ["nodejs", "electron-deps"], hidden: true },
+  { id: "chrome", label: "Chrome", description: "Google Chrome; web apps that need it (DRM, video calls) bring it", needs: ["electron-deps"] },
   { id: "tiled", label: "Tiled", description: "tile map editor" },
   { id: "android-studio", label: "Android Studio", description: "large download; emulator needs /dev/kvm" },
   { id: "hplip", label: "HP printer tools", description: "hplip and CUPS client" },
@@ -58,11 +56,17 @@ export interface SpecProject {
   mount: string;
 }
 
+/** A website in a WadBrowser window of its own (wadspaces-webapp). */
 export interface WebApp {
   name: string;
   url: string;
   /** Catalog id: fixes the launcher name (wadspaces-webapp-<id>.desktop). */
   id?: string;
+  /** A site WadBrowser can't run (DRM, video calls): a Chrome --app window. */
+  chrome?: boolean;
+  /** The user's own picture for its icon (an upload's data: URL, or an
+   *  address); otherwise wadd makes one from the site's icon. */
+  iconUrl?: string;
 }
 
 /** Debian packages for one desktop app (wadspaces-apt). */
@@ -83,6 +87,7 @@ export interface LayoutEntry {
   autostart?: boolean;
 }
 
+/** A Kale Browser app, from designs made before WadBrowser: built as a web app now. */
 export interface KaleResource {
   app_name: string;
   app_url: string;
@@ -111,7 +116,9 @@ export interface CreatorSpec {
   features: FeatureId[];
   aptApps?: AptApp[];
   webapps: WebApp[];
-  kaleResources: KaleResource[];
+  /** What links open in: the WadBrowser on its desktop ("full": with an
+   *  address bar; "focus": without). Absent: the base's default (focus). */
+  defaultBrowser?: "full" | "focus";
   wallpaper?: Wallpaper;
   /** Desktop icons in order; absent for hand-written specs (the presets). */
   layout?: LayoutEntry[];
@@ -168,10 +175,10 @@ export function slugify(s: string): string {
   return call("slugify", s);
 }
 
-/** Features in install order. Web apps imply chrome and Kale Browser apps imply
- *  kalebrowser; other dependencies are installed by the feature scripts
- *  themselves (`need nodejs`), so they are not listed. */
-export function resolveFeatures(spec: Pick<CreatorSpec, "features" | "webapps" | "kaleResources">): FeatureId[] {
+/** Features in install order. Web apps run in WadBrowser (in the base); only
+ *  those marked chrome bring chrome. Other dependencies are installed by the
+ *  feature scripts themselves (`need nodejs`), so they are not listed. */
+export function resolveFeatures(spec: Pick<CreatorSpec, "features" | "webapps">): FeatureId[] {
   return call("resolveFeatures", spec);
 }
 

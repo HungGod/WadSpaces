@@ -77,7 +77,7 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
         "dockerfile" => generator::dockerfile(a(0)).into(),
         "compose" => generator::compose(a(0)).into(),
         "readme" => generator::readme(a(0)).into(),
-        "kaleResourcesJson" => generator::kale_resources_json(a(0)).into(),
+        "wadbrowserConf" => generator::wadbrowser_conf(a(0)).map(Value::from).unwrap_or(Value::Null),
         "layoutJson" => build::layout_json(a(0)).into(),
         "quadlet" => generator::quadlet(
             a(0),
@@ -89,11 +89,18 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
         "workspacesYamlSnippet" => generator::workspaces_yaml_snippet(a(0)).into(),
         "bundleFiles" => {
             let wallpaper = args.get(1).and_then(bytes_of);
-            files_json(generator::bundle_files(a(0), wallpaper.as_deref(), opt_s(2)))
+            // Web apps' icons: {"<app id>": {"$bytes": png}}.
+            let icons: Vec<(String, Vec<u8>)> = args
+                .get(3)
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+                .filter_map(|(id, b)| Some((id.clone(), bytes_of(b)?)))
+                .collect();
+            files_json(generator::bundle_files(a(0), wallpaper.as_deref(), opt_s(2), &icons))
         }
         // build
         "toBuildSpec" => build::to_build_spec(a(0), a(1)),
-        "kaleDesktop" => build::kale_desktop(s(0)).into(),
         // catalog
         "recipeFor" => recipes::recipe_for(s(0), opt_s(1)).to_json(),
         "localIcon" => icons::local_icon(s(0)).into(),

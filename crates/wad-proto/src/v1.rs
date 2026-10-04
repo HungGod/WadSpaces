@@ -539,6 +539,44 @@ pub struct BuildRequest {
     pub projects: Vec<serde_json::Value>,
 }
 
+/// A web app's icon to have ready: its site, and the picture the user chose
+/// for it (a data: URL or an address), if any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IconSource {
+    pub site: String,
+    #[serde(default)]
+    pub custom: Option<String>,
+}
+
+/// POST /v1/icons/prefetch: icons Wad Creator's design has, made in the
+/// background so a build finds them ready.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IconPrefetch {
+    pub apps: Vec<IconSource>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum IconKind {
+    /// The site's own icon, as a silhouette card.
+    Site,
+    /// The user's picture.
+    Custom,
+    /// A card with the site's name (it gave no icon, or is on this network).
+    Fallback,
+}
+
+/// GET /v1/icons/webapp?site=&custom=: the icon a web app would get.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WebappIcon {
+    /// PNG, base64.
+    pub png: String,
+    pub kind: IconKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Wallpaper {

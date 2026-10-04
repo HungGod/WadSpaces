@@ -17,10 +17,6 @@ fn desktops() -> &'static Value {
     D.get_or_init(|| serde_json::from_str(PRESET_DESKTOPS_JSON).expect("data/preset-desktops.json is valid"))
 }
 
-fn kale(pairs: &[(&str, &str)]) -> Value {
-    Value::Array(pairs.iter().map(|(n, u)| json!({ "app_name": n, "app_url": u })).collect())
-}
-
 fn web(pairs: &[(&str, &str)]) -> Value {
     Value::Array(pairs.iter().map(|(n, u)| json!({ "name": n, "url": u })).collect())
 }
@@ -29,33 +25,33 @@ fn web(pairs: &[(&str, &str)]) -> Value {
 pub fn presets() -> &'static [Value] {
     static P: OnceLock<Vec<Value>> = OnceLock::new();
     P.get_or_init(|| {
-        let kale_dev = kale(&[("Github", "https://github.com"), ("Claude", "https://claude.ai"), ("Open Router", "https://openrouter.ai/")]);
+        let kale_dev = web(&[("Github", "https://github.com"), ("Claude", "https://claude.ai"), ("Open Router", "https://openrouter.ai/")]);
         vec![
             new_spec(&json!({ "id": "writing", "name": "Writing", "features": ["git", "obsidian"], "port": 3100, "hotkey": 1, "persistConfig": false, "display": "host" })),
             new_spec(&json!({
                 "id": "iq-dev", "name": "IntelligenceQuest Dev", "port": 3110, "hotkey": 2, "display": "host",
                 "features": ["git", "cpp", "python", "nodejs", "vscode", "claude-code", "tiled"],
-                "kaleResources": kale(&[("Spritesheet Packer", "https://www.codeandweb.com/free-sprite-sheet-packer"), ("Github", "https://github.com"), ("Claude", "https://claude.ai"), ("Piskel", "https://www.piskelapp.com/")]),
+                "webapps": web(&[("Spritesheet Packer", "https://www.codeandweb.com/free-sprite-sheet-packer"), ("Github", "https://github.com"), ("Claude", "https://claude.ai"), ("Piskel", "https://www.piskelapp.com/")]),
             })),
             new_spec(&json!({
                 "id": "wad-c", "name": "Wad Creator Dev", "port": 3120, "hotkey": 3, "display": "host",
-                "features": ["git", "nodejs", "firebase", "vscode", "claude-code", "chrome"],
+                "features": ["git", "nodejs", "firebase", "vscode", "claude-code"],
                 "webapps": web(&[("Claude", "https://claude.ai"), ("GitHub", "https://github.com"), ("Google Cloud", "https://console.cloud.google.com"), ("OpenRouter", "https://openrouter.ai")]),
             })),
             new_spec(&json!({
                 "id": "kale-b", "name": "Kale Browser", "port": 3130, "hotkey": 4, "display": "host",
                 "features": ["git", "python", "nodejs", "vscode", "claude-code"],
-                "kaleResources": kale_dev,
+                "webapps": kale_dev,
             })),
             new_spec(&json!({
                 "id": "vanua-academy", "name": "Vanua Academy", "port": 3140, "hotkey": 5, "display": "host",
-                "features": ["git", "python", "nodejs", "firebase", "vscode", "claude-code", "chrome", "hplip"],
+                "features": ["git", "python", "nodejs", "firebase", "vscode", "claude-code", "hplip"],
                 "webapps": web(&[("Gmail", "https://mail.google.com"), ("Claude", "https://claude.ai"), ("GitHub", "https://github.com"), ("Google Cloud", "https://console.cloud.google.com"), ("Google Workspace", "https://workspace.google.com/dashboard"), ("Google Drive", "https://drive.google.com")]),
             })),
             new_spec(&json!({
                 "id": "kale-p", "name": "Kale Phone", "port": 3150, "hotkey": 6, "display": "host", "devices": ["/dev/dri", "/dev/kvm"],
                 "features": ["git", "nodejs", "vscode", "claude-code", "android-studio"],
-                "kaleResources": kale_dev,
+                "webapps": kale_dev,
             })),
         ]
     })

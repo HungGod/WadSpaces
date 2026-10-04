@@ -56,8 +56,7 @@
           "cell": {
             "col": 0,
             "row": 1
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "github-0-2",
@@ -70,8 +69,7 @@
           "cell": {
             "col": 0,
             "row": 2
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "claude-0-3",
@@ -84,8 +82,7 @@
           "cell": {
             "col": 0,
             "row": 3
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "piskel-0-4",
@@ -98,8 +95,7 @@
           "cell": {
             "col": 0,
             "row": 4
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "tiled-0-5",
@@ -266,8 +262,7 @@
           "cell": {
             "col": 0,
             "row": 1
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "claude-0-2",
@@ -280,8 +275,7 @@
           "cell": {
             "col": 0,
             "row": 2
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "openrouter-0-3",
@@ -294,8 +288,7 @@
           "cell": {
             "col": 0,
             "row": 3
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "vscode-0-4",
@@ -488,8 +481,7 @@
           "cell": {
             "col": 0,
             "row": 2
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "claude-0-3",
@@ -502,8 +494,7 @@
           "cell": {
             "col": 0,
             "row": 3
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "openrouter-0-4",
@@ -516,8 +507,7 @@
           "cell": {
             "col": 0,
             "row": 4
-          },
-          "launcher": "kale"
+          }
         },
         {
           "id": "vscode-0-5",

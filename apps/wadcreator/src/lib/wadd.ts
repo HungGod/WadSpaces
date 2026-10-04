@@ -371,6 +371,11 @@ export const wadd = {
   /** The Rust wadd: build from the design (it makes the build folder itself). */
   buildDesign: (req: { design: WadspaceSpec; wallpaper: { fileName: string; data: string }; projects: Project[] }) =>
     call<BuildSummary>("POST", "/api/builds/design", req),
+  /** Web apps' icons for wadd to make ahead of a build (it keeps them). */
+  prefetchIcons: (apps: { site: string; custom?: string }[]) => call<{ ok: boolean }>("POST", "/api/icons/prefetch", { apps }),
+  /** The icon a web app gets in its image: a PNG (base64), and how it was made. */
+  webappIcon: (site: string, custom?: string) =>
+    call<{ png: string; kind: "site" | "custom" | "fallback" }>("POST", "/api/icons/webapp", { site, ...(custom && { custom }) }),
   build: (id: string, since = 0) => call<BuildUpdate>("GET", `/api/builds/${encodeURIComponent(id)}?since=${since}`),
   cancelBuild: (id: string) => call<BuildSummary>("DELETE", `/api/builds/${encodeURIComponent(id)}`),
   // Projects (folders mounted at launch) and launches

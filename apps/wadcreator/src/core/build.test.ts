@@ -43,7 +43,7 @@ describe("toBuildSpec", () => {
       icon("vscode", 0, { autostart: true }),
       icon("gimp", 1),
       icon("github", 2),
-      icon("claude", 3, { launcher: "kale" }),
+      icon("claude", 3, { launcher: "kale" }), // saved before WadBrowser
       icon("unity", 4),
       icon("custom-k1", 5, { label: "My Site", url: "https://my.site" }),
       // A cloud-file shortcut saved before cloud files were removed.
@@ -56,11 +56,12 @@ describe("toBuildSpec", () => {
   it("installs each app the way its recipe says", () => {
     expect(plan.spec.features).toEqual(expect.arrayContaining(["git", "vscode"]));
     expect(plan.spec.aptApps).toEqual([{ id: "gimp", packages: ["gimp"], desktop: "gimp.desktop" }]);
+    // Every web app is a WadBrowser window, the old Kale ones too.
     expect(plan.spec.webapps).toEqual([
       { id: "github", name: "GitHub", url: "https://github.com" },
+      { id: "claude", name: "Claude", url: "https://claude.ai" },
       { id: "custom-k1", name: "My Site", url: "https://my.site" },
     ]);
-    expect(plan.spec.kaleResources).toEqual([{ app_name: "Claude", app_url: "https://claude.ai" }]);
   });
 
   it("reports what it can't install yet", () => {
@@ -70,17 +71,28 @@ describe("toBuildSpec", () => {
   it("keeps the desktop order in layout.json, without duplicates or old file shortcuts", () => {
     expect(plan.spec.layout!.map((l) => l.app)).toEqual(["vscode", "gimp", "github", "claude", "custom-k1"]);
     expect(plan.spec.layout![0]).toEqual({ app: "vscode", desktop: "wadspaces-vscode.desktop", label: "VS Code", autostart: true });
-    expect(plan.spec.layout![3]).toEqual({ app: "claude", desktop: "WADspaces-claude.desktop", label: "Claude" });
+    expect(plan.spec.layout![3]).toEqual({ app: "claude", desktop: "wadspaces-webapp-claude.desktop", label: "Claude" });
     expect(JSON.parse(layoutJson(plan.spec)).icons).toHaveLength(5);
   });
 
   it("generates a Dockerfile with the new helpers", () => {
     const df = dockerfile(plan.spec);
-    expect(df).toContain("RUN wadspaces-feature git vscode chrome kalebrowser");
+    // Web apps need no Chrome: WadBrowser is in the base.
+    expect(df).toContain("RUN wadspaces-feature git vscode\n");
     expect(df).toContain("wadspaces-apt gimp --desktop gimp.desktop gimp && \\\n    wadspaces-apt --clean");
     expect(df).toContain('wadspaces-webapp --id github "GitHub" https://github.com');
-    expect(df).toContain("wadspaces-kalebrowser-install");
+    expect(df).not.toContain("kalebrowser");
     expect(df).toContain("ARG BASE_IMAGE=localhost/wadspaces-base:trixie");
+  });
+
+  it("links open in the WadBrowser on the desktop; DRM and call sites stay on Chrome", () => {
+    const full = toBuildSpec(ws([icon("wadbrowser-focus", 0), icon("wadbrowser", 1), icon("spotify", 2)])).spec;
+    expect(full.defaultBrowser).toBe("full");
+    expect(full.webapps).toEqual([{ id: "spotify", name: "Spotify", url: "https://open.spotify.com", chrome: true }]);
+    expect(dockerfile(full)).toContain('wadspaces-webapp --id spotify --chrome "Spotify" https://open.spotify.com');
+    expect(dockerfile(full)).toContain("RUN wadspaces-feature git chrome\n");
+    expect(toBuildSpec(ws([icon("wadbrowser-focus", 0)])).spec.defaultBrowser).toBe("focus");
+    expect(toBuildSpec(ws([icon("gmail", 0)])).spec.defaultBrowser).toBeUndefined();
   });
 
   it("names the image after the wadspace unless told otherwise", () => {

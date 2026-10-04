@@ -366,6 +366,12 @@ impl RsWadd {
                 });
             }
             (Post, ["api", "builds", "design"]) => build_py(&self.v1(Post, "/v1/builds", Some(&b)).await?),
+            // Web apps' icons, made before a build (prefetch) or shown in the Builder.
+            (Post, ["api", "icons", "prefetch"]) => {
+                self.v1(Post, "/v1/icons/prefetch", Some(&b)).await?;
+                ok()
+            }
+            (Post, ["api", "icons", "webapp"]) => self.v1(Post, "/v1/icons/webapp", Some(&b)).await?,
             (Get, ["api", "builds", id]) => {
                 let since = q.get("since").cloned().unwrap_or_else(|| "0".into());
                 let l = self.v1(Get, &format!("/v1/builds/{}?since={since}", enc(id)), None).await?;

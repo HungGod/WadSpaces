@@ -13,7 +13,6 @@ pub fn default_advanced(tz: &str) -> Value {
         "hotkey": null,
         "tools": ["git"],
         "projects": [],
-        "kaleResources": [],
         "env": { "PUID": "1000", "PGID": "1000", "TZ": tz },
         "secrets": [],
         "devices": ["/dev/dri"],

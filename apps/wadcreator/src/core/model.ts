@@ -25,7 +25,8 @@ export interface LayoutIcon {
   cell?: { col: number; row: number };
   /** Open this app's window as soon as the wadspace boots. */
   autostart?: boolean;
-  /** Web apps only: open in Chrome (default) or as a Kale Browser app. */
+  /** @deprecated Designs from before WadBrowser: "chrome" or "kale". Every
+   *  web app is a WadBrowser window now; this is read and ignored. */
   launcher?: "chrome" | "kale";
   /** Custom (non-catalog) web apps: the site to open. */
   url?: string;
@@ -71,7 +72,8 @@ export interface Advanced {
   /** Ids of the projects (core/projects.ts) it opens with unless you pick
    *  others: folders on the machine mounted at ~/Desktop/<mountName>. */
   projects: string[];
-  kaleResources: KaleResource[];
+  /** @deprecated Designs from before WadBrowser: built as web apps (menu only). */
+  kaleResources?: KaleResource[];
   env: Record<string, string>;
   /** Podman secrets on the machine, e.g. github_token. */
   secrets: string[];

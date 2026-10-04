@@ -25,6 +25,7 @@ import { Catalog } from "./Catalog";
 import { Customize, DesktopSettings } from "./Properties";
 import { ProjectsPanel } from "./ProjectsPanel";
 import { hasLocal } from "@/lib/machine";
+import { usePrefetchIcons } from "@/lib/webappIcons";
 
 /** The Builder walks through these in order, then builds. */
 type Step = "apps" | "projects" | "customize";
@@ -99,6 +100,9 @@ export function Builder({ id, duplicate = false, agent: startWithAgent = false, 
   useEffect(() => {
     if (tourStep === "apps" || tourStep === "projects") setStep(tourStep);
   }, [tourStep]);
+
+  // Web apps' icons, made on the machine while you design, ready for the build.
+  usePrefetchIcons({ layout, advanced });
 
   const snapshot = JSON.stringify({ name, description, visibility, layout, agent, dockerfile, advanced });
   const dirty = snapshot !== saved;

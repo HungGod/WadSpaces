@@ -5,7 +5,9 @@
 //   apt       Debian trixie packages, installed by `wadspaces-apt`; `desktop`
 //             names the launcher to put on the desktop (otherwise the helper
 //             takes the first new one in /usr/share/applications)
-//   webapp    a Chrome --app window (`wadspaces-webapp`); pulls in chrome
+//   webapp    a WadBrowser window of its own (`wadspaces-webapp`); `chrome`:
+//             a Chrome --app window instead, for sites WadBrowser can't run
+//             (DRM players, video calls), which pulls in chrome
 //   builtin   already in the base image
 //   soon      not installable yet (third-party repo, AI agent, ...): shown in
 //             the catalog with a "Coming soon" badge and skipped by builds
@@ -17,7 +19,7 @@ import { call } from "../wasm";
 export type Recipe =
   | { kind: "feature"; feature: FeatureId; desktop: string[] }
   | { kind: "apt"; packages: string[]; desktop?: string }
-  | { kind: "webapp"; url: string }
+  | { kind: "webapp"; url: string; chrome?: boolean }
   | { kind: "builtin"; desktop: string }
   | { kind: "soon"; reason: string };
 

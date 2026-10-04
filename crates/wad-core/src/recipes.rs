@@ -8,8 +8,10 @@ pub enum Recipe {
     Feature { feature: &'static str, desktop: &'static [&'static str] },
     /// Debian packages (`wadspaces-apt`); `desktop`: the launcher to use.
     Apt { packages: &'static [&'static str], desktop: Option<&'static str> },
-    /// A Chrome --app window (`wadspaces-webapp`).
-    Webapp { url: String },
+    /// A website in a window of its own (`wadspaces-webapp`): WadBrowser's,
+    /// or, for the few sites WebKitGTK can't run (DRM players, video calls),
+    /// a Chrome --app window.
+    Webapp { url: String, chrome: bool },
     /// In the base image already.
     Builtin { desktop: &'static str },
     /// Not installable yet.
@@ -26,7 +28,8 @@ impl Recipe {
                 Some(d) => json!({ "kind": "apt", "packages": packages, "desktop": d }),
                 None => json!({ "kind": "apt", "packages": packages }),
             },
-            Recipe::Webapp { url } => json!({ "kind": "webapp", "url": url }),
+            Recipe::Webapp { url, chrome: false } => json!({ "kind": "webapp", "url": url }),
+            Recipe::Webapp { url, chrome: true } => json!({ "kind": "webapp", "url": url, "chrome": true }),
             Recipe::Builtin { desktop } => json!({ "kind": "builtin", "desktop": desktop }),
             Recipe::Soon { reason } => json!({ "kind": "soon", "reason": reason }),
         }
@@ -43,7 +46,12 @@ fn apt(packages: &'static [&'static str], desktop: Option<&'static str>) -> Reci
     Recipe::Apt { packages, desktop }
 }
 fn web(url: &str) -> Recipe {
-    Recipe::Webapp { url: url.into() }
+    Recipe::Webapp { url: url.into(), chrome: false }
+}
+/// A site that needs Chrome: WebKitGTK has no WebRTC (video calls) and no
+/// EME (DRM), so these would load but not work in WadBrowser.
+fn chrome_web(url: &str) -> Recipe {
+    Recipe::Webapp { url: url.into(), chrome: true }
 }
 fn soon(reason: &'static str) -> Recipe {
     Recipe::Soon { reason }
@@ -53,6 +61,8 @@ fn soon(reason: &'static str) -> Recipe {
 pub fn recipe(id: &str) -> Option<Recipe> {
     Some(match id {
         // Browsers
+        "wadbrowser" => Recipe::Builtin { desktop: "wadbrowser.desktop" },
+        "wadbrowser-focus" => Recipe::Builtin { desktop: "wadbrowser-focus.desktop" },
         "chrome" => feature("chrome", &["wadspaces-chrome.desktop"]),
         "firefox" => apt(&["firefox-esr"], Some("firefox-esr.desktop")),
         "chromium" => apt(&["chromium"], Some("chromium.desktop")),
@@ -111,12 +121,12 @@ pub fn recipe(id: &str) -> Option<Recipe> {
         "gmail" => web("https://mail.google.com"),
         "google-workspace" => web("https://workspace.google.com/dashboard"),
         // Chat and meetings
-        "slack" => web("https://app.slack.com/client"),
-        "discord" => web("https://discord.com/app"),
-        "zoom" => web("https://app.zoom.us/wc"),
+        "slack" => chrome_web("https://app.slack.com/client"),
+        "discord" => chrome_web("https://discord.com/app"),
+        "zoom" => chrome_web("https://app.zoom.us/wc"),
         "telegram" => apt(&["telegram-desktop"], Some("org.telegram.desktop.desktop")),
         "signal" => soon(THIRD_PARTY),
-        "spotify" => web("https://open.spotify.com"),
+        "spotify" => chrome_web("https://open.spotify.com"),
         // Games
         "steam" => soon(THIRD_PARTY),
         "retroarch" => apt(&["retroarch"], None),
@@ -139,7 +149,7 @@ pub fn recipe_for(app_id: &str, domain: Option<&str>) -> Recipe {
             } else {
                 format!("https://{d}")
             };
-            Recipe::Webapp { url }
+            Recipe::Webapp { url, chrome: false }
         }
         _ => soon("Unknown app"),
     }
@@ -176,7 +186,7 @@ mod tests {
     #[test]
     fn an_unknown_app_with_a_site_is_a_web_app() {
         assert!(
-            matches!(recipe_for("custom-x1", Some("example.com/app")), Recipe::Webapp { url } if url == "https://example.com/app")
+            matches!(recipe_for("custom-x1", Some("example.com/app")), Recipe::Webapp { url, chrome: false } if url == "https://example.com/app")
         );
         assert!(matches!(recipe_for("custom-x1", None), Recipe::Soon { .. }));
     }

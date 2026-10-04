@@ -7,6 +7,8 @@ import { favicon } from "@/lib/favicon";
 import { backend } from "@/data";
 import { useApp } from "@/lib/store";
 import { localIcon } from "@core/catalog/icons";
+import { recipeFor } from "@core/catalog/recipes";
+import { useWebappIcon } from "@/lib/webappIcons";
 
 const SWATCHES = ["#c6ff1f", "#ff3d81", "#7c3aed", "#0e7fd6", "#1db954", "#ff7139", "#e87d0d", "#24292f", "#2f2f2f", "#5865f2", "#c96442", "#0a0614"];
 
@@ -21,6 +23,9 @@ export function IconEditor({ icon, onSave, onCancel }: { icon: LayoutIcon; onSav
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
+  // A web app: the icon its image will get (made on the machine, by wadd).
+  const recipe = recipeFor(icon.appId, icon.url);
+  const made = useWebappIcon(recipe.kind === "webapp" ? recipe.url : undefined, iconUrl);
 
   const upload = async (f: File) => {
     setBusy(true);
@@ -89,6 +94,16 @@ export function IconEditor({ icon, onSave, onCancel }: { icon: LayoutIcon; onSav
               {busy ? "Uploading…" : "Choose an image"}
             </button>
           </>
+        )}
+
+        {made && (
+          <div className="mt-4 flex items-center gap-3 rounded-lg bg-white/5 p-2 text-xs text-white/60">
+            <img src={`data:image/png;base64,${made.png}`} alt="" className="size-10 rounded-lg" />
+            <span>
+              In the workspace:{" "}
+              {made.kind === "site" ? "the site's own icon" : made.kind === "custom" ? "your picture" : "the site's name (it has no icon to use)"}
+            </span>
+          </div>
         )}
 
         <div className="mb-2 mt-4 text-xs text-white/60">Window color</div>

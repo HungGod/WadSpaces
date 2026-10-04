@@ -136,12 +136,12 @@ function CustomAppDialog({ open, onClose, onCreate }: { open: boolean; onClose: 
           </div>
           <div className="flex-1">
             <Label>Name</Label>
-            <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Kale Browser" />
+            <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="My site" />
           </div>
         </div>
         <div>
           <Label>Website</Label>
-          <Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="kalebrowser.com" />
+          <Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="example.com" />
         </div>
         <div>
           <Label hint="optional">Icon image URL</Label>

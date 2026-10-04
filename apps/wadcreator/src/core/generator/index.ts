@@ -3,8 +3,9 @@
 //
 //   Dockerfile  docker-compose.yml  README.md  wad-<id>.container  workspaces.yaml.snippet
 //   root/etc/wadspaces/layout.json                  (Builder desktops: icons in order)
-//   root/etc/wadspaces/kalebrowser-resources.json   (Kale Browser apps only)
+//   root/etc/wadspaces/wadbrowser.conf              (a WadBrowser on the desktop: what links open in)
 //   root/usr/share/backgrounds/wallpaper.<ext>      (when a wallpaper is set)
+//   root/usr/share/icons/hicolor/512x512/apps/wadspaces-webapp-<id>.png   (web apps' icons: wadd makes them)
 //
 // and builds through wadd on the machine, or with `podman build` in it on the
 // base image (images/build.sh in the monorepo). Project files are
@@ -16,8 +17,9 @@ export function dockerfile(spec: CreatorSpec): string {
   return call("dockerfile", spec);
 }
 
-export function kaleResourcesJson(spec: CreatorSpec): string {
-  return call("kaleResourcesJson", spec);
+/** /etc/wadspaces/wadbrowser.conf, when the desktop has a WadBrowser (null otherwise). */
+export function wadbrowserConf(spec: CreatorSpec): string | null {
+  return call("wadbrowserConf", spec);
 }
 
 /** docker-compose.yml, for running it by hand. A native (display: host)
@@ -50,9 +52,17 @@ export interface BundleFile {
   content: string | Uint8Array;
 }
 
-/** The build folder. `dockerfileText` replaces the generated Dockerfile (a hand edit). */
-export function bundleFiles(spec: CreatorSpec, wallpaper?: Uint8Array, dockerfileText?: string): BundleFile[] {
-  return call("bundleFiles", spec, wallpaper ?? null, dockerfileText ?? null);
+/** The build folder. `dockerfileText` replaces the generated Dockerfile (a
+ *  hand edit); `icons`: web apps' icons (PNG) by app id. A folder made here
+ *  for download has none: the image's helper writes a card with the site's
+ *  name instead. */
+export function bundleFiles(
+  spec: CreatorSpec,
+  wallpaper?: Uint8Array,
+  dockerfileText?: string,
+  icons?: Record<string, Uint8Array>,
+): BundleFile[] {
+  return call("bundleFiles", spec, wallpaper ?? null, dockerfileText ?? null, icons ?? null);
 }
 
 export async function bundleZip(spec: CreatorSpec, wallpaper?: Uint8Array, dockerfileText?: string): Promise<Blob> {

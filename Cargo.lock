@@ -6066,6 +6066,7 @@ dependencies = [
  "wad-firebase",
  "wad-git",
  "wad-github",
+ "wad-icons",
  "wad-input",
  "wad-net",
  "wad-podman",

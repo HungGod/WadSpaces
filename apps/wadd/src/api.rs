@@ -19,9 +19,9 @@ use serde::Deserialize;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::BroadcastStream;
 use wad_proto::v1::{
-    Browse, Build, BuildLog, BuildRequest, CloudLink, Drive, Event, Health, KeysStatus, Launch, LaunchLog,
-    LaunchRequest, LogLine, MachineInfo, Project, ProjectDeleted, ProjectStatus, Run, Session, SessionRequest,
-    ViewState, Workspace, WorkspaceState,
+    Browse, Build, BuildLog, BuildRequest, CloudLink, Drive, Event, Health, IconPrefetch, IconSource, KeysStatus,
+    Launch, LaunchLog, LaunchRequest, LogLine, MachineInfo, Project, ProjectDeleted, ProjectStatus, Run, Session,
+    SessionRequest, ViewState, WebappIcon, Workspace, WorkspaceState,
 };
 use wad_proto::{ApiError, ErrorCode};
 
@@ -151,6 +151,8 @@ pub fn router(app: Arc<AppState>) -> Router {
             get(builds).post(build_create).layer(axum::extract::DefaultBodyLimit::max(96 * 1024 * 1024)),
         )
         .route("/v1/builds/{id}", get(build).delete(build_cancel))
+        .route("/v1/icons/prefetch", post(icons_prefetch))
+        .route("/v1/icons/webapp", post(webapp_icon))
         .route("/v1/runs", get(runs))
         .route("/v1/session", get(session).post(session_begin))
         .route("/v1/session", delete(session_end))
@@ -529,6 +531,32 @@ async fn build_create(
     Json(req): Json<BuildRequest>,
 ) -> Result<(StatusCode, Json<Build>), Failure> {
     Ok((StatusCode::CREATED, Json(app.builds.create(&req)?)))
+}
+
+/// Web apps' icons to make in the background, for a build to come.
+async fn icons_prefetch(State(app): State<Arc<AppState>>, Json(req): Json<IconPrefetch>) -> StatusCode {
+    let apps: Vec<IconSource> = req.apps.into_iter().filter(|a| web_address(&a.site)).take(64).collect();
+    app.builds.icons().prefetch(apps);
+    StatusCode::ACCEPTED
+}
+
+/// The icon a web app would get in its image (Wad Creator shows it).
+async fn webapp_icon(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<IconSource>,
+) -> Result<Json<WebappIcon>, Failure> {
+    if !web_address(&req.site) {
+        return Err(Failure(ApiError::new(ErrorCode::BadRequest, "site: an http(s) address")));
+    }
+    let icon = app.builds.icons().icon(&req.site, req.custom.as_deref()).await;
+    Ok(Json(WebappIcon {
+        png: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &icon.png),
+        kind: crate::icons::kind(icon.source),
+    }))
+}
+
+fn web_address(s: &str) -> bool {
+    (s.starts_with("https://") || s.starts_with("http://")) && s.len() < 2048
 }
 
 /// A build, and its log from line `since`.

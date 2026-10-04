@@ -68,14 +68,19 @@ const WADSPACES: WadspaceSpec[] = [
     icon("terminal", 1, { autostart: true }),
     icon("gimp", 2),
     icon("claude", 3),
-    icon("github", 4, { launcher: "kale", label: "Git Hub" }),
+    icon("github", 4, { launcher: "kale", label: "Git Hub" }), // from before WadBrowser: a web app
     icon("brave", 5),
     icon("vscode", 6), // twice: one install
     icon("custom-thing", 7, { label: "My Site", url: "https://example.com/app?x=1" }),
     icon("custom-fav", 8, { label: "Fav", iconUrl: "https://www.google.com/s2/favicons?domain=docs.rs&sz=128" }),
     icon("nowhere", 9, { label: "Nowhere" }),
     icon("chrome", 10),
+    icon("wadbrowser", 11),
+    icon("spotify", 12), // a Chrome web app (DRM)
+    icon("custom-up", 13, { label: "Uploaded", url: "https://up.example", iconUrl: "data:image/png;base64,iVBORw0KGgo=" }),
+    icon("custom-pic", 14, { label: "Picture", url: "https://pic.example", iconUrl: "https://pic.example/me.png" }),
   ]),
+  ws("browse-abc123", [icon("wadbrowser-focus", 0), icon("discord", 1), icon("gmail", 2)]),
   ws(
     "free-abc123",
     [icon("obsidian", 0, { x: 0.5, y: 0.2, cell: undefined }), icon("firefox", 0, { x: 0.1, y: 0.9, cell: undefined }), icon("krita", 0, { x: 0.1, y: 0.1, cell: undefined })],
@@ -106,9 +111,13 @@ const CREATOR: CreatorSpec[] = [
   newSpec({
     id: "odd",
     name: 'Odd "name" with $vars and `ticks` \\ ünï',
-    features: ["obsidian", "git", "chrome", "kalebrowser"],
-    webapps: [{ name: "Mail", url: "https://mail.google.com" }, { id: "slack", name: "Slack \"work\"", url: "https://app.slack.com/client" }],
-    kaleResources: [{ app_name: "Claude", app_url: "https://claude.ai" }],
+    features: ["obsidian", "git", "chrome"],
+    webapps: [
+      { name: "Mail", url: "https://mail.google.com" },
+      { id: "slack", name: "Slack \"work\"", url: "https://app.slack.com/client", chrome: true },
+      { id: "mine", name: "Mine", url: "https://mine.example", iconUrl: "data:image/png;base64,iVBORw0KGgo=" },
+    ],
+    defaultBrowser: "full",
     aptApps: [{ id: "gimp", packages: ["gimp"], desktop: "gimp.desktop" }, { id: "ardour", packages: ["ardour", "ardour-data"] }],
     wallpaper: { fileName: "wallpaper.jpg", mode: "tile", color: "#123456" },
     layout: [{ app: "vscode", desktop: "code.desktop", label: "Code", autostart: true }, { app: "gimp", label: "GIMP" }],
@@ -121,7 +130,7 @@ const CREATOR: CreatorSpec[] = [
   }),
   newSpec({ id: "plain", name: "Plain", env: {}, secrets: [], devices: [], shmSize: "", persistConfig: false, features: [] }),
   newSpec({ id: "wall", name: "Wall", wallpaper: { fileName: "wallpaper.png", mode: "center", color: "#0b0b14" } }),
-  newSpec({ id: "Bad ID", name: " ", image: " ", display: "stream", port: 8080, hotkey: 12, webapps: [{ name: "x", url: "not a url" }], kaleResources: [{ app_name: "y", app_url: "" }] }),
+  newSpec({ id: "Bad ID", name: " ", image: " ", display: "stream", port: 8080, hotkey: 12, webapps: [{ name: "x", url: "not a url" }, { name: "y", url: "" }] }),
   newSpec({ id: "lowport", name: "Low", display: "stream", port: 80, hotkey: 0 }),
   ...presets(),
 ];
@@ -191,11 +200,13 @@ export function cases(): Case[] {
     add("dockerfile", s);
     add("compose", s);
     add("readme", s);
-    add("kaleResourcesJson", s);
+    add("wadbrowserConf", s);
     add("layoutJson", s);
     add("bundleFiles", s);
     add("bundleFiles", s, { $bytes: "iVBORw0KGgo=" }, "FROM scratch\n");
   }
+  // Web apps' icons, made by wadd: only the spec's own web apps, by a valid id.
+  add("bundleFiles", CREATOR[3], null, null, { slack: { $bytes: "iVBORw0KGgo=" }, mine: { $bytes: "AAEC" }, other: { $bytes: "AA==" }, "Bad Id": { $bytes: "AA==" } });
   for (const w of WADD) {
     add("quadlet", w);
     add("quadlet", w, "/srv/p", "/srv/s");
@@ -209,10 +220,9 @@ export function cases(): Case[] {
   // build
   for (const w of WADSPACES) for (const o of BUILD_OPTS) add("toBuildSpec", w, o);
   for (const p of presets()) add("toBuildSpec", presetWadspace(p.id), { projects: PROJECTS });
-  for (const n of ["Claude", "  My App_Name  ", "Open Router", "Ünï Cødé", "a--b__c  d", ""]) add("kaleDesktop", n);
 
   // recipes and icons
-  for (const [id, d] of [["vscode"], ["brave"], ["unknown-app"], ["unknown-app", "example.com"], ["unknown-app", "http://x.org/a"], ["claude", "ignored.com"]] as [string, string?][]) {
+  for (const [id, d] of [["vscode"], ["brave"], ["unknown-app"], ["unknown-app", "example.com"], ["unknown-app", "http://x.org/a"], ["claude", "ignored.com"], ["wadbrowser"], ["wadbrowser-focus"], ["spotify"], ["zoom"]] as [string, string?][]) {
     add("recipeFor", id, ...(d ? [d] : []));
   }
   for (const u of [

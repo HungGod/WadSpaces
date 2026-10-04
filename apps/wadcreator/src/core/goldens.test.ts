@@ -5,10 +5,10 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { layoutJson, kaleDesktop, toBuildSpec } from "./build";
+import { layoutJson, toBuildSpec } from "./build";
 import { localIcon } from "./catalog/icons";
 import { recipeFor } from "./catalog/recipes";
-import { bundleFiles, compose, dockerfile, kaleResourcesJson, quadlet, readme, workspacesYamlSnippet } from "./generator";
+import { bundleFiles, compose, dockerfile, quadlet, readme, wadbrowserConf, workspacesYamlSnippet } from "./generator";
 import { cases } from "./goldens";
 import { defaultAdvanced, dropFileIcons, newWadspaceId, orderedIcons } from "./model";
 import * as projects from "./projects";
@@ -59,13 +59,12 @@ const IMPL: Record<string, Fn> = {
   dockerfile,
   compose,
   readme,
-  kaleResourcesJson,
+  wadbrowserConf,
   layoutJson,
   quadlet,
   workspacesYamlSnippet,
   bundleFiles,
   toBuildSpec,
-  kaleDesktop,
   recipeFor,
   localIcon,
   presetWadspace,
