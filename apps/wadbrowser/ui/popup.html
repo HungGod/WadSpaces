@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <!-- The chrome's menus and panels, drawn over the page in a transparent
-         view of their own (see browser.rs, popup_view). Talks back through
-         the "wb" script message handler. -->
+         view of their own (menu.rs). Talks back through the "wb" script
+         message handler. -->
     <style>
       html,
       body {
@@ -21,7 +21,7 @@
       }
       #box {
         position: absolute;
-        inset: 0 6px 6px 0;
+        inset: 0 8px 8px 0;
         background: #2a2b2e;
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 10px;
@@ -36,54 +36,233 @@
         padding: 0 10px;
         border-radius: 6px;
         cursor: default;
+        outline: none;
       }
       .item:hover,
       .item:focus {
         background: rgba(255, 255, 255, 0.08);
-        outline: none;
       }
       .item .label {
         flex: 1;
       }
-      .item .key {
+      .key {
         color: #9aa0a6;
         font-size: 12px;
+      }
+      .sep {
+        height: 1px;
+        margin: 4px 6px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .zoom {
+        display: flex;
+        align-items: center;
+        height: 32px;
+        padding: 0 4px 0 10px;
+      }
+      .zoom .label {
+        flex: 1;
+      }
+      .zoom button,
+      .dl button {
+        height: 26px;
+        min-width: 30px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: default;
+      }
+      .zoom button:hover,
+      .dl button:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .zoom .value {
+        min-width: 48px;
+        text-align: center;
+      }
+      h2 {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 0;
+        height: 32px;
+        padding: 0 4px 0 10px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .dl {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        height: 56px;
+        padding: 0 4px 0 10px;
+        border-radius: 6px;
+      }
+      .dl:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .dl .name {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .dl .status {
+        color: #9aa0a6;
+        font-size: 12px;
+      }
+      .dl .bar {
+        height: 3px;
+        margin-top: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.1);
+        overflow: hidden;
+      }
+      .dl .bar span {
+        display: block;
+        height: 100%;
+        background: #d4ff3d;
+      }
+      .dl.failed .status {
+        color: #ff6b5e;
+      }
+      #list {
+        max-height: calc(100% - 32px);
+        overflow-y: auto;
+      }
+      .empty {
+        padding: 18px 10px;
+        color: #9aa0a6;
       }
     </style>
   </head>
   <body>
-    <div id="box" role="menu"></div>
+    <div id="box"></div>
     <script>
       "use strict";
       const box = document.getElementById("box");
       const send = (msg) => window.webkit.messageHandlers.wb.postMessage(JSON.stringify(msg));
-      window.wbPopup = {
-        show(kind, data) {
-          box.replaceChildren();
-          if (kind === "menu") {
-            for (const it of data.items || []) {
-              const el = document.createElement("div");
-              el.className = "item";
-              el.setAttribute("role", "menuitem");
-              el.tabIndex = 0;
-              const label = document.createElement("span");
-              label.className = "label";
-              label.textContent = it.label;
-              const key = document.createElement("span");
-              key.className = "key";
-              key.textContent = it.key || "";
-              el.append(label, key);
-              el.addEventListener("click", () => send({ kind: "menu", id: it.id }));
-              box.append(el);
-            }
+      let kind = "";
+
+      function el(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+      }
+
+      function menu(items) {
+        box.setAttribute("role", "menu");
+        for (const it of items || []) {
+          if (it.sep) {
+            box.append(el("div", "sep"));
+          } else if (it.zoom !== undefined) {
+            const row = el("div", "zoom");
+            const out = el("button", "", "−");
+            const value = el("span", "value", `${it.zoom}%`);
+            const inn = el("button", "", "+");
+            out.title = "Zoom out (Ctrl+−)";
+            inn.title = "Zoom in (Ctrl++)";
+            out.onclick = () => send({ kind: "act", action: { do: "zoom-out" }, keep: true });
+            inn.onclick = () => send({ kind: "act", action: { do: "zoom-in" }, keep: true });
+            value.onclick = () => send({ kind: "act", action: { do: "zoom-reset" }, keep: true });
+            value.id = "zoomvalue";
+            row.append(el("span", "label", "Zoom"), out, value, inn);
+            box.append(row);
+          } else {
+            const row = el("div", "item");
+            row.setAttribute("role", "menuitem");
+            row.tabIndex = 0;
+            row.append(el("span", "label", it.label), el("span", "key", it.key || ""));
+            row.onclick = () => send({ kind: "act", action: it.action });
+            box.append(row);
           }
-          box.firstElementChild && box.firstElementChild.focus();
+        }
+        const firstItem = box.querySelector(".item");
+        if (firstItem) firstItem.focus();
+      }
+
+      const size = (n) =>
+        n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB` : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`;
+
+      function downloads(items) {
+        box.removeAttribute("role");
+        const head = el("h2", "", "Downloads");
+        const clear = el("button", "", "Clear");
+        clear.onclick = () => send({ kind: "download", id: 0, what: "clear", keep: true });
+        head.append(clear);
+        const list = el("div");
+        list.id = "list";
+        box.append(head, list);
+        fillDownloads(items);
+      }
+
+      function fillDownloads(items) {
+        const list = document.getElementById("list");
+        if (!list) return;
+        list.replaceChildren();
+        if (!items.length) list.append(el("div", "empty", "Nothing downloaded yet."));
+        for (const d of items) {
+          const row = el("div", `dl ${d.state}`);
+          const left = el("div");
+          const status =
+            d.state === "running"
+              ? d.total
+                ? `${size(d.received)} of ${size(d.total)}`
+                : size(d.received)
+              : d.state === "done"
+                ? size(d.total || d.received)
+                : d.state === "failed"
+                  ? "Failed"
+                  : "Cancelled";
+          left.append(el("div", "name", d.name || "Starting…"), el("div", "status", status));
+          if (d.state === "running") {
+            const bar = el("div", "bar");
+            const fill = el("span");
+            fill.style.width = d.total ? `${Math.min(100, (d.received / d.total) * 100)}%` : "30%";
+            bar.append(fill);
+            left.append(bar);
+          }
+          const buttons = el("div");
+          const btn = (label, what, title) => {
+            const b = el("button", "", label);
+            b.title = title;
+            b.onclick = () => send({ kind: "download", id: d.id, what, keep: what !== "open" && what !== "show" });
+            buttons.append(b);
+          };
+          if (d.state === "running") btn("Cancel", "cancel", "Stop this download");
+          if (d.state === "done") {
+            btn("Open", "open", "Open the file");
+            btn("Show", "show", "Show it in its folder");
+          }
+          if (d.state !== "running") btn("✕", "remove", "Take it off this list (the file stays)");
+          row.append(left, buttons);
+          list.append(row);
+        }
+      }
+
+      window.wbPopup = {
+        show(k, data) {
+          kind = k;
+          box.replaceChildren();
+          if (k === "menu") menu(data.items);
+          if (k === "downloads") downloads(data.items || []);
+        },
+        update(data) {
+          if (kind === "downloads" && data.items) fillDownloads(data.items);
+          const z = document.getElementById("zoomvalue");
+          if (z && data.zoom !== undefined) z.textContent = `${data.zoom}%`;
         },
       };
+
       document.addEventListener("keydown", (e) => {
+        const items = [...box.querySelectorAll(".item")];
+        const at = items.indexOf(document.activeElement);
         if (e.key === "Escape") send({ kind: "close" });
-        if (e.key === "Enter" && document.activeElement && document.activeElement.classList.contains("item"))
-          document.activeElement.click();
+        if (e.key === "Enter" && at >= 0) document.activeElement.click();
+        if (e.key === "ArrowDown" && items.length) items[(at + 1) % items.length].focus();
+        if (e.key === "ArrowUp" && items.length) items[(at - 1 + items.length) % items.length].focus();
       });
     </script>
   </body>

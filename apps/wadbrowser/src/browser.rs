@@ -1,41 +1,40 @@
 //! Browser windows and their tabs.
 //!
 //! GTK objects live on the main thread only, so the windows are kept in a
-//! thread-local and Tauri's (sync) commands, which run on the main thread, use
+//! thread-local, and Tauri's commands (sync ones run on the main thread) use
 //! them directly. WebKit's signals can fire while that table is borrowed (a
-//! load starting inside `load_uri`, say), so they never touch it: they mark the
-//! tab's window for a state push on the next idle turn.
+//! load starting inside `load_uri`, say), so they never touch it: what needs
+//! the table is deferred to the next turn of the main loop (see `tab.rs`).
 
-use crate::{app_id, gpu, profile, urlbar};
+use crate::{app_id, config, menu, profile, resize, tab};
 use gtk::glib;
 use gtk::prelude::*;
-use javascriptcore::ValueExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
-use webkit2gtk::{
-    AutoplayPolicy, LoadEvent, Settings, SettingsExt, UserContentManager, UserContentManagerExt, WebView, WebViewExt,
-    WebsitePolicies, WindowPropertiesExt,
-};
+use webkit2gtk::{BackForwardListExt, WebView, WebViewExt, WebViewSessionState};
 
-type Error = Box<dyn std::error::Error>;
+pub type Error = Box<dyn std::error::Error>;
 
-/// The chrome's height: tabs plus the URL bar row, or one slim row.
-const CHROME_FULL: i32 = 76;
-const CHROME_SLIM: i32 = 38;
+/// The chrome's height: tabs plus the URL bar row, or one slim row. It grows
+/// while the find row or a permission question shows (`chrome_height`).
+pub const CHROME_FULL: i32 = 76;
+pub const CHROME_SLIM: i32 = 38;
 const BACKGROUND: tauri::window::Color = tauri::window::Color(32, 33, 36, 255);
+const CLOSED_KEPT: usize = 25;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     /// Tabs and a URL bar.
     #[default]
     Full,
-    /// Tabs, no URL bar: pages arrive by links and by xdg-open.
+    /// WadBrowser Focus: tabs, no URL bar; pages arrive by links (xdg-open).
     Focus,
-    /// One web app's window: its own app_id and name, no URL bar, and a tab
+    /// One web app's window: its own app_id and name, no URL bar, a tab
     /// strip only once there's a second tab.
     App,
 }
@@ -43,74 +42,129 @@ pub enum Mode {
 #[derive(Clone, Debug, Default)]
 pub struct Opts {
     pub mode: Mode,
-    /// For [`Mode::App`]: the app_id (`wadspaces-webapp-<id>`) and its name.
+    /// For [`Mode::App`]: its app_id (`wadspaces-webapp-<id>`), name, start page and picture.
     pub app_id: Option<String>,
     pub name: Option<String>,
-    pub url: Option<String>,
+    pub start: Option<String>,
+    pub icon: Option<String>,
     pub profile: Option<String>,
 }
 
 impl Opts {
-    fn profile(&self) -> &str {
+    pub fn profile(&self) -> &str {
         self.profile.as_deref().unwrap_or(profile::DEFAULT)
     }
-    fn home(&self) -> String {
-        self.url.clone().unwrap_or_else(|| "about:blank".into())
+
+    /// Where Home and a new tab go: the app's start page, or the configured home.
+    pub fn home(&self) -> String {
+        match (self.mode, &self.start) {
+            (Mode::App, Some(start)) => start.clone(),
+            _ => config::get().home.clone(),
+        }
     }
 }
 
-struct Tab {
-    id: u64,
-    view: WebView,
+pub struct Tab {
+    pub id: u64,
+    /// The page; None while the tab sleeps (hibernated) to free its memory.
+    pub live: Option<WebView>,
+    /// A sleeping tab's history, to wake it where it was.
+    pub saved: Option<glib::Bytes>,
+    pub title: String,
+    pub url: String,
+    pub favicon: Option<String>,
+    pub last_seen: Instant,
 }
 
-/// The chrome's menus and panels: a transparent view in a popup surface of
-/// its own over the window, so the compositor blends its rounded corners and
-/// shadow over the page (GTK 3 can't blend one WebKit view over another).
-struct Menu {
-    win: gtk::Window,
-    view: WebView,
+impl Tab {
+    pub fn new(view: WebView) -> Tab {
+        let id = NEXT_TAB.fetch_add(1, Ordering::Relaxed);
+        tab::register(&view, id);
+        Tab {
+            id,
+            live: Some(view),
+            saved: None,
+            title: String::new(),
+            url: String::new(),
+            favicon: None,
+            last_seen: Instant::now(),
+        }
+    }
+
+    /// Takes in a view's latest title, address and icon (for sleeping later).
+    pub fn refresh(&mut self) {
+        if let Some(v) = &self.live {
+            self.title = v.title().map(String::from).unwrap_or_default();
+            if let Some(u) = v.uri() {
+                self.url = u.into();
+            }
+        }
+    }
 }
 
-struct Browser {
-    window: WebviewWindow,
+impl Tab {
+    /// A tab that isn't loaded until it's looked at (a restored session).
+    pub fn asleep(url: String, title: String) -> Tab {
+        let id = NEXT_TAB.fetch_add(1, Ordering::Relaxed);
+        Tab { id, live: None, saved: None, title, url, favicon: None, last_seen: Instant::now() }
+    }
+}
+
+impl Drop for Tab {
+    fn drop(&mut self) {
+        // A move moves this struct; a drop is the tab closing.
+        if let Some(v) = &self.live {
+            tab::unregister(v);
+        }
+    }
+}
+
+/// A closed tab, for Ctrl+Shift+T: its address and history.
+struct Closed {
+    url: String,
+    saved: Option<glib::Bytes>,
+}
+
+pub struct Browser {
+    pub window: WebviewWindow,
+    pub chrome: WebView,
     stack: gtk::Stack,
-    menu: Menu,
-    tabs: Vec<Tab>,
-    active: Option<u64>,
-    opts: Opts,
+    status: Status,
+    pub menu: menu::Menu,
+    pub tabs: Vec<Tab>,
+    pub active: Option<u64>,
+    pub opts: Opts,
     ready: bool,
+    closed: Vec<Closed>,
+    chrome_extra: i32,
 }
 
 thread_local! {
     static BROWSERS: RefCell<HashMap<String, Browser>> = RefCell::new(HashMap::new());
-    /// Each tab's id by its view (its GObject's address), for WebKit's signals.
-    static VIEW_TAB: RefCell<HashMap<usize, u64>> = RefCell::new(HashMap::new());
+    /// Window labels, the most recently used last.
+    static RECENT: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     static DIRTY: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
     static PUSH_QUEUED: Cell<bool> = const { Cell::new(false) };
-    /// The tab being dragged, and its window: drags cross windows, and the
-    /// window a tab is dropped on learns which tab from here.
-    static DRAG: RefCell<Option<(String, u64)>> = const { RefCell::new(None) };
 }
 
 static NEXT_WINDOW: AtomicU64 = AtomicU64::new(1);
 static NEXT_TAB: AtomicU64 = AtomicU64::new(1);
 
 /// What a new window starts with.
-enum First {
-    Url(Option<String>),
+pub enum First {
+    /// These pages (the home page if none).
+    Urls(Vec<String>),
     /// A tab moved from another window, live.
     Tab(Tab),
+    /// A crashed browser's tabs, `active` shown.
+    Restored { tabs: Vec<Tab>, active: usize },
 }
 
 /// Opens a browser window; its label.
-pub fn open(app: &AppHandle, opts: Opts) -> Result<String, Error> {
-    open_with(app, opts, First::Url(None))
-}
-
-fn open_with(app: &AppHandle, opts: Opts, first: First) -> Result<String, Error> {
+pub fn open(app: &AppHandle, opts: Opts, first: First) -> Result<String, Error> {
     let label = format!("w{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed));
     let title = opts.name.clone().unwrap_or_else(|| "WadBrowser".into());
+    let app_id = opts.app_id.clone().filter(|id| app_id::valid(id)).unwrap_or_else(|| app_id::DEFAULT.into());
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
         .title(&title)
         .inner_size(1100.0, 750.0)
@@ -126,233 +180,189 @@ fn open_with(app: &AppHandle, opts: Opts, first: First) -> Result<String, Error>
     let chrome =
         vbox.children().into_iter().find_map(|w| w.downcast::<WebView>().ok()).ok_or("Tauri made no chrome webview")?;
     vbox.set_child_packing(&chrome, false, true, 0, gtk::PackType::Start);
-    chrome.set_size_request(-1, if opts.mode == Mode::Full { CHROME_FULL } else { CHROME_SLIM });
+    chrome.set_size_request(-1, base_height(opts.mode));
+    resize::attach(chrome.upcast_ref());
 
     let stack = gtk::Stack::new();
     stack.set_hexpand(true);
     stack.set_vexpand(true);
-    let overlay = gtk::Overlay::new();
-    overlay.add(&stack);
-    vbox.pack_start(&overlay, true, true, 0);
+    vbox.pack_start(&stack, true, true, 0);
+    stack.show();
 
     let gtk_window = window.gtk_window()?;
-    let menu = menu(app, &label, &chrome, &gtk_window);
-    let app_id = opts.app_id.clone().filter(|id| app_id::valid(id)).unwrap_or_else(|| app_id::DEFAULT.into());
-    let first = match first {
-        First::Tab(tab) => tab,
-        First::Url(url) => {
-            let url = url.unwrap_or_else(|| opts.home());
-            new_tab(&opts, None, &url)
+    let status = Status::new(&gtk_window);
+    let menu = menu::Menu::new(app, &label, &chrome, &gtk_window);
+    crate::keys::attach(app, &label, &gtk_window);
+
+    let (tabs, shown) = match first {
+        First::Tab(tab) => (vec![tab], 0),
+        First::Urls(urls) if urls.is_empty() => (vec![tab::new_tab(&opts, &opts.home())], 0),
+        First::Urls(urls) => (urls.iter().map(|u| tab::new_tab(&opts, u)).collect(), 0),
+        First::Restored { tabs, active } if !tabs.is_empty() => {
+            let active = active.min(tabs.len() - 1);
+            (tabs, active)
         }
+        First::Restored { .. } => (vec![tab::new_tab(&opts, &opts.home())], 0),
     };
-    let first_id = first.id;
-    stack.add(&first.view);
+    for t in &tabs {
+        if let Some(v) = &t.live {
+            stack.add(v);
+            v.show();
+        }
+    }
+    let first_id = tabs[shown].id;
     BROWSERS.with_borrow_mut(|all| {
         all.insert(
             label.clone(),
             Browser {
                 window: window.clone(),
+                chrome,
                 stack,
+                status,
                 menu,
-                tabs: vec![first],
-                active: Some(first_id),
+                tabs,
+                active: None,
                 opts,
                 ready: false,
+                closed: Vec::new(),
+                chrome_extra: 0,
             },
         )
     });
 
     let closing = label.clone();
-    window.on_window_event(move |e| {
-        if let WindowEvent::Destroyed = e {
+    window.on_window_event(move |e| match e {
+        WindowEvent::Focused(true) => used(&closing),
+        WindowEvent::Focused(false) => {
+            // A menu open over the window closes with it.
+            let label = closing.clone();
+            glib::idle_add_local_once(move || {
+                with(&label, |b| b.menu.hide());
+            });
+        }
+        WindowEvent::Destroyed => {
             let label = closing.clone();
             glib::idle_add_local_once(move || {
                 BROWSERS.with_borrow_mut(|all| all.remove(&label));
+                RECENT.with_borrow_mut(|r| r.retain(|l| l != &label));
+                crate::session::save_soon();
             });
         }
+        _ => {}
     });
 
     app_id::show_as(&gtk_window, &app_id);
+    used(&label);
     with(&label, |b| b.select(first_id));
     Ok(label)
 }
 
-fn menu(app: &AppHandle, label: &str, chrome: &WebView, parent: &gtk::ApplicationWindow) -> Menu {
-    let messages = UserContentManager::new();
-    messages.register_script_message_handler("wb");
-    let (app, label) = (app.clone(), label.to_owned());
-    messages.connect_script_message_received(Some("wb"), move |_, msg| {
-        let text = msg.js_value().map(|v| v.to_str().to_string()).unwrap_or_default();
-        let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) else { return };
-        let (app, label) = (app.clone(), label.clone());
-        // Not inside WebKit's callback: on the next turn.
-        glib::idle_add_local_once(move || menu_message(&app, &label, &msg));
-    });
-    let settings = Settings::new();
-    settings.set_hardware_acceleration_policy(gpu::policy());
-    // It shares the chrome's web process: a menu costs no new process.
-    let view = WebView::builder().related_view(chrome).settings(&settings).user_content_manager(&messages).build();
-    view.set_background_color(&gtk::gdk::RGBA::new(0.0, 0.0, 0.0, 0.0));
-    view.load_html(include_str!("../ui/popup.html"), None);
-
-    let win = gtk::Window::new(gtk::WindowType::Popup);
-    if let Some(rgba) = GtkWindowExt::screen(&win).and_then(|s| s.rgba_visual()) {
-        win.set_visual(Some(&rgba));
-    }
-    win.set_app_paintable(true);
-    win.set_type_hint(gtk::gdk::WindowTypeHint::PopupMenu);
-    win.set_transient_for(Some(parent));
-    win.add(&view);
-    view.show();
-    Menu { win, view }
+fn base_height(mode: Mode) -> i32 {
+    if mode == Mode::Full { CHROME_FULL } else { CHROME_SLIM }
 }
 
-fn menu_message(app: &AppHandle, label: &str, msg: &serde_json::Value) {
-    with(label, |b| b.menu.win.hide());
-    if msg["kind"] != "menu" {
-        return;
-    }
-    match msg["id"].as_str().unwrap_or_default() {
-        "new-tab" => {
-            with(label, |b| b.new_tab(None));
+/// The hovered link's address, bottom left over the page: a tooltip-like
+/// surface of its own. (A GtkOverlay child over the pages would give the
+/// window another GDK child window, and the chrome's view then stops
+/// repainting.)
+pub struct Status {
+    win: gtk::Window,
+    label: gtk::Label,
+    parent: gtk::ApplicationWindow,
+}
+
+impl Status {
+    fn new(parent: &gtk::ApplicationWindow) -> Status {
+        let win = gtk::Window::new(gtk::WindowType::Popup);
+        win.set_type_hint(gtk::gdk::WindowTypeHint::Tooltip);
+        win.set_transient_for(Some(parent));
+        win.set_accept_focus(false);
+        let label = gtk::Label::new(None);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        label.set_max_width_chars(90);
+        label.set_xalign(0.0);
+        let css = gtk::CssProvider::new();
+        let _ = css.load_from_data(
+            b"window { background: #202124; } label { color: #e8eaed; padding: 3px 8px; font-size: 12px; }",
+        );
+        for w in [win.upcast_ref::<gtk::Widget>(), label.upcast_ref()] {
+            w.style_context().add_provider(&css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
-        "new-window" => {
-            if let Some(opts) = with(label, |b| b.opts.clone()) {
-                let opts = Opts { url: None, ..opts };
-                if let Err(e) = open(app, opts) {
-                    tracing::warn!(%e, "can't open a window");
-                }
-            }
+        win.add(&label);
+        label.show();
+        Status { win, label, parent: parent.clone() }
+    }
+
+    fn show(&self, text: &str) {
+        self.label.set_text(text);
+        let (_, h) = self.label.preferred_height();
+        let (_, w) = self.label.preferred_width();
+        let (ox, oy) = self
+            .parent
+            .window()
+            .map(|g| {
+                let (_, x, y) = g.origin();
+                (x, y)
+            })
+            .unwrap_or_default();
+        self.win.resize(w.max(1), h.max(1));
+        self.win.move_(ox, oy + self.parent.allocated_height() - h);
+        self.win.show();
+    }
+
+    fn hide(&self) {
+        if self.win.is_visible() {
+            self.win.hide();
         }
-        "fullscreen" => {
-            with(label, |b| b.window.set_fullscreen(!b.window.is_fullscreen().unwrap_or(false)));
-        }
-        other => tracing::debug!(other, "menu item not built yet"),
     }
 }
 
-fn settings() -> Settings {
-    let s = Settings::new();
-    s.set_hardware_acceleration_policy(gpu::policy());
-    s.set_enable_developer_extras(std::env::var_os("WADBROWSER_DEVTOOLS").is_some());
-    s.set_javascript_can_open_windows_automatically(true);
-    s.set_enable_back_forward_navigation_gestures(true);
-    s.set_enable_site_specific_quirks(true);
-    s.set_media_playback_requires_user_gesture(false);
-    s.set_enable_smooth_scrolling(true);
-    s
-}
-
-fn new_tab(opts: &Opts, related: Option<&WebView>, url: &str) -> Tab {
-    let tab = Tab::new(tab_view(opts, related));
-    if !url.is_empty() {
-        tab.view.load_uri(url);
-    }
-    tab
-}
-
-impl Tab {
-    fn new(view: WebView) -> Tab {
-        let id = NEXT_TAB.fetch_add(1, Ordering::Relaxed);
-        VIEW_TAB.with_borrow_mut(|m| m.insert(key(&view), id));
-        Tab { id, view }
-    }
-}
-
-impl Drop for Tab {
-    fn drop(&mut self) {
-        // Moving a tab moves this struct, so a drop is the tab closing.
-        let _ = VIEW_TAB.try_with(|m| m.borrow_mut().remove(&key(&self.view)));
-    }
-}
-
-fn key(view: &WebView) -> usize {
-    view.as_ptr() as usize
-}
-
-fn tab_view(opts: &Opts, related: Option<&WebView>) -> WebView {
-    let policies = WebsitePolicies::builder().autoplay(AutoplayPolicy::Allow).build();
-    let builder = WebView::builder().settings(&settings()).website_policies(&policies);
-    let view = match related {
-        // A page's popup: same process and context as its opener, so
-        // window.opener (sign-in popups) works.
-        Some(opener) => builder.related_view(opener).build(),
-        None => builder.web_context(&profile::context(opts.profile())).build(),
-    };
-    view.set_hexpand(true);
-    view.set_vexpand(true);
-    watch(&view);
-    view
-}
-
-/// Tab state changes push the window's state to its chrome (batched).
-fn watch(view: &WebView) {
-    view.connect_title_notify(dirty);
-    view.connect_uri_notify(dirty);
-    view.connect_estimated_load_progress_notify(dirty);
-    view.connect_is_loading_notify(dirty);
-    view.connect_load_changed(|v, e| {
-        if matches!(e, LoadEvent::Committed | LoadEvent::Finished) {
-            dirty(v);
-        }
-    });
-    view.connect_create(|opener, _action| {
-        let popup = new_popup_view(opener)?;
-        Some(popup.upcast())
+fn used(label: &str) {
+    RECENT.with_borrow_mut(|r| {
+        r.retain(|l| l != label);
+        r.push(label.to_owned());
     });
 }
 
-/// A page asked for a new window: a popup window when it gave a size (sign-in
-/// flows), else a new tab beside it.
-fn new_popup_view(opener: &WebView) -> Option<WebView> {
-    let (label, opts) = BROWSERS.with_borrow(|all| {
-        all.iter().find(|(_, b)| b.tab_of(opener).is_some()).map(|(l, b)| (l.clone(), b.opts.clone()))
-    })?;
-    let view = tab_view(&opts, Some(opener));
-    view.connect_ready_to_show(move |v| {
-        let sized = v.window_properties().map(|p| p.geometry()).is_some_and(|g| g.width() > 0 && g.height() > 0);
-        if sized {
-            popup_window(v);
-        } else {
-            let tab = Tab::new(v.clone());
-            let id = tab.id;
-            let label = label.clone();
-            glib::idle_add_local_once(move || {
-                with(&label, |b| {
-                    b.insert(tab, None);
-                    b.select(id);
-                });
-            });
+/// Runs `f` on window `label`.
+pub fn with<R>(label: &str, f: impl FnOnce(&mut Browser) -> R) -> Option<R> {
+    BROWSERS.with_borrow_mut(|all| all.get_mut(label).map(f))
+}
+
+/// Runs `f` on every window.
+pub fn each(mut f: impl FnMut(&str, &mut Browser)) {
+    BROWSERS.with_borrow_mut(|all| {
+        for (label, b) in all.iter_mut() {
+            f(label, b)
         }
     });
-    Some(view)
 }
 
-/// A sized popup: a plain window of its own, closed when the page closes it.
-fn popup_window(view: &WebView) {
-    let win = gtk::Window::new(gtk::WindowType::Toplevel);
-    let (w, h) = view
-        .window_properties()
-        .map(|p| p.geometry())
-        .map_or((520, 660), |g| (g.width().max(320), g.height().max(240)));
-    win.set_default_size(w, h);
-    win.add(view);
-    view.connect_title_notify(glib::clone!(@weak win => move |v| {
-        win.set_title(&v.title().unwrap_or_default());
-    }));
-    view.connect_close(glib::clone!(@weak win => move |_| win.close()));
-    win.show_all();
+/// The window holding tab `id`.
+pub fn window_of(id: u64) -> Option<String> {
+    BROWSERS.with_borrow(|all| all.iter().find(|(_, b)| b.tabs.iter().any(|t| t.id == id)).map(|(l, _)| l.clone()))
 }
 
-fn dirty(view: &WebView) {
-    let Some(id) = VIEW_TAB.with_borrow(|m| m.get(&key(view)).copied()) else { return };
+/// The most recently used window that `pick` accepts.
+pub fn recent(pick: impl Fn(&Browser) -> bool) -> Option<String> {
+    let order = RECENT.with_borrow(|r| r.clone());
+    BROWSERS.with_borrow(|all| order.iter().rev().find(|l| all.get(*l).is_some_and(&pick)).cloned())
+}
+
+/// Marks tab `id` changed: its window's chrome hears within a frame or two.
+pub fn dirty(id: u64) {
     DIRTY.with_borrow_mut(|d| d.insert(id));
     if !PUSH_QUEUED.replace(true) {
-        glib::idle_add_local_once(|| {
+        glib::timeout_add_local_once(Duration::from_millis(30), || {
             PUSH_QUEUED.set(false);
             let ids = DIRTY.take();
-            BROWSERS.with_borrow(|all| {
-                for b in all.values().filter(|b| b.tabs.iter().any(|t| ids.contains(&t.id))) {
+            each(|_, b| {
+                let mut hit = false;
+                for t in b.tabs.iter_mut().filter(|t| ids.contains(&t.id)) {
+                    t.refresh();
+                    hit = true;
+                }
+                if hit {
                     b.push();
                 }
             });
@@ -360,47 +370,56 @@ fn dirty(view: &WebView) {
     }
 }
 
-fn with<R>(label: &str, f: impl FnOnce(&mut Browser) -> R) -> Option<R> {
-    BROWSERS.with_borrow_mut(|all| all.get_mut(label).map(f))
-}
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TabState {
+struct TabState<'a> {
     id: u64,
-    title: String,
-    url: String,
+    title: &'a str,
+    url: &'a str,
+    favicon: Option<&'a str>,
     loading: bool,
     progress: f64,
     can_back: bool,
     can_forward: bool,
+    audio: bool,
+    muted: bool,
+    sleeping: bool,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct State<'a> {
+pub struct State<'a> {
     mode: Mode,
     name: Option<&'a str>,
-    tabs: Vec<TabState>,
+    app_icon: Option<String>,
+    /// The app's own site (app windows show the address when off it).
+    home_host: Option<String>,
+    can_new_tab: bool,
+    tabs: Vec<TabState<'a>>,
     active: Option<u64>,
+    zoom: u32,
+    fullscreen: bool,
 }
 
 impl Browser {
-    fn tab_of(&self, view: &WebView) -> Option<u64> {
-        self.tabs.iter().find(|t| &t.view == view).map(|t| t.id)
+    pub fn tab(&self, id: u64) -> Option<&Tab> {
+        self.tabs.iter().find(|t| t.id == id)
     }
 
-    fn view(&self, id: u64) -> Option<&WebView> {
-        self.tabs.iter().find(|t| t.id == id).map(|t| &t.view)
+    pub fn view(&self, id: u64) -> Option<&WebView> {
+        self.tab(id).and_then(|t| t.live.as_ref())
     }
 
-    fn active_view(&self) -> Option<&WebView> {
+    pub fn active_view(&self) -> Option<&WebView> {
         self.active.and_then(|id| self.view(id))
     }
 
-    fn insert(&mut self, tab: Tab, index: Option<usize>) {
-        self.stack.add(&tab.view);
-        tab.view.show();
+    /// Adds `tab` after the active one (or at `index`).
+    pub fn insert(&mut self, tab: Tab, index: Option<usize>) {
+        if let Some(v) = &tab.live {
+            self.stack.add(v);
+            v.show();
+        }
         let at = index.unwrap_or_else(|| {
             self.active.and_then(|a| self.tabs.iter().position(|t| t.id == a)).map_or(self.tabs.len(), |p| p + 1)
         });
@@ -408,20 +427,45 @@ impl Browser {
         self.push();
     }
 
-    fn select(&mut self, id: u64) {
-        if let Some(view) = self.view(id).cloned() {
-            self.stack.set_visible_child(&view);
-            view.grab_focus();
-            self.active = Some(id);
-            self.push();
+    /// Shows tab `id`, waking it if it sleeps.
+    pub fn select(&mut self, id: u64) {
+        let opts = self.opts.clone();
+        let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) else { return };
+        if t.live.is_none() {
+            let view = tab::view(&opts, None);
+            tab::register(&view, t.id);
+            match t.saved.take() {
+                Some(bytes) => {
+                    view.restore_session_state(&WebViewSessionState::new(&bytes));
+                    match view.back_forward_list().and_then(|l| l.current_item()) {
+                        Some(item) => view.go_to_back_forward_list_item(&item),
+                        None => view.load_uri(&t.url),
+                    }
+                }
+                None => view.load_uri(&t.url),
+            }
+            self.stack.add(&view);
+            view.show();
+            t.live = Some(view);
         }
+        t.last_seen = Instant::now();
+        let view = t.live.clone().expect("woken above");
+        if let Some(old) = self.active.and_then(|a| self.tabs.iter_mut().find(|t| t.id == a)) {
+            old.last_seen = Instant::now();
+        }
+        self.stack.set_visible_child(&view);
+        view.grab_focus();
+        self.active = Some(id);
+        self.push();
     }
 
     /// Takes tab `id` out of this window (still live); selects a neighbour.
-    fn take(&mut self, id: u64) -> Option<Tab> {
+    pub fn take(&mut self, id: u64) -> Option<Tab> {
         let at = self.tabs.iter().position(|t| t.id == id)?;
         let tab = self.tabs.remove(at);
-        self.stack.remove(&tab.view);
+        if let Some(v) = &tab.live {
+            self.stack.remove(v);
+        }
         if self.active == Some(id) {
             self.active = None;
             if let Some(next) = self.tabs.get(at.min(self.tabs.len().saturating_sub(1))).map(|t| t.id) {
@@ -432,16 +476,55 @@ impl Browser {
         Some(tab)
     }
 
-    fn new_tab(&mut self, url: Option<&str>) -> u64 {
-        let url = url.map(urlbar::normalize).unwrap_or_else(|| self.opts.home());
-        let tab = new_tab(&self.opts, None, &url);
+    /// Closes tab `id` (kept for Ctrl+Shift+T); the window too if it was the last.
+    pub fn close_tab(&mut self, id: u64) {
+        let Some(mut tab) = self.take(id) else { return };
+        tab.refresh();
+        let saved = tab.live.as_ref().and_then(|v| v.session_state()).and_then(|s| s.serialize()).or(tab.saved.take());
+        if !tab.url.is_empty() && tab.url != "about:blank" {
+            self.closed.push(Closed { url: tab.url.clone(), saved });
+            if self.closed.len() > CLOSED_KEPT {
+                self.closed.remove(0);
+            }
+        }
+        if self.tabs.is_empty() {
+            self.close_window();
+        }
+    }
+
+    pub fn reopen_closed(&mut self) {
+        let Some(c) = self.closed.pop() else { return };
+        let mut tab = tab::new_tab(&self.opts, "");
+        tab.url = c.url;
+        if let (Some(bytes), Some(v)) = (c.saved, &tab.live) {
+            v.restore_session_state(&WebViewSessionState::new(&bytes));
+            match v.back_forward_list().and_then(|l| l.current_item()) {
+                Some(item) => v.go_to_back_forward_list_item(&item),
+                None => v.load_uri(&tab.url),
+            }
+        } else if let Some(v) = &tab.live {
+            v.load_uri(&tab.url);
+        }
         let id = tab.id;
         self.insert(tab, None);
         self.select(id);
+    }
+
+    pub fn new_tab(&mut self, url: Option<&str>, background: bool) -> u64 {
+        let url = url.map(crate::urlbar::normalize).unwrap_or_else(|| self.opts.home());
+        let tab = tab::new_tab(&self.opts, &url);
+        let id = tab.id;
+        self.insert(tab, None);
+        if !background {
+            self.select(id);
+        }
+        if url == "about:blank" && self.opts.mode == Mode::Full && !background {
+            let _ = self.window.emit_to(self.window.label(), "wb:focus-url", ());
+        }
         id
     }
 
-    fn reorder(&mut self, id: u64, index: usize) {
+    pub fn reorder(&mut self, id: u64, index: usize) {
         let Some(from) = self.tabs.iter().position(|t| t.id == id) else { return };
         let tab = self.tabs.remove(from);
         // The index counts the tab in its old place.
@@ -450,25 +533,96 @@ impl Browser {
         self.push();
     }
 
-    fn state(&self) -> State<'_> {
+    /// Puts tab `id` to sleep: its history kept, its page (and memory) freed.
+    pub fn sleep(&mut self, id: u64) -> bool {
+        if self.active == Some(id) {
+            return false;
+        }
+        let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) else { return false };
+        let Some(view) = t.live.take() else { return false };
+        t.refresh_from(&view);
+        t.saved = view.session_state().and_then(|s| s.serialize());
+        tab::unregister(&view);
+        self.stack.remove(&view);
+        self.push();
+        true
+    }
+
+    pub fn set_status(&self, text: Option<&str>) {
+        match text {
+            Some(t) if !t.is_empty() => self.status.show(t),
+            _ => self.status.hide(),
+        }
+    }
+
+    /// The chrome asks for room (its find row or a question showing).
+    pub fn set_chrome_height(&mut self, height: i32) {
+        let base = base_height(self.opts.mode);
+        self.chrome_extra = (height - base).clamp(0, 120);
+        self.chrome.set_size_request(-1, base + self.chrome_extra);
+    }
+
+    pub fn set_fullscreen(&self, on: bool) {
+        let _ = self.window.set_fullscreen(on);
+        self.chrome.set_visible(!on);
+        self.push();
+    }
+
+    pub fn is_fullscreen(&self) -> bool {
+        self.window.is_fullscreen().unwrap_or(false)
+    }
+
+    /// The shown page's zoom, in percent.
+    pub fn state_zoom(&self) -> u32 {
+        (self.active_view().map_or(1.0, |v| v.zoom_level()) * 100.0).round() as u32
+    }
+
+    pub fn state(&self) -> State<'_> {
         let tabs = self
             .tabs
             .iter()
-            .map(|t| TabState {
-                id: t.id,
-                title: t.view.title().map(String::from).unwrap_or_default(),
-                url: t.view.uri().map(String::from).unwrap_or_default(),
-                loading: t.view.is_loading(),
-                progress: t.view.estimated_load_progress(),
-                can_back: t.view.can_go_back(),
-                can_forward: t.view.can_go_forward(),
+            .map(|t| {
+                let v = t.live.as_ref();
+                TabState {
+                    id: t.id,
+                    title: &t.title,
+                    url: &t.url,
+                    favicon: t.favicon.as_deref(),
+                    loading: v.is_some_and(|v| v.is_loading()),
+                    progress: v.map_or(1.0, |v| v.estimated_load_progress()),
+                    can_back: v.map_or(t.saved.is_some(), |v| v.can_go_back()),
+                    can_forward: v.is_some_and(|v| v.can_go_forward()),
+                    audio: v.is_some_and(|v| v.is_playing_audio()),
+                    muted: v.is_some_and(|v| v.is_muted()),
+                    sleeping: v.is_none(),
+                }
             })
             .collect();
-        State { mode: self.opts.mode, name: self.opts.name.as_deref(), tabs, active: self.active }
+        let home_host = (self.opts.mode == Mode::App)
+            .then(|| self.opts.start.as_deref().and_then(|s| tauri::Url::parse(s).ok()?.host_str().map(str::to_owned)))
+            .flatten();
+        State {
+            mode: self.opts.mode,
+            name: self.opts.name.as_deref(),
+            app_icon: self.opts.icon.as_deref().and_then(crate::tab::icon_data_url),
+            home_host,
+            can_new_tab: self.opts.mode != Mode::Focus || self.opts.home() != "about:blank",
+            tabs,
+            active: self.active,
+            zoom: self.state_zoom(),
+            fullscreen: self.is_fullscreen(),
+        }
     }
 
-    /// Sends the chrome the window's state (once it's listening).
-    fn push(&self) {
+    /// Sends the chrome the window's state (once it's listening), and titles the window.
+    pub fn push(&self) {
+        let title = match (self.opts.mode, self.active.and_then(|a| self.tab(a))) {
+            (Mode::App, _) => self.opts.name.clone().unwrap_or_else(|| "WadBrowser".into()),
+            (_, Some(t)) if !t.title.is_empty() => format!("{} – WadBrowser", t.title),
+            _ => "WadBrowser".into(),
+        };
+        let _ = self.window.set_title(&title);
+        crate::session::save_soon();
         if !self.ready {
             return;
         }
@@ -477,46 +631,39 @@ impl Browser {
         }
     }
 
-    fn close_window(&self) {
+    pub fn mark_ready(&mut self) -> serde_json::Value {
+        self.ready = true;
+        serde_json::to_value(self.state()).unwrap_or_default()
+    }
+
+    pub fn close_window(&self) {
+        self.menu.hide();
+        self.status.hide();
         let _ = self.window.close();
+    }
+
+    pub fn present(&self, activation_token: Option<&str>) {
+        if let Ok(w) = self.window.gtk_window() {
+            if let Some(token) = activation_token {
+                w.set_startup_id(token);
+            }
+            w.present();
+        }
     }
 }
 
-// ---- commands from the chrome (sync: they run on the main thread) ----
-
-/// The chrome is up and listening: its first state, and pushes from now on.
-#[tauri::command]
-pub fn chrome_ready(window: WebviewWindow) -> Option<serde_json::Value> {
-    with(window.label(), |b| {
-        b.ready = true;
-        serde_json::to_value(b.state()).ok()
-    })
-    .flatten()
-}
-
-#[tauri::command]
-pub fn tab_new(window: WebviewWindow, url: Option<String>) {
-    with(window.label(), |b| b.new_tab(url.as_deref()));
-}
-
-#[tauri::command]
-pub fn tab_select(window: WebviewWindow, id: u64) {
-    with(window.label(), |b| b.select(id));
-}
-
-#[tauri::command]
-pub fn tab_close(window: WebviewWindow, id: u64) {
-    with(window.label(), |b| {
-        b.take(id);
-        if b.tabs.is_empty() {
-            b.close_window();
+impl Tab {
+    fn refresh_from(&mut self, view: &WebView) {
+        self.title = view.title().map(String::from).unwrap_or_default();
+        if let Some(u) = view.uri() {
+            self.url = u.into();
         }
-    });
+    }
 }
 
 /// Moves tab `id` of window `from` to window `to` at `index`, or to a new
 /// window of its own. The page moves live: no reload.
-fn move_tab(app: &AppHandle, from: &str, id: u64, to: Option<&str>, index: Option<usize>) -> Result<(), String> {
+pub fn move_tab(app: &AppHandle, from: &str, id: u64, to: Option<&str>, index: Option<usize>) -> Result<(), String> {
     if to == Some(from) {
         return with(from, |b| b.reorder(id, index.unwrap_or(usize::MAX))).ok_or_else(|| "no such window".into());
     }
@@ -539,7 +686,7 @@ fn move_tab(app: &AppHandle, from: &str, id: u64, to: Option<&str>, index: Optio
             }
         }
         None => {
-            open_with(app, opts, First::Tab(tab)).map_err(|e| e.to_string())?;
+            open(app, opts, First::Tab(tab)).map_err(|e| e.to_string())?;
         }
     }
     with(from, |b| {
@@ -550,138 +697,30 @@ fn move_tab(app: &AppHandle, from: &str, id: u64, to: Option<&str>, index: Optio
     Ok(())
 }
 
-/// Moves tab `id` to window `to` at `index`, or to a new window ("Move tab to
-/// new window").
-#[tauri::command]
-pub fn tab_move(
-    app: AppHandle,
-    window: WebviewWindow,
-    id: u64,
-    to: Option<String>,
-    index: Option<usize>,
-) -> Result<(), String> {
-    move_tab(&app, window.label(), id, to.as_deref(), index)
-}
-
-#[tauri::command]
-pub fn tab_drag_begin(window: WebviewWindow, id: u64) {
-    DRAG.set(Some((window.label().to_owned(), id)));
-}
-
-/// The dragged tab was dropped on this window's strip at `index`.
-#[tauri::command]
-pub fn tab_drop(app: AppHandle, window: WebviewWindow, index: usize) -> Result<(), String> {
-    let Some((from, id)) = DRAG.take() else { return Ok(()) };
-    move_tab(&app, &from, id, Some(window.label()), Some(index))
-}
-
-/// The drag ended. With `detach` (no strip took it), the tab gets a window of
-/// its own, unless it's its window's only tab. A drop on another window may
-/// still be on its way, so this waits a moment for it.
-#[tauri::command]
-pub fn tab_drag_end(app: AppHandle, detach: bool) {
-    if !detach {
-        DRAG.set(None);
+/// Puts tabs to sleep that haven't been looked at for a while (checked each
+/// minute): not the shown one, nor one playing sound or downloading.
+pub fn start_hibernation() {
+    let minutes = config::get().hibernate_after_minutes;
+    if minutes == 0 {
         return;
     }
-    glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
-        let Some((from, id)) = DRAG.take() else { return };
-        if with(&from, |b| b.tabs.len() > 1) == Some(true)
-            && let Err(e) = move_tab(&app, &from, id, None, None)
-        {
-            tracing::warn!(%e, "can't detach the tab");
-        }
+    let after = Duration::from_secs(minutes * 60);
+    glib::timeout_add_seconds_local(60, move || {
+        let busy = crate::downloads::busy_views();
+        each(|_, b| {
+            let sleepy: Vec<u64> = b
+                .tabs
+                .iter()
+                .filter(|t| Some(t.id) != b.active && t.last_seen.elapsed() > after)
+                .filter(|t| t.live.as_ref().is_some_and(|v| !v.is_playing_audio() && !busy.contains(&tab::key(v))))
+                .map(|t| t.id)
+                .collect();
+            for id in sleepy {
+                b.sleep(id);
+            }
+        });
+        glib::ControlFlow::Continue
     });
-}
-
-#[tauri::command]
-pub fn focus_page(window: WebviewWindow) {
-    with(window.label(), |b| {
-        if let Some(v) = b.active_view() {
-            v.grab_focus();
-        }
-    });
-}
-
-#[tauri::command]
-pub fn navigate(window: WebviewWindow, input: String) {
-    with(window.label(), |b| {
-        if let (Some(view), Some(url)) = (b.active_view(), urlbar::resolve(&input, urlbar::DEFAULT_SEARCH)) {
-            view.load_uri(&url);
-            view.grab_focus();
-        }
-    });
-}
-
-#[tauri::command]
-pub fn nav(window: WebviewWindow, action: String) {
-    with(window.label(), |b| {
-        let home = b.opts.home();
-        let Some(view) = b.active_view() else { return };
-        match action.as_str() {
-            "back" => view.go_back(),
-            "forward" => view.go_forward(),
-            "reload" => view.reload(),
-            "reload-hard" => view.reload_bypass_cache(),
-            "stop" => view.stop_loading(),
-            "home" => view.load_uri(&home),
-            _ => {}
-        }
-    });
-}
-
-/// Shows the menu surface at a rectangle of the window (logical pixels from
-/// its top left), drawing `kind` with `data`.
-#[tauri::command]
-pub fn popup_show(
-    window: WebviewWindow,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-    kind: String,
-    data: serde_json::Value,
-) {
-    with(window.label(), |b| {
-        let Ok(parent) = b.window.gtk_window() else { return };
-        let m = &b.menu;
-        let script = format!(
-            "window.wbPopup && window.wbPopup.show({}, {})",
-            serde_json::to_string(&kind).unwrap_or_default(),
-            data
-        );
-        m.view.evaluate_javascript(&script, None, None, None::<&gtk::gio::Cancellable>, |_| {});
-        let (ox, oy) = parent
-            .window()
-            .map(|w| {
-                let (_, x, y) = w.origin();
-                (x, y)
-            })
-            .unwrap_or_default();
-        m.view.set_size_request(width.max(1), height.max(1));
-        m.win.resize(width.max(1), height.max(1));
-        m.win.move_(ox + x.max(0), oy + y.max(0));
-        m.win.show();
-    });
-}
-
-#[tauri::command]
-pub fn popup_hide(window: WebviewWindow) {
-    with(window.label(), |b| b.menu.win.hide());
-}
-
-#[tauri::command]
-pub fn win_action(window: WebviewWindow, action: String) {
-    let _ = match action.as_str() {
-        "minimize" => window.minimize(),
-        "maximize" => match window.is_maximized() {
-            Ok(true) => window.unmaximize(),
-            _ => window.maximize(),
-        },
-        "fullscreen" => window.set_fullscreen(!window.is_fullscreen().unwrap_or(false)),
-        "close" => window.close(),
-        _ => Ok(()),
-    };
 }
 
 // ---- for the spike ----
@@ -708,7 +747,7 @@ pub mod probe {
 
     pub fn new_tab(label: &str, url: &str) -> Option<u64> {
         with(label, |b| {
-            let tab = super::new_tab(&b.opts, None, url);
+            let tab = tab::new_tab(&b.opts, url);
             let id = tab.id;
             b.insert(tab, None);
             b.select(id);
@@ -716,13 +755,17 @@ pub mod probe {
         })
     }
 
+    pub fn chrome(label: &str) -> Option<WebView> {
+        with(label, |b| b.chrome.clone())
+    }
+
     pub fn menu(label: &str) -> Option<gtk::Window> {
-        with(label, |b| b.menu.win.clone())
+        with(label, |b| b.menu.window())
     }
 
     pub fn open_with_tab(app: &AppHandle, opts: Opts, from: &str, id: u64) -> Result<String, Error> {
         let tab = with(from, |b| b.take(id)).flatten().ok_or("no tab")?;
-        open_with(app, opts, First::Tab(tab))
+        open(app, opts, First::Tab(tab))
     }
 
     pub fn move_tab(from: &str, id: u64, to: &str) -> bool {
@@ -733,5 +776,17 @@ pub mod probe {
             b.select(id);
         })
         .is_some()
+    }
+
+    pub fn sleep(label: &str, id: u64) -> bool {
+        with(label, |b| b.sleep(id)).unwrap_or(false)
+    }
+
+    pub fn select(label: &str, id: u64) {
+        with(label, |b| b.select(id));
+    }
+
+    pub fn is_live(label: &str, id: u64) -> bool {
+        with(label, |b| b.view(id).is_some()).unwrap_or(false)
     }
 }

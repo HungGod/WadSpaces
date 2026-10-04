@@ -35,7 +35,7 @@ export XDG_RUNTIME_DIR="${RT}" WAYLAND_DISPLAY=wayland-1 ${LIBS:+LD_LIBRARY_PATH
 SHOT
 chmod +x "${OUT}/shot.sh"
 
-env -u WAYLAND_DISPLAY -u DISPLAY XDG_RUNTIME_DIR="${RT}" WLR_BACKENDS=headless WLR_RENDERER=pixman \
+env -u WAYLAND_DISPLAY -u DISPLAY XDG_RUNTIME_DIR="${RT}" WLR_BACKENDS=headless WLR_RENDERER="${SWAY_RENDERER:-pixman}" \
     WLR_LIBINPUT_NO_DEVICES=1 ${LIBS:+LD_LIBRARY_PATH=${LIBS}} "${BIN}sway" -c "${OUT}/sway.conf" > "${OUT}/sway.log" 2>&1 &
 SWAY=$!
 trap 'kill ${SWAY} 2>/dev/null; wait ${SWAY} 2>/dev/null; rm -rf "${RT}"' EXIT
@@ -58,7 +58,7 @@ env WAYLAND_DISPLAY="${RT_NAME}/wayland-1" GDK_BACKEND=wayland dbus-run-session 
         unset WAYLAND_DEBUG
         for p in /proc/[0-9]*; do
             [[ ${p#/proc/} == "$$" ]] && continue
-            tr "\0" "\n" < "$p/environ" 2>/dev/null | grep -qxF "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}" \
+            tr "\0" "\n" 2>/dev/null < "$p/environ" | grep -qxF "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}" \
                 && kill "${p#/proc/}" 2>/dev/null
         done
         true' "${ROOT}/target/debug/wadbrowser" \

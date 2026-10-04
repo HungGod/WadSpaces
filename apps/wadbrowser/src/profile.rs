@@ -29,6 +29,7 @@ fn make(name: &str) -> WebContext {
         .build();
     let context = WebContext::builder().website_data_manager(&manager).memory_pressure_settings(&pressure()).build();
     context.set_cache_model(CacheModel::WebBrowser);
+    crate::downloads::watch(&context);
     context.set_favicon_database_directory(Some(&data.join("favicons").to_string_lossy()));
     context
 }

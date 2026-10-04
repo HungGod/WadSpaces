@@ -8,7 +8,8 @@
 //!
 //! `WADBROWSER_SPIKE_SHOT=<script>` is run with a path to save screenshots.
 
-use crate::browser::{self, Mode, Opts, probe};
+use crate::browser::{self, First, Mode, Opts, probe};
+use crate::commands;
 use gtk::glib;
 use gtk::prelude::*;
 use javascriptcore::ValueExt;
@@ -47,7 +48,8 @@ pub fn start(app: &AppHandle) -> bool {
     if let Ok(urls) = std::env::var("WADBROWSER_SPIKE_SITES") {
         return sites(app, dir, urls.split_whitespace().map(str::to_owned).collect());
     }
-    let w1 = match browser::open(app, Opts { mode: Mode::Full, url: Some(String::new()), ..Default::default() }) {
+    let w1 = match browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
+    {
         Ok(l) => l,
         Err(e) => {
             println!("SPIKE open-failed {e}");
@@ -67,6 +69,7 @@ pub fn start(app: &AppHandle) -> bool {
             let (w1, dir) = (w1.clone(), dir.clone());
             Box::new(move || {
                 layout(&w1);
+                chrome_report(&w1);
                 eval(&w1, a, "before-move");
                 shot(&dir, "1-two-tabs");
             })
@@ -80,7 +83,7 @@ pub fn start(app: &AppHandle) -> bool {
                     { "id": "new-window", "label": "New window", "key": "Ctrl+N" },
                     { "id": "fullscreen", "label": "Full screen", "key": "F11" },
                     { "id": "downloads", "label": "Downloads", "key": "" }]});
-                browser::popup_show(win, 760, 76, 240, 148, "menu".into(), data);
+                commands::popup_show(win, 760, 76, 240, 148, "menu".into(), data);
             })
         }),
         (4500, {
@@ -93,7 +96,7 @@ pub fn start(app: &AppHandle) -> bool {
                 }
                 shot(&dir, "2-popup");
                 if let Some(win) = probe::window(&w1) {
-                    browser::popup_hide(win);
+                    commands::popup_hide(win);
                 }
             })
         }),
@@ -104,10 +107,10 @@ pub fn start(app: &AppHandle) -> bool {
                     mode: Mode::App,
                     app_id: Some("wadspaces-webapp-spike".into()),
                     name: Some("Spike App".into()),
-                    url: Some(String::new()),
+                    start: Some("http://spike.localhost/".into()),
                     ..Default::default()
                 };
-                match browser::open(&app, opts) {
+                match browser::open(&app, opts, First::Urls(vec![String::new()])) {
                     Ok(w2) => {
                         let c = probe::tabs(&w2)[0];
                         load(&w2, c, "C", "#f4d4a4");
@@ -146,6 +149,7 @@ pub fn start(app: &AppHandle) -> bool {
             let dir = dir.clone();
             Box::new(move || {
                 for w in probe::labels() {
+                    chrome_report(&w);
                     if probe::tabs(&w).contains(&a) {
                         eval(&w, a, "after-detach");
                         layout(&w);
@@ -155,7 +159,42 @@ pub fn start(app: &AppHandle) -> bool {
                 shot(&dir, "4-detached");
             })
         }),
-        (10000, {
+        (9500, {
+            let w1 = w1.clone();
+            Box::new(move || {
+                // Hibernation: a tab with history, put to sleep, then woken.
+                let Some(d) = probe::new_tab(&w1, "data:text/html,<title>D1</title>one") else { return };
+                if let Some(v) = probe::view(&w1, d) {
+                    glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                        v.load_uri("data:text/html,<title>D2</title>two")
+                    });
+                }
+                glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+                    let e = probe::new_tab(&w1, "data:text/html,<title>E</title>e").unwrap_or_default();
+                    let slept = probe::sleep(&w1, d);
+                    println!("SPIKE slept {slept} live={}", probe::is_live(&w1, d));
+                    glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                        probe::select(&w1, d);
+                        let _ = e;
+                        glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+                            if let Some(v) = probe::view(&w1, d) {
+                                println!(
+                                    "SPIKE woke live={} title={:?} can_back={}",
+                                    probe::is_live(&w1, d),
+                                    v.title().unwrap_or_default(),
+                                    v.can_go_back()
+                                );
+                            }
+                        });
+                    });
+                });
+            })
+        }),
+        (13500, {
+            let dir = dir.clone();
+            Box::new(move || shot(&dir, "5-woken"))
+        }),
+        (14000, {
             let app = app.clone();
             Box::new(move || {
                 println!("SPIKE done");
@@ -176,9 +215,7 @@ fn load(label: &str, tab: u64, name: &str, bg: &str) {
 }
 
 fn with_tab_select(label: &str, tab: u64) {
-    if let Some(win) = probe::window(label) {
-        browser::tab_select(win, tab);
-    }
+    probe::select(label, tab);
 }
 
 fn eval(label: &str, tab: u64, what: &'static str) {
@@ -215,14 +252,15 @@ fn shot(dir: &std::path::Path, name: &str) {
 /// `WADBROWSER_SPIKE_SITES="url ..."`: what WebKit supports, then each site
 /// loaded in turn and screenshotted.
 fn sites(app: &AppHandle, dir: PathBuf, urls: Vec<String>) -> bool {
-    let label = match browser::open(app, Opts { mode: Mode::Full, url: Some(String::new()), ..Default::default() }) {
-        Ok(l) => l,
-        Err(e) => {
-            println!("SPIKE open-failed {e}");
-            app.exit(1);
-            return true;
-        }
-    };
+    let label =
+        match browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()])) {
+            Ok(l) => l,
+            Err(e) => {
+                println!("SPIKE open-failed {e}");
+                app.exit(1);
+                return true;
+            }
+        };
     let tab = probe::tabs(&label)[0];
     if let Some(v) = probe::view(&label, tab) {
         v.load_html("<title>caps</title><p>caps", Some("https://caps.localhost/"));
@@ -280,4 +318,16 @@ fn sites(app: &AppHandle, dir: PathBuf, urls: Vec<String>) -> bool {
         app.exit(0);
     });
     true
+}
+
+/// What the chrome's page shows, and any errors it had.
+fn chrome_report(label: &str) {
+    let Some(c) = probe::chrome(label) else { return };
+    let js = r#"JSON.stringify({ body: document.body.className, tabs: document.getElementById("tabs").children.length,
+        url: document.getElementById("url").value, errors: window.__wbErrors, vis: document.visibilityState, focus: document.hasFocus() })"#;
+    let label = label.to_owned();
+    c.evaluate_javascript(js, None, None, None::<&gtk::gio::Cancellable>, move |r| match r {
+        Ok(v) => println!("SPIKE chrome {label} {}", v.to_str()),
+        Err(e) => println!("SPIKE chrome-failed {label} {e}"),
+    });
 }

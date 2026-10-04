@@ -5991,12 +5991,16 @@ dependencies = [
 name = "wadbrowser"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "cairo-rs 0.18.5",
  "gtk",
  "javascriptcore-rs",
+ "libc",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
  "webkit2gtk",

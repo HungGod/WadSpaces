@@ -4,8 +4,8 @@
 //! windows carry `wadspaces-webapp-<id>`, while one process hosts them all.
 //! GTK 3 takes the app_id from the program name when it makes a window's
 //! xdg_toplevel (as the window is first shown), so the name is swapped for that
-//! moment; `gdk_wayland_window_set_application_id` then keeps it right if the
-//! surface is ever made again.
+//! moment; `gdk_wayland_window_set_application_id`
+//! then keeps it right if the surface is ever made again.
 
 use gtk::glib;
 use gtk::glib::translate::ToGlibPtr;

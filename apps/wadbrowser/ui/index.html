@@ -7,9 +7,13 @@
     <script type="module" src="./chrome.js"></script>
   </head>
   <body class="mode-full">
-    <!-- Full mode: the strip row, then the toolbar row. Focus and app modes:
-         one row, the toolbar's buttons first, then the strip. -->
+    <!-- Full: the strip row, then the toolbar row. Focus and app windows: one
+         row, the toolbar's buttons moved into it (chrome.js). -->
     <div id="strip" class="row" data-tauri-drag-region>
+      <div id="identity" data-tauri-drag-region>
+        <img id="appicon" alt="" hidden />
+        <span id="appname" data-tauri-drag-region></span>
+      </div>
       <div id="nav" class="group">
         <button id="back" class="icon" title="Back (Alt+Left)" aria-label="Back">
           <svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5" /></svg>
@@ -21,7 +25,7 @@
           <svg class="reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" /></svg>
           <svg class="stop" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg>
         </button>
-        <button id="home" class="icon" title="Home" aria-label="Home">
+        <button id="home" class="icon" title="Home (Alt+Home)" aria-label="Home">
           <svg viewBox="0 0 16 16"><path d="M2.5 7.5 8 3l5.5 4.5M4 6.5V13h3v-3.5h2V13h3V6.5" /></svg>
         </button>
       </div>
@@ -29,8 +33,17 @@
       <button id="newtab" class="icon" title="New tab (Ctrl+T)" aria-label="New tab">
         <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
       </button>
-      <div id="appname" data-tauri-drag-region></div>
       <div class="fill" data-tauri-drag-region></div>
+      <div id="offsite" title="This page is outside the app's site"></div>
+      <div id="tools" class="group">
+        <button id="downloads" class="icon" title="Downloads" aria-label="Downloads" hidden>
+          <svg viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" /></svg>
+          <span id="dlring"></span>
+        </button>
+        <button id="menu" class="icon" title="Menu" aria-label="Menu">
+          <svg viewBox="0 0 16 16"><circle cx="8" cy="3.5" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="8" cy="12.5" r="1" /></svg>
+        </button>
+      </div>
       <div id="winbtns" class="group">
         <button id="min" class="win" title="Minimize" aria-label="Minimize">
           <svg viewBox="0 0 16 16"><path d="M3.5 8.5h9" /></svg>
@@ -47,10 +60,28 @@
       <div id="nav-slot" class="group"></div>
       <form id="urlform" autocomplete="off">
         <input id="url" type="text" spellcheck="false" placeholder="Search or type an address" aria-label="Address" />
+        <span id="zoom" title="Zoom (Ctrl+0 resets)" hidden></span>
       </form>
-      <button id="menu" class="icon" title="Menu" aria-label="Menu">
-        <svg viewBox="0 0 16 16"><circle cx="8" cy="3.5" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="8" cy="12.5" r="1" /></svg>
+      <div id="tools-slot" class="group"></div>
+    </div>
+    <div id="findbar" class="row bar" hidden>
+      <input id="findtext" type="text" spellcheck="false" placeholder="Find in page" aria-label="Find in page" />
+      <span id="findcount"></span>
+      <button id="findprev" class="icon" title="Previous (Shift+Enter)" aria-label="Previous">
+        <svg viewBox="0 0 16 16"><path d="m4 10 4-4 4 4" /></svg>
       </button>
+      <button id="findnext" class="icon" title="Next (Enter)" aria-label="Next">
+        <svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4" /></svg>
+      </button>
+      <button id="findclose" class="icon" title="Close (Esc)" aria-label="Close find">
+        <svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+      </button>
+    </div>
+    <div id="prompt" class="row bar" hidden>
+      <span id="prompttext"></span>
+      <label class="remember"><input id="promptkeep" type="checkbox" checked /> Remember for this site</label>
+      <button id="promptno" class="text">Block</button>
+      <button id="promptyes" class="text primary">Allow</button>
     </div>
     <div id="progress"></div>
   </body>

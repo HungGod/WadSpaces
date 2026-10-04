@@ -1,6 +1,7 @@
 :root {
   --bg: #202124;
   --tab: #2a2b2e;
+  --tab-hover: #2f3034;
   --tab-active: #35363a;
   --field: #2a2b2e;
   --text: #e8eaed;
@@ -20,7 +21,6 @@
 html,
 body {
   margin: 0;
-  height: 100%;
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
@@ -41,6 +41,10 @@ svg {
 svg circle {
   fill: currentColor;
   stroke: none;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .row {
@@ -69,6 +73,7 @@ button {
 }
 
 .icon {
+  position: relative;
   width: 28px;
   height: 28px;
   border: 0;
@@ -79,7 +84,8 @@ button {
   justify-content: center;
   flex: none;
 }
-.icon:hover:not(:disabled) {
+.icon:hover:not(:disabled),
+.icon.open {
   background: var(--hover);
 }
 .icon:disabled {
@@ -110,6 +116,60 @@ body.loading #reload .stop {
   background: var(--danger);
 }
 
+.text {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+}
+.text:hover {
+  background: var(--hover);
+}
+.text.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111;
+}
+
+/* ---- the app's own name (app windows) ---- */
+
+#identity {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 4px;
+  min-width: 0;
+  max-width: 40%;
+}
+#appicon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  flex: none;
+}
+#appname {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+#offsite {
+  display: none;
+  max-width: 34%;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: var(--field);
+  color: var(--muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+body.offsite #offsite {
+  display: block;
+}
+
 /* ---- tabs ---- */
 
 #tabs {
@@ -125,25 +185,49 @@ body.loading #reload .stop {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   height: 30px;
-  padding: 0 4px 0 10px;
-  width: 200px;
-  min-width: 56px;
-  flex: 0 1 200px;
+  padding: 0 4px 0 9px;
+  width: 210px;
+  min-width: 48px;
+  flex: 0 1 210px;
   border-radius: 8px;
   background: var(--tab);
   color: var(--muted);
 }
 .tab:hover {
-  background: #2f3034;
+  background: var(--tab-hover);
 }
 .tab.active {
   background: var(--tab-active);
   color: var(--text);
 }
+.tab.sleeping .title,
+.tab.sleeping .fav {
+  opacity: 0.55;
+}
 .tab.dragging {
   opacity: 0.4;
+}
+.tab .fav {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 3px;
+  background: center / contain no-repeat;
+}
+.tab .fav .globe {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  stroke-width: 1.3;
+}
+.tab .fav .globe .ring {
+  fill: none;
+  stroke: currentColor;
+}
+.tab .fav.has .globe {
+  display: none;
 }
 .tab .title {
   flex: 1;
@@ -151,6 +235,25 @@ body.loading #reload .stop {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.tab .audio {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.tab .audio svg {
+  width: 13px;
+  height: 13px;
+}
+.tab .audio:hover {
+  background: var(--hover);
 }
 .tab .x {
   width: 20px;
@@ -162,6 +265,7 @@ body.loading #reload .stop {
   align-items: center;
   justify-content: center;
   flex: none;
+  padding: 0;
 }
 .tab .x svg {
   width: 12px;
@@ -171,8 +275,9 @@ body.loading #reload .stop {
   background: var(--hover);
 }
 .tab .spinner {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
+  margin: 1px;
   border-radius: 50%;
   border: 2px solid var(--muted);
   border-top-color: transparent;
@@ -184,8 +289,6 @@ body.loading #reload .stop {
     transform: rotate(360deg);
   }
 }
-
-/* Where a dragged tab will land. */
 .tab.drop-before::before,
 .tab.drop-after::after {
   content: "";
@@ -206,9 +309,12 @@ body.loading #reload .stop {
 /* ---- toolbar ---- */
 
 #urlform {
+  position: relative;
   flex: 1;
   min-width: 0;
   margin: 0;
+  display: flex;
+  align-items: center;
 }
 #url {
   width: 100%;
@@ -227,6 +333,22 @@ body.loading #reload .stop {
   border-color: var(--accent);
   background: #1b1c1f;
 }
+#zoom {
+  position: absolute;
+  right: 8px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--tab-active);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+#dlring {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  pointer-events: none;
+}
 
 #progress {
   position: fixed;
@@ -235,22 +357,58 @@ body.loading #reload .stop {
   height: 2px;
   width: 0;
   background: var(--accent);
-  transition:
-    width 0.2s,
-    opacity 0.3s;
+  /* No transitions in the chrome: a running one leaves a new window showing
+     its first frame for seconds (WebKitGTK; seen on headless sway). */
   opacity: 0;
 }
 body.loading #progress {
   opacity: 1;
 }
 
-#appname {
-  display: none;
-  padding: 0 8px;
+/* ---- find and question rows ---- */
+
+.bar {
+  border-top: 1px solid var(--border);
+}
+#findtext {
+  width: 260px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0 12px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#findtext:focus {
+  border-color: var(--accent);
+}
+#findtext.none {
+  border-color: #ff6b5e;
+}
+#findcount {
+  min-width: 60px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 0 4px;
+}
+#prompt {
+  gap: 10px;
+}
+#prompttext {
+  flex: 1;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--text);
+}
+.remember {
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 /* ---- modes ---- */
@@ -258,10 +416,15 @@ body.loading #progress {
 body:not(.mode-full) #toolbar {
   display: none;
 }
+body.mode-app #identity {
+  display: flex;
+}
 body.mode-app.single #tabs,
-body.mode-app #newtab {
+body.mode-app #newtab,
+body.no-newtab #newtab {
   display: none;
 }
-body.mode-app.single #appname {
-  display: block;
+body.mode-app:not(.single) #appname {
+  display: none;
 }
+
