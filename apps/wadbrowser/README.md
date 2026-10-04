@@ -22,8 +22,10 @@ surface of their own, which the compositor blends over the page.
 
 - **One process per user** (`ipc.rs`): a later launch hands its request to
   the running browser over `$XDG_RUNTIME_DIR/wadbrowser/ctl.sock` and exits,
-  so a link opens in the window already there and tabs move between windows
-  live (drag one off the strip, or onto another window's).
+  so a link opens in the window already there. Tabs move between windows
+  (drag one off the strip, or onto another window's chrome); a moved tab's
+  page loads again in its new window, history kept: WebKit ties a view's
+  GPU drawing to its window, so views never change windows.
 - **Memory**: one shared profile (one network process and cache for every
   web app); tabs idle for 15 minutes sleep (their history kept) and wake
   where they were; WebKit sheds caches under memory pressure.

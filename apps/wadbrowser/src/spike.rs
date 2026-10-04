@@ -133,7 +133,7 @@ pub fn start(app: &AppHandle) -> bool {
                         let c = probe::tabs(&w2)[0];
                         load(&w2, c, "C", "#f4d4a4");
                         println!("SPIKE second-window {w2}");
-                        let moved = probe::move_tab(&w1, a, &w2);
+                        let moved = probe::move_tab(&app, &w1, a, &w2);
                         println!("SPIKE moved-tab {moved} w1={:?} w2={:?}", probe::tabs(&w1), probe::tabs(&w2));
                     }
                     Err(e) => println!("SPIKE second-window-failed {e}"),
@@ -269,9 +269,21 @@ pub fn start(app: &AppHandle) -> bool {
     true
 }
 
+/// A page of its own (a data: address, so a tab made again in another
+/// window loads it again).
 fn load(label: &str, tab: u64, name: &str, bg: &str) {
     if let Some(v) = probe::view(label, tab) {
-        v.load_html(&PAGE.replace("__NAME__", name).replace("__BG__", bg), Some("http://spike.localhost/"));
+        let html = PAGE.replace("__NAME__", name).replace("__BG__", bg);
+        let enc: String = html
+            .chars()
+            .map(|c| match c {
+                '#' => "%23".to_string(),
+                '%' => "%25".to_string(),
+                '\n' => " ".to_string(),
+                c => c.to_string(),
+            })
+            .collect();
+        v.load_uri(&format!("data:text/html,{enc}"));
     }
 }
 

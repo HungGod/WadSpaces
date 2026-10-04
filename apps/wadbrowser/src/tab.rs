@@ -355,12 +355,3 @@ pub fn icon_data_url(path: &str) -> Option<String> {
             .clone()
     })
 }
-
-/// A view moved to another window: WebKit draws it again only when its size
-/// changes, so a move into a window of the same size would show nothing.
-/// One pixel, for one frame, and back.
-pub fn redraw_moved(view: &WebView) {
-    view.set_margin_bottom(1);
-    let v = view.clone();
-    glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || v.set_margin_bottom(0));
-}
