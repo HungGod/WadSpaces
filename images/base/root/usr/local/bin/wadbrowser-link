@@ -1,0 +1,4 @@
+#!/bin/sh
+# x-www-browser and $BROWSER: a link opens in the workspace's kind of
+# WadBrowser window (/etc/wadspaces/wadbrowser.conf).
+exec /usr/local/bin/wadbrowser --default "$@"

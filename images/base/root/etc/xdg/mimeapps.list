@@ -1,0 +1,7 @@
+# Links open in WadBrowser (wadbrowser-handler.desktop reads which kind of
+# window from /etc/wadspaces/wadbrowser.conf).
+[Default Applications]
+x-scheme-handler/http=wadbrowser-handler.desktop
+x-scheme-handler/https=wadbrowser-handler.desktop
+text/html=wadbrowser-handler.desktop
+application/xhtml+xml=wadbrowser-handler.desktop

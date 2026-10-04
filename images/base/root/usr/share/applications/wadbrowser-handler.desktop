@@ -1,0 +1,12 @@
+[Desktop Entry]
+# What links open in (xdg-open, other apps): WadBrowser or WadBrowser Focus,
+# whichever /etc/wadspaces/wadbrowser.conf names. Not in menus.
+Type=Application
+Name=WadBrowser (links)
+Exec=/usr/local/bin/wadbrowser --default %U
+Icon=wadbrowser
+Terminal=false
+NoDisplay=true
+StartupNotify=true
+StartupWMClass=wadbrowser
+MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;application/xhtml+xml;

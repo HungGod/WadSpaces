@@ -1,51 +1,61 @@
 #!/usr/bin/env bash
-# Build-time: create a Chrome "app window" launcher for a website.
+# Build-time: a launcher for a website as an app of its own.
 #
 #   wadspaces-webapp "Claude" https://claude.ai
 #   wadspaces-webapp --id claude "Claude" https://claude.ai
+#   wadspaces-webapp --id spotify --chrome "Spotify" https://open.spotify.com
 #
-# Writes /usr/share/applications/wadspaces-webapp-<id>.desktop running
-# `google-chrome --app=<url>` in its own window class, fetches an icon, and
-# lists the launcher for the Desktop. The id defaults to a slug of the name;
-# Wad Creator passes its catalog id, and wadspaces-layout finds the launcher
-# through /etc/wadspaces/apps.d/<id>.list. A real PWA install is not needed:
-# the --app window is what a PWA gives you, minus the manifest. All web apps
-# share the default Chrome profile, so one Google sign-in covers Gmail, Drive, etc.
+# Writes /usr/share/applications/wadspaces-webapp-<id>.desktop, which opens
+# the site in a WadBrowser window of its own (app_id wadspaces-webapp-<id>,
+# no address bar), and lists the launcher for the Desktop. All web apps share
+# one browser profile, so one sign-in covers Gmail, Drive, etc. --chrome is
+# for the few sites WadBrowser (WebKitGTK) can't run: DRM players, video
+# calls. It opens a Chrome --app window instead (the chrome feature first).
+#
+# Nothing is fetched: the icon is the one Wad Creator made (the design's
+# root/ puts it at the path below, after this runs); until then, and in
+# images built by hand, a card with the site's name stands in for it.
+#
+# The id defaults to a slug of the name; Wad Creator passes its catalog id,
+# and wadspaces-layout finds the launcher through /etc/wadspaces/apps.d/<id>.list.
 set -euo pipefail
-export CURL_HOME=/usr/local/lib/wadspaces  # .curlrc: retries
 APP_ID=""
-if [[ "${1:-}" == "--id" ]]; then
-    APP_ID="$2"; shift 2
-    [[ "${APP_ID}" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "bad app id: ${APP_ID}" >&2; exit 2; }
-fi
-[[ $# -eq 2 ]] || { echo "usage: wadspaces-webapp [--id <id>] <name> <url>" >&2; exit 2; }
+ENGINE=wadbrowser
+while [[ $# -gt 0 && "$1" == --* ]]; do
+    case "$1" in
+        --id) APP_ID="$2"; shift 2
+              [[ "${APP_ID}" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "bad app id: ${APP_ID}" >&2; exit 2; } ;;
+        --chrome) ENGINE=chrome; shift ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+done
+[[ $# -eq 2 ]] || { echo "usage: wadspaces-webapp [--id <id>] [--chrome] <name> <url>" >&2; exit 2; }
 NAME="$1"; URL="$2"
-
-command -v google-chrome > /dev/null || { echo "wadspaces-webapp needs the chrome feature first" >&2; exit 1; }
+[[ "${URL}" =~ ^https?:// ]] || { echo "not a web address: ${URL}" >&2; exit 2; }
+[[ "${NAME}" != *$'\n'* ]] || { echo "the name has a line break in it" >&2; exit 2; }
 
 SLUG="${APP_ID:-$(printf '%s' "${NAME}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')}"
+[[ -n "${SLUG}" ]] || SLUG=app
 ID="wadspaces-webapp-${SLUG}"
-HOST="$(printf '%s' "${URL}" | sed -E 's#^[a-z]+://##; s#/.*$##')"
-ICON_DIR=/usr/share/icons/hicolor/256x256/apps
+ICON_DIR=/usr/share/icons/hicolor/512x512/apps
+ICON="${ICON_DIR}/${ID}.png"
 mkdir -p "${ICON_DIR}"
+[[ -f "${ICON}" ]] || wadspaces-icon fallback --url "${URL}" --out "${ICON}"
 
-# Google's favicon service, for the host and then its parent domain (it does
-# not know e.g. console.cloud.google.com). A few rounds, because build-time
-# DNS can drop out for longer than curl's own retries.
-fetch_icon() {
-    local h="$1"
-    curl -fsSL -o "${ICON_DIR}/${ID}.png" "https://www.google.com/s2/favicons?domain=${h}&sz=256"
+# One Exec argument, quoted as the desktop entry spec says: inside double
+# quotes, " ` $ \ take a backslash, and a % is doubled.
+quote() {
+    local s="$1"
+    s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//\`/\\\`}"; s="${s//\$/\\\$}"; s="${s//%/%%}"
+    printf '"%s"' "${s}"
 }
-GOT=""
-for attempt in 1 2 3; do
-    if fetch_icon "${HOST}" || { [[ "${HOST}" == *.*.* ]] && fetch_icon "${HOST#*.}"; }; then
-        GOT=1; break
-    fi
-    sleep 5
-done
-if [[ -z "${GOT}" ]]; then
-    echo "webapp: no icon for ${HOST}, using the fallback"
-    cp /usr/share/wadspaces/webapp-fallback.png "${ICON_DIR}/${ID}.png"
+
+if [[ "${ENGINE}" == chrome ]]; then
+    command -v google-chrome > /dev/null || { echo "wadspaces-webapp --chrome needs the chrome feature first" >&2; exit 1; }
+    EXEC="/usr/local/bin/google-chrome $(quote "--app=${URL}") --class=${ID}"
+else
+    command -v wadbrowser > /dev/null || { echo "wadspaces-webapp needs wadbrowser (the base image has it)" >&2; exit 1; }
+    EXEC="/usr/local/bin/wadbrowser --app ${SLUG} --name $(quote "${NAME}") --url $(quote "${URL}") %U"
 fi
 
 cat > "/usr/share/applications/${ID}.desktop" <<EOF
@@ -53,9 +63,10 @@ cat > "/usr/share/applications/${ID}.desktop" <<EOF
 Type=Application
 Name=${NAME}
 Comment=${URL}
-Exec=/usr/local/bin/google-chrome --app=${URL} --class=${ID}
-Icon=${ID}
+Exec=${EXEC}
+Icon=${ICON}
 Terminal=false
+StartupNotify=true
 Categories=Network;WebBrowser;
 StartupWMClass=${ID}
 EOF
@@ -63,4 +74,4 @@ EOF
 mkdir -p /etc/wadspaces/desktop-entries.d /etc/wadspaces/apps.d
 echo "${ID}.desktop" >> /etc/wadspaces/desktop-entries.d/webapps.list
 [[ -n "${APP_ID}" ]] && echo "${ID}.desktop" > "/etc/wadspaces/apps.d/${APP_ID}.list"
-echo "webapp: ${NAME} -> ${URL}"
+echo "webapp: ${NAME} -> ${URL} (${ENGINE})"

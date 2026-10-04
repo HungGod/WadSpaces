@@ -21,6 +21,7 @@ wad-sway = { path = "crates/wad-sway" }
 wad-input = { path = "crates/wad-input" }
 wad-git = { path = "crates/wad-git" }
 wad-net = { path = "crates/wad-net" }
+wad-icons = { path = "crates/wad-icons" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -85,6 +86,15 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.resvg]
 opt-level = 3
+
+# WadBrowser and wadspaces-icon as they go into the workspace base image:
+# fast to start, small (images/build.sh).
+[profile.wadbrowser]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
 
 # The UI's WebAssembly (cargo xtask wasm): small over fast.
 [profile.wasm]

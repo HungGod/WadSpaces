@@ -1,0 +1,22 @@
+# Builds WadSpaces' programs that run inside workspaces (WadBrowser, the
+# wadspaces-icon helper) against Debian trixie, the workspaces' own system:
+# a binary built on the Fedora host would link another glibc and WebKitGTK.
+#
+#   images/build.sh builds this as localhost/wadspaces-builder:trixie and runs
+#   cargo in it (see build_wadbrowser there).
+FROM docker.io/library/rust:1.99-slim-trixie
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential \
+      libgtk-3-dev \
+      libjavascriptcoregtk-4.1-dev \
+      libsoup-3.0-dev \
+      libwebkit2gtk-4.1-dev \
+      pkg-config && \
+    rm -rf /var/lib/apt/lists/*
+
+# The repo's rust-toolchain.toml also wants the wasm target (the UI's core);
+# none of that is built here, so use the image's own toolchain as it is.
+ENV RUSTUP_TOOLCHAIN=1.99.0 \
+    CARGO_TERM_COLOR=never

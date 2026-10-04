@@ -22,7 +22,11 @@
 #
 #   wadspaces-feature <name>...          tools and apps (/usr/local/lib/wadspaces/features)
 #   wadspaces-apt <id> [--desktop f] <pkg>...   a Debian desktop app
-#   wadspaces-webapp [--id <id>] <name> <url>   a website in its own app window
+#   wadspaces-webapp [--id <id>] <name> <url>   a website in its own WadBrowser window
+#
+# WadBrowser (apps/wadbrowser) is the browser, every web app's window, and
+# what links open in. It's built for trixie by images/build.sh, which passes
+# it in as the `wadbrowser` build context (so build with that script).
 #
 # selkies-desktop lists ~/Desktop in readdir order; this shim sorts it by name
 # so a designed desktop keeps its order (shim/sorted-desktop.c).
@@ -124,6 +128,31 @@ RUN \
 # The GitHub CLI (wrapped by /usr/local/bin/gh to use the github_token secret).
 # A layer of its own so adding it didn't rebuild the big install above.
 RUN apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*
+
+# WadBrowser: WebKitGTK, and GStreamer to play media (va: the GPU decodes
+# video; libav for what it can't), then the program itself. A layer of its
+# own: the big install above stays cached.
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    gstreamer1.0-gl \
+    gstreamer1.0-libav \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-pulseaudio \
+    intel-media-va-driver \
+    libwebkit2gtk-4.1-0 && \
+  rm -rf /var/lib/apt/lists/*
+COPY --from=wadbrowser bin/ /usr/local/bin/
+COPY --from=wadbrowser icons/ /usr/share/icons/hicolor/
+RUN \
+  echo "**** links open in WadBrowser ****" && \
+  update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/local/bin/wadbrowser-link 200 && \
+  echo "**** check it runs here ****" && \
+  ! ldd /usr/local/bin/wadbrowser | grep 'not found' && \
+  wadbrowser --version && \
+  wadspaces-icon --help > /dev/null
+ENV BROWSER=/usr/local/bin/wadbrowser-link
 
 # Project files are mounted by wadd at run time, never fetched by the image.
 # wadd only mounts projects into images built on a base that says so: older
