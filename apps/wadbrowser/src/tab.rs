@@ -37,6 +37,19 @@ pub fn unregister(view: &WebView) {
     let _ = VIEW_TAB.try_with(|m| m.borrow_mut().remove(&key(view)));
 }
 
+/// A view done with (its tab closed, asleep, or given a new view): destroyed
+/// now, so WebKit lets its page and web process go. Dropping our reference
+/// isn't enough: whatever else holds one (WebKit's own pending work, a
+/// signal's closure) would keep the page, and its process, alive.
+pub fn discard(view: &WebView) {
+    unregister(view);
+    if gtk::is_initialized_main_thread() {
+        // SAFETY: out of every container already, and nothing here uses it
+        // again (its id is unregistered: deferred work finds no tab).
+        unsafe { view.destroy() };
+    }
+}
+
 /// The tab showing `view`.
 pub fn id_of(view: &WebView) -> Option<u64> {
     VIEW_TAB.with_borrow(|m| m.get(&key(view)).copied())

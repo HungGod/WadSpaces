@@ -22,6 +22,17 @@ pub struct Menu {
     parent: gtk::ApplicationWindow,
 }
 
+impl Drop for Menu {
+    fn drop(&mut self) {
+        // A toplevel lives until it's destroyed (GTK holds it), and its view
+        // keeps the chrome's web process: both go with the browser window.
+        if gtk::is_initialized_main_thread() {
+            // SAFETY: the window is ours alone and isn't used after this.
+            unsafe { self.win.destroy() };
+        }
+    }
+}
+
 impl Menu {
     pub fn new(app: &AppHandle, label: &str, chrome: &WebView, parent: &gtk::ApplicationWindow) -> Menu {
         let messages = UserContentManager::new();

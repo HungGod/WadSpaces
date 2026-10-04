@@ -119,7 +119,7 @@ impl Drop for Tab {
     fn drop(&mut self) {
         // A move moves this struct; a drop is the tab closing.
         if let Some(v) = &self.live {
-            tab::unregister(v);
+            tab::discard(v);
         }
     }
 }
@@ -320,6 +320,16 @@ pub struct Status {
     win: gtk::Window,
     label: gtk::Label,
     parent: gtk::ApplicationWindow,
+}
+
+impl Drop for Status {
+    fn drop(&mut self) {
+        // A toplevel lives until it's destroyed (GTK holds it), whatever we drop.
+        if gtk::is_initialized_main_thread() {
+            // SAFETY: the window is ours alone and isn't used after this.
+            unsafe { self.win.destroy() };
+        }
+    }
 }
 
 impl Status {
@@ -594,6 +604,9 @@ impl Browser {
     pub fn remake_from(&mut self, gone: &str) {
         let opts = self.opts.clone();
         let active = self.active;
+        // Every window it was shown in counts, not just the first: a tab sent
+        // to a window of its own and docked back home draws another tab's
+        // page once that window has gone.
         for t in self.tabs.iter_mut().filter(|t| t.hosts.iter().any(|h| h == gone)) {
             let Some(old) = t.live.take() else {
                 t.hosts.clear();
@@ -620,6 +633,7 @@ impl Browser {
                 self.stack.set_visible_child(&view);
             }
             self.stack.remove(&old);
+            tab::discard(&old);
             t.live = Some(view);
             t.hosts = vec![self.label.clone()];
         }
@@ -634,8 +648,8 @@ impl Browser {
         let Some(view) = t.live.take() else { return false };
         t.refresh_from(&view);
         t.saved = view.session_state().and_then(|s| s.serialize());
-        tab::unregister(&view);
         self.stack.remove(&view);
+        tab::discard(&view);
         self.push();
         true
     }

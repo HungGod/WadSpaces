@@ -60,6 +60,12 @@ pub fn start(app: &AppHandle) -> bool {
     if std::env::var_os("WADBROWSER_SPIKE_EDGES").is_some() {
         return edges(app);
     }
+    if std::env::var_os("WADBROWSER_SPIKE_STRESS").is_some() {
+        return stress(app);
+    }
+    if std::env::var_os("WADBROWSER_SPIKE_ROUNDTRIP").is_some() {
+        return roundtrip(app, dir);
+    }
     let w1 = match browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
     {
         Ok(l) => l,
@@ -624,6 +630,171 @@ fn edges(app: &AppHandle) -> bool {
     let app = app.clone();
     list.push((
         300,
+        Box::new(move || {
+            println!("SPIKE done");
+            app.exit(0);
+        }),
+    ));
+    steps(list);
+    true
+}
+
+/// This process and the WebKit processes it started: how many, and their
+/// memory (PSS, MB).
+fn memory() -> (usize, u64) {
+    let me = std::process::id();
+    let mut n = 0;
+    let mut kb = 0;
+    for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else { continue };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { continue };
+        let ppid: u32 =
+            stat.rsplit(')').next().and_then(|r| r.split_whitespace().nth(1)).and_then(|p| p.parse().ok()).unwrap_or(0);
+        if pid != me && ppid != me {
+            continue;
+        }
+        if pid != me {
+            n += 1;
+        }
+        let rollup = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).unwrap_or_default();
+        kb += rollup
+            .lines()
+            .find(|l| l.starts_with("Pss:"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+    }
+    (n, kb / 1024)
+}
+
+/// A tab detached into a window of its own and docked back (that window
+/// closing), again and again: memory should settle, not climb.
+fn stress(app: &AppHandle) -> bool {
+    let Ok(w1) = browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![String::new()]))
+    else {
+        return true;
+    };
+    let a = probe::tabs(&w1)[0];
+    load(&w1, a, "A", "#9fd8a4");
+    let b = probe::new_tab(&w1, "").unwrap_or_default();
+    load(&w1, b, "B", "#a4c2f4");
+    let cycles: u32 = std::env::var("WADBROWSER_SPIKE_STRESS").ok().and_then(|n| n.parse().ok()).unwrap_or(12);
+    let mut list: Vec<(u64, Box<dyn FnOnce()>)> = vec![(
+        2500,
+        Box::new(|| {
+            let (n, mb) = memory();
+            println!("SPIKE memory start: {n} web processes, {mb} MB");
+        }),
+    )];
+    for i in 1..=cycles {
+        let (app1, w1a) = (app.clone(), w1.clone());
+        list.push((
+            600,
+            Box::new(move || {
+                if let Err(e) = probe::open_with_tab(&app1, Opts::default(), &w1a, b) {
+                    println!("SPIKE detach-failed {e}");
+                }
+            }),
+        ));
+        let (app2, w1b) = (app.clone(), w1.clone());
+        list.push((
+            900,
+            Box::new(move || {
+                let Some(from) = probe::labels().into_iter().find(|l| *l != w1b && probe::tabs(l).contains(&b)) else {
+                    return;
+                };
+                if let Err(e) = browser::move_tab(&app2, &from, b, Some(&w1b), None) {
+                    println!("SPIKE dock-failed {e}");
+                }
+            }),
+        ));
+        list.push((
+            900,
+            Box::new(move || {
+                let (n, mb) = memory();
+                println!("SPIKE memory cycle {i}: {n} web processes, {mb} MB, windows {}", probe::labels().len());
+            }),
+        ));
+    }
+    let app = app.clone();
+    list.push((
+        500,
+        Box::new(move || {
+            println!("SPIKE done");
+            app.exit(0);
+        }),
+    ));
+    steps(list);
+    true
+}
+
+/// Tab X (first shown in w1) goes to a window of its own and comes home;
+/// that window closes behind it. Then tab Y (also first shown in w1) goes to a
+/// window of its own, and w1 closes. Does each still draw (GPU path)?
+fn roundtrip(app: &AppHandle, dir: PathBuf) -> bool {
+    let page = |name: &str, bg: &str| {
+        format!(
+            "data:text/html,<title>Page {name}</title><body style='background:{bg};font:40px sans-serif'><h1>{name}</h1><script>window.born=Date.now()</script>"
+        )
+    };
+    let Ok(w1) =
+        browser::open(app, Opts { mode: Mode::Full, ..Default::default() }, First::Urls(vec![page("X", "%23f4a4a4")]))
+    else {
+        return true;
+    };
+    let x = probe::tabs(&w1)[0];
+    let y = probe::new_tab(&w1, &page("Y", "%23a4c2f4")).unwrap_or_default();
+    let z = probe::new_tab(&w1, &page("Z", "%23d4f4a4")).unwrap_or_default();
+    let _ = z;
+    let mut list: Vec<(u64, Box<dyn FnOnce()>)> = vec![];
+    let (a, w) = (app.clone(), w1.clone());
+    list.push((
+        2500,
+        Box::new(move || {
+            probe::open_with_tab(&a, Opts::default(), &w, x).unwrap();
+        }),
+    ));
+    let (a, w) = (app.clone(), w1.clone());
+    list.push((
+        1500,
+        Box::new(move || {
+            let from = probe::labels().into_iter().find(|l| *l != w && probe::tabs(l).contains(&x)).unwrap();
+            browser::move_tab(&a, &from, x, Some(&w), None).unwrap();
+            probe::select(&w, x);
+        }),
+    ));
+    let d = dir.clone();
+    list.push((
+        2500,
+        Box::new(move || {
+            shot(&d, "r1-x-home");
+        }),
+    ));
+    let (a, w) = (app.clone(), w1.clone());
+    list.push((
+        500,
+        Box::new(move || {
+            probe::open_with_tab(&a, Opts::default(), &w, y).unwrap();
+        }),
+    ));
+    let w = w1.clone();
+    list.push((
+        1500,
+        Box::new(move || {
+            if let Some(win) = probe::window(&w) {
+                let _ = win.close();
+            }
+        }),
+    ));
+    list.push((
+        2500,
+        Box::new(move || {
+            shot(&dir, "r2-y-alone");
+        }),
+    ));
+    let app = app.clone();
+    list.push((
+        800,
         Box::new(move || {
             println!("SPIKE done");
             app.exit(0);
