@@ -4,7 +4,7 @@
 //! card ([`style::card`]), or a picture the user chose ([`style::plain`]), or,
 //! when there's nothing to use (a site on this network, a site that won't
 //! answer), a card with its host's name ([`style::text_card`]). wadd makes
-//! them as Wad Creator designs (`fetch`), keeps them in a [`cache::Cache`],
+//! them as WadSpaces Client designs (`fetch`), keeps them in a [`cache::Cache`],
 //! and puts them in the build folder: the image itself fetches nothing.
 
 pub mod cache;

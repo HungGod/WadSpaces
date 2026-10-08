@@ -13,6 +13,12 @@ else
   selkies-desktop > /dev/null 2>&1 &
 fi
 
+# One clipboard for the machine: copies here paste in every other wadspace
+# and WadSpaces Client, and theirs here (crates/wad-clip).
+if [ -n "${WADSPACES_HOST_WAYLAND:-}" ] && command -v wadspaces-clipboard > /dev/null; then
+  wadspaces-clipboard --host "${WADSPACES_HOST_WAYLAND}" > /dev/null &
+fi
+
 # labwc is one window on the display; if that window is closed it would carry
 # on with no screen at all. Exit instead, and let svc-de decide what next.
 (

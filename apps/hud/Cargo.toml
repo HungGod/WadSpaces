@@ -1,6 +1,6 @@
 [package]
 name = "wadspaces-hud"
-description = "What floats above every window on a WadSpaces machine: Home, Wi-Fi, power, the focus timer, the switcher"
+description = "What floats above every window on a WadSpaces machine: Home, Wi-Fi, power, the clock, brightness and volume, the focus timer, the switcher, the clipboard history"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,6 +17,7 @@ async-channel = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 serde.workspace = true
 serde_json.workspace = true
+wad-clip = { path = "../../crates/wad-clip" }
 
 [dev-dependencies]
 # The client's tests talk to the Rust wadd itself, in-process.

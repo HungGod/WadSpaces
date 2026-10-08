@@ -87,9 +87,9 @@ fn commits(n: u32) -> &'static str {
 struct Job {
     launch: Launch,
     log: Lines,
-    /// To be viewed from another device: started on its stream sidecar
-    /// (streams.rs drew it there), not switched to on the screen.
-    stream: bool,
+    /// Started, not switched to on the screen: opened in the background
+    /// (one of several the UI opens at once).
+    background: bool,
 }
 
 /// Where else a project is open: the owner's other machines (the cloud
@@ -158,14 +158,13 @@ impl Launches {
         self.create_as(ws_id, project_ids, restart, false)
     }
 
-    /// `stream`: for viewing elsewhere (the workspace is drawn on its stream
-    /// sidecar already): started, not switched to.
+    /// `background`: started, not switched to.
     pub fn create_as(
         &self,
         ws_id: &str,
         project_ids: &[String],
         restart: bool,
-        stream: bool,
+        background: bool,
     ) -> Result<Launch, ApiError> {
         let ws = self.registry.workspace(ws_id)?;
         let busy = |j: &Job| j.launch.ws_id == ws.id && !j.launch.status.finished();
@@ -240,7 +239,7 @@ impl Launches {
             line_count: 0,
         };
         let log = Lines::new(&self.log_dir, &launch.id, MAX_LINES);
-        self.jobs.lock().unwrap().push(Job { launch: launch.clone(), log, stream });
+        self.jobs.lock().unwrap().push(Job { launch: launch.clone(), log, background });
         self.trim();
         self.publish(&id, true);
         let me = self.me.upgrade().expect("launches outlive their calls");
@@ -442,7 +441,7 @@ impl Launches {
             let mut labels = self.backend.image_labels(&ws.image).await?;
             if labels.is_none() {
                 if ws.image.starts_with("localhost/") {
-                    return Err(format!("{} isn't on this machine; build {} in Wad Creator first", ws.image, ws.name));
+                    return Err(format!("{} isn't on this machine; build {} in WadSpaces first", ws.image, ws.name));
                 }
                 self.line(id, &format!("downloading {}", ws.image));
                 // The download's progress, onto the image's line.
@@ -698,9 +697,9 @@ impl Launches {
             let what = if mounts.is_empty() { "no projects".to_string() } else { mounts.join(", ") };
             self.line(id, &format!("{} now mounts {what}", ws.name));
         }
-        let stream = self.jobs.lock().unwrap().iter().any(|j| j.launch.id == id && j.stream);
-        if stream {
-            self.line(id, &format!("starting {} for viewing elsewhere", ws.name));
+        let background = self.jobs.lock().unwrap().iter().any(|j| j.launch.id == id && j.background);
+        if background {
+            self.line(id, &format!("starting {} in the background", ws.name));
             self.registry.start(&ws.id).map_err(|e| e.message)?;
         } else {
             self.line(id, &format!("starting {}", ws.name));

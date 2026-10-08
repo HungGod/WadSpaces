@@ -3,27 +3,36 @@
 #
 #   host/build.sh image            container image localhost/wadspaces-host:latest
 #   host/build.sh qcow2 | iso      image + disk via bootc-image-builder (sudo)
-#   host/build.sh install /dev/sdX image + `bootc install to-disk` onto that drive
-#                                  (WIPES it; sudo; refuses the disk holding /)
-#   host/build.sh update /dev/sdX  image, copied onto an already installed drive
+#   host/build.sh install [/dev/sdX]
+#                                  image + `bootc install to-disk` onto that drive
+#                                  (WIPES it; sudo; refuses the disk holding /),
+#                                  with the base images (--no-bases: without)
+#   host/build.sh update [/dev/sdX]
+#                                  image, copied onto an already installed drive
 #                                  in place: only changed layers are written, and
 #                                  the drive switches to it on its next boot (sudo)
+#
+# With no drive named, install and update use the one USB drive plugged in.
+# sudo asks for the password once, at the start, and stays fresh until the
+# end (a drive copy takes longer than sudo remembers a password). The drive's
+# partitions are unmounted first if the desktop mounted them.
 #
 #   --images writing,iq-dev        with install/update: also copy these workspaces'
 #                                  images onto the drive (as their workspaces.d/<id>.toml
 #                                  names them, from this machine's podman), so the
 #                                  machine never downloads them
-#   --bases                        with install/update: also copy the base images
-#                                  (localhost/wadspaces-{base,stream}:trixie, built by
-#                                  images/build.sh) onto the drive; the machine builds
-#                                  designs on the first and streams with the second
+#   --bases                        with update: also copy the base image
+#                                  (localhost/wadspaces-base:trixie, built by
+#                                  images/build.sh) onto the drive; the machine
+#                                  builds designs on it. install copies it unless
+#                                  --no-bases
 #   --stage-only DIR               with update: write what would go onto the
 #                                  drive into DIR instead (for testing)
 #
-# WADCREATOR_DIR (default apps/wadcreator): Wad Creator, the kiosk's shell. Its
-# Tauri app (npm run build:app) goes into the image at /usr/bin/wadcreator. It
+# CLIENT_DIR (default apps/client): the WadSpaces Client, the kiosk's shell. Its
+# Tauri app (npm run build:app) goes into the image at /usr/bin/client. It
 # needs Rust (rustup), Node, the WebKitGTK dev packages, and the Firebase web
-# config in WADCREATOR_DIR/.env.local.
+# config in CLIENT_DIR/.env.local.
 #
 # wadd (apps/wadd, the machine daemon) and the HUD (apps/hud: the bar, power
 # and Wi-Fi menus and the switcher above every window) are built here too,
@@ -34,13 +43,13 @@
 # context directly):
 #   admin_password_hash    crypt hash for `admin` (default: the one in bib-config.toml)
 # No GitHub token is baked in any more: each machine signs in to GitHub from
-# Wad Creator (device sign-in), and gets the token from the account.
+# WadSpaces Client (device sign-in), and gets the token from the account.
 # ADMIN_SSH_KEY (default: the key in bib-config.toml) is admin's SSH key.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="${IMAGE:-localhost/wadspaces-host:latest}"
-WADCREATOR_DIR="${WADCREATOR_DIR:-${ROOT}/apps/wadcreator}"
+CLIENT_DIR="${CLIENT_DIR:-${ROOT}/apps/client}"
 SECRETS_DIR="${ROOT}/host/secrets"
 BIB_CONFIG="${ROOT}/host/bib-config.toml"
 TARGET="${1:-image}"
@@ -48,6 +57,10 @@ DISK=""
 IMAGES=""
 BASES=""
 STAGE_ONLY=""
+# The background job keeping sudo fresh, and a drive mounted for a copy:
+# cleanup() undoes both however the script ends.
+SUDO_KEEPALIVE=""
+MNT=""
 [[ $# -gt 0 ]] && shift
 if [[ "${TARGET}" == "install" || "${TARGET}" == "update" ]] && [[ $# -gt 0 && "$1" != --* ]]; then
     DISK="$1"; shift
@@ -56,27 +69,53 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --images) IMAGES="$2"; shift 2 ;;
         --bases) BASES=1; shift ;;
+        --no-bases) BASES=0; shift ;;
         --stage-only) STAGE_ONLY="$2"; shift 2 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 STICK_OCI="${ROOT}/.build/stick/oci"
+# A wiped drive has no base image: install brings it unless told not to.
+if [[ "${TARGET}" == "install" ]]; then BASES="${BASES:-1}"; fi
+[[ "${BASES}" == "0" ]] && BASES=""
+
+cleanup() {
+    if [[ -n "${MNT}" ]]; then
+        sudo umount "${MNT}" 2>/dev/null
+        rmdir "${MNT}" 2>/dev/null
+    fi
+    if [[ -n "${SUDO_KEEPALIVE}" ]]; then
+        kill "${SUDO_KEEPALIVE}" 2>/dev/null
+    fi
+    true
+}
+trap cleanup EXIT
+
+# Ask for the sudo password now, once, and keep it fresh while this script
+# runs: builds and a drive copy outlast sudo's few minutes.
+sudo_once() {
+    [[ $EUID -eq 0 ]] && return
+    echo ">> sudo is needed for ${1}: asking once, now"
+    sudo -v
+    ( while kill -0 "$$" 2>/dev/null; do sudo -n -v 2>/dev/null; sleep 50; done ) &
+    SUDO_KEEPALIVE=$!
+}
 
 # Built here rather than in a container: this laptop runs Fedora 43 like the
 # image, so the app links against the same WebKitGTK. The image build runs
-# `wadcreator --version` to check that it loads.
-stage_wadcreator() {
-    local out="${ROOT}/.build/wadcreator-app"
+# `client --version` to check that it loads.
+stage_client() {
+    local out="${ROOT}/.build/client-app"
     rm -rf "${out}" && mkdir -p "${out}"
     if ! command -v cargo > /dev/null && [[ -f "${HOME}/.cargo/env" ]]; then
         # shellcheck disable=SC1091
         source "${HOME}/.cargo/env"
     fi
     command -v cargo > /dev/null || { echo "cargo not found: install Rust with rustup" >&2; exit 1; }
-    [[ -f "${WADCREATOR_DIR}/.env.local" ]] || { echo "no ${WADCREATOR_DIR}/.env.local: Wad Creator needs the Firebase web config (see .env.example)" >&2; exit 1; }
-    echo ">> building Wad Creator (Tauri) in ${WADCREATOR_DIR}"
-    (cd "${WADCREATOR_DIR}" && npm ci --no-audit --no-fund && npm run build:app)
-    install -m 755 "${ROOT}/target/release/wadcreator" "${out}/wadcreator"
+    [[ -f "${CLIENT_DIR}/.env.local" ]] || { echo "no ${CLIENT_DIR}/.env.local: WadSpaces Client needs the Firebase web config (see .env.example)" >&2; exit 1; }
+    echo ">> building WadSpaces Client (Tauri) in ${CLIENT_DIR}"
+    (cd "${CLIENT_DIR}" && npm ci --no-audit --no-fund && npm run build:app)
+    install -m 755 "${ROOT}/target/release/client" "${out}/client"
 }
 
 stage_wadd() {
@@ -146,15 +185,35 @@ root_disk() {
     lsblk -ndo PKNAME "${src}" 2>/dev/null | sed 's|^|/dev/|' || true
 }
 
+# No drive named: the one USB drive plugged in.
+pick_usb_disk() {
+    local usb
+    mapfile -t usb < <(lsblk -dnpo NAME,TRAN,TYPE | awk '$2 == "usb" && $3 == "disk" { print $1 }')
+    case ${#usb[@]} in
+        0) echo "no USB drive plugged in: plug one in, or name it (host/build.sh ${TARGET} /dev/sdX)" >&2; exit 2 ;;
+        1) DISK="${usb[0]}"; echo ">> using the USB drive ${DISK}" ;;
+        *) echo "more than one USB drive: name one (host/build.sh ${TARGET} /dev/sdX)" >&2
+           lsblk -o NAME,SIZE,MODEL,TRAN "${usb[@]}" >&2; exit 2 ;;
+    esac
+}
+
 check_disk() {
-    [[ -n "${DISK}" && -b "${DISK}" ]] || { echo "usage: host/build.sh ${TARGET} /dev/sdX" >&2; exit 2; }
+    [[ -n "${DISK}" ]] || pick_usb_disk
+    [[ -b "${DISK}" ]] || { echo "${DISK} is not a block device" >&2; exit 2; }
     [[ "$(lsblk -ndo TYPE "${DISK}")" == "disk" ]] || { echo "${DISK} is not a whole disk" >&2; exit 2; }
     if [[ "$(realpath "${DISK}")" == "$(realpath "$(root_disk)" 2>/dev/null)" ]]; then
         echo "${DISK} holds this system's root filesystem; refusing" >&2; exit 2
     fi
-    if lsblk -nro MOUNTPOINTS "${DISK}" | grep -q .; then
-        echo "${DISK} has mounted partitions; unmount them first" >&2; exit 2
-    fi
+}
+
+# The desktop mounts a drive's partitions when it's plugged in: unmount them
+# (needs sudo_once first).
+unmount_disk() {
+    local p
+    for p in $(lsblk -nrpo NAME,MOUNTPOINTS "${DISK}" | awk 'NF > 1 { print $1 }'); do
+        echo ">> unmounting ${p}"
+        sudo umount --all-targets "${p}"
+    done
 }
 
 check_install_target() {
@@ -215,7 +274,7 @@ stage_stick() {
     # Bases keep their own names: wadd builds on them as they are.
     local b
     local b src
-    for b in ${BASES:+base stream}; do
+    for b in ${BASES:+base}; do
         src="localhost/wadspaces-${b}:trixie"
         podman image exists "${src}" || { echo "${src} is not built: images/build.sh --only ${b}" >&2; exit 1; }
         echo ">> staging ${src}"
@@ -227,12 +286,11 @@ stage_stick() {
 
 # Mount the drive's root, mirror the staged directory into its /var, mark it.
 push_to_drive() {
-    local part mnt var
+    local part var
     part="$(root_partition)"
-    mnt="$(mktemp -d)"
-    sudo mount "${part}" "${mnt}"
-    trap "sudo umount '${mnt}' 2>/dev/null; rmdir '${mnt}' 2>/dev/null" EXIT
-    var="$(sudo sh -c "ls -d '${mnt}'/ostree/deploy/*/var" | head -n1)"
+    MNT="$(mktemp -d)"
+    sudo mount "${part}" "${MNT}"
+    var="$(sudo sh -c "ls -d '${MNT}'/ostree/deploy/*/var" | head -n1)"
     [[ -n "${var}" ]] || { echo "no ostree deployment on ${part}" >&2; exit 1; }
     echo ">> copying changed layers to ${DISK}"
     sudo mkdir -p "${var}/lib/wadspaces/incoming"
@@ -240,8 +298,9 @@ push_to_drive() {
     sudo touch "${var}/lib/wadspaces/incoming/pending"
     echo ">> flushing to the drive"
     sync
-    sudo umount "${mnt}" && rmdir "${mnt}"
-    trap - EXIT
+    sudo umount "${MNT}" && rmdir "${MNT}"
+    MNT=""
+    echo ">> ${DISK} is unmounted: safe to unplug"
 }
 
 copy_to_root_storage() {
@@ -252,13 +311,18 @@ copy_to_root_storage() {
 }
 
 case "${TARGET}" in
-    image|qcow2|iso|raw) ;;
-    install) check_install_target ;;
-    update) [[ -n "${STAGE_ONLY}" ]] || check_update_target ;;
-    *) echo "usage: host/build.sh [image|qcow2|iso|raw|install /dev/sdX|update /dev/sdX] [--images a,b] [--bases]" >&2; exit 2 ;;
+    image) ;;
+    qcow2|iso|raw) sudo_once "the disk image" ;;
+    install) check_install_target; sudo_once "installing onto ${DISK}"; unmount_disk ;;
+    update)
+        if [[ -z "${STAGE_ONLY}" ]]; then
+            check_update_target; sudo_once "updating ${DISK}"; unmount_disk
+        fi
+        ;;
+    *) echo "usage: host/build.sh [image|qcow2|iso|raw|install [/dev/sdX]|update [/dev/sdX]] [--images a,b] [--bases|--no-bases]" >&2; exit 2 ;;
 esac
 
-stage_wadcreator
+stage_client
 stage_wadd
 stage_hud
 stage_secrets

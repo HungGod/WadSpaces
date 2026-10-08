@@ -27,7 +27,7 @@ pub struct GithubAccount {
     pub avatar_url: Option<String>,
 }
 
-/// A GitHub repository, as Wad Creator lists them (and the account keeps at
+/// A GitHub repository, as WadSpaces Client lists them (and the account keeps at
 /// users/{uid}/github/repos for the online app).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

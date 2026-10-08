@@ -1,16 +1,16 @@
 # WadSpaces
 
-The software that runs a WadSpaces machine, and the Wad Creator app used to design and run wadspaces.
+The software that runs a WadSpaces machine, and the WadSpaces Client, the app used to design and run wadspaces.
 
 | Path | What it is |
 |---|---|
-| `apps/wadd/` | wadd, the machine daemon: workspaces, projects, builds, the account link, streams. Its API is `/v1` over `/run/wadd/wadd.sock`. |
-| `apps/wadcreator/` | Wad Creator: the React UI. It's built for three targets (`src/lib/machine.ts`): the web portal (`online`, `wad-spaces.web.app`), the machine app (`machine`, inside Tauri: the kiosk's shell), and `offline` (development against a dev wadd). The Firebase function and Firestore rules are here too. |
-| `apps/wadcreator/src-tauri/` | The machine app: Tauri around the same React UI. Its Rust side holds the commands the UI calls (`src/gen/bindings.ts` is generated from them). |
-| `apps/hud/` | The HUD: the buttons above every wadspace, and the switcher, Wi-Fi and power overlays. |
-| `crates/` | Shared Rust crates:<br>• `wad-proto`: types shared by wadd, the app and the UI<br>• `wad-core`: designs and generators; also compiled to wasm for the UI<br>• `wad-config`<br>• `wad-store`: wadd's state files<br>• `wad-podman`, `wad-systemd`, `wad-sway`<br>• `wad-input`: the keyboard proxy<br>• `wad-git`: project clones and fast-forwards<br>• `wad-net`: Wi-Fi through NetworkManager<br>• `wad-github`: device-flow sign-in<br>• `wad-firebase`: Firestore from Rust |
-| `host/` | The machine's OS image (Fedora bootc, sway, Wad Creator as the shell), and `host/build.sh` to build it and write it to a drive. `CUTOVER.md` and `STREAMS.md` are the checklists for the cutover from the Python wadd and for streams. |
-| `images/` | The images workspaces are made from: `base` (the lean desktop every design builds on) and `stream` (the sidecar a workspace draws on when it's viewed from another device). `images/build.sh` builds them. |
+| `apps/wadd/` | wadd, the machine daemon: workspaces, projects, builds, the account link. Its API is `/v1` over `/run/wadd/wadd.sock`. |
+| `apps/client/` | The WadSpaces Client (the program is `client`, `/usr/bin/client` on a machine): the React UI. It's built for three targets (`src/lib/machine.ts`): the web portal (`online`, `wad-spaces.web.app`), the machine app (`machine`, inside Tauri: the kiosk's shell), and `offline` (development against a dev wadd). The Firebase function and Firestore rules are here too. |
+| `apps/client/src-tauri/` | The machine app: Tauri around the same React UI. Its Rust side holds the commands the UI calls (`src/gen/bindings.ts` is generated from them). |
+| `apps/hud/` | The HUD: the bar above every wadspace (Home, Wi-Fi, brightness and volume, power, the clock; it tucks away behind an arrow), and the switcher, Wi-Fi, power and clipboard-history (Super+V) overlays. |
+| `crates/` | Shared Rust crates:<br>• `wad-proto`: types shared by wadd, the app and the UI<br>• `wad-core`: designs and generators; also compiled to wasm for the UI<br>• `wad-config`<br>• `wad-store`: wadd's state files<br>• `wad-podman`, `wad-systemd`, `wad-sway`<br>• `wad-input`: the keyboard proxy<br>• `wad-git`: project clones and fast-forwards<br>• `wad-net`: Wi-Fi through NetworkManager<br>• `wad-github`: device-flow sign-in<br>• `wad-firebase`: Firestore from Rust<br>• `wad-clip`: one clipboard for the machine (each wadspace's `wadspaces-clipboard` bridge, and the HUD's history) |
+| `host/` | The machine's OS image (Fedora bootc, sway, WadSpaces Client as the shell), and `host/build.sh` to build it and write it to a drive. `CUTOVER.md` is the checklist for the cutover from the Python wadd. |
+| `images/` | The image workspaces are made from: `base`, the lean desktop every design builds on. `images/build.sh` builds it. |
 | `fixtures/` | What every renderer must reproduce:<br>• unit files (`quadlet/`)<br>• the core's goldens (`core/`)<br>• the hand-written workspaces from before the Builder (`presets/`)<br>• the old Python wadd's config cases (`python-state/`) |
 
 ## Tests
@@ -18,8 +18,8 @@ The software that runs a WadSpaces machine, and the Wad Creator app used to desi
 ```bash
 cargo xtask ci                                         # everything below except the rules tests
 cargo test --workspace                                 # Rust
-(cd apps/wadcreator && npm test && npm run typecheck)  # UI
-(cd apps/wadcreator && npm run test:rules)             # Firestore rules (emulator)
+(cd apps/client && npm test && npm run typecheck)  # UI
+(cd apps/client && npm run test:rules)             # Firestore rules (emulator)
 ```
 
 After changing a Tauri command or a `wad-proto` type, run `cargo xtask bindings` (a test fails until you do). After changing `wad-core`, run `cargo xtask wasm`.
@@ -30,8 +30,8 @@ Try it on a laptop, in a window, without the host image. Run wadd as you, then t
 
 ```bash
 cargo run -p wadd -- serve --user &
-cd apps/wadcreator && npm run app      # hot reload
-npm run build:app                      # release build at target/release/wadcreator (--kiosk for fullscreen)
+cd apps/client && npm run app      # hot reload
+npm run build:app                      # release build at target/release/client (--kiosk for fullscreen)
 ```
 
 You sign in with your real account (Firebase). Wi-Fi and Power in the app act on the laptop for real.
@@ -63,20 +63,18 @@ apps/wadd/dev/try-github.sh    # GitHub for real: whose token podman has, and yo
                                # (--sign-in: the device sign-in first; it replaces that token)
 apps/wadd/dev/try-network.sh   # NetworkManager for real: status and networks in range
                                # (--join SSID / --forget SSID change things)
-apps/wadd/dev/try-stream.sh    # streams for real: TLS, the password, a remote view
-                               # (VIEW=1: and Wad Creator's stream window)
 apps/wadd/dev/try-app.sh       # the machine app's spike against `wadd serve --user`
 sudo target/debug/wadd keys    # the keyboard proxy for 20 s (prints what Super chords would do)
 ```
 
 A few scripts need extra pieces:
 - `try-view.sh` and `try-build.sh` need sway. Unpacked under `.build/sway` is enough (`dev/sway.sh` says how).
-- `try-build.sh` and `try-stream.sh` need the images: `images/build.sh`.
+- `try-build.sh` needs the base image: `images/build.sh`.
 
 ## History
 
 This repo was made on 2026-10-02 from older repos. Their history is kept as the second parent of the import merges:
-- `WadCreator` → `apps/wadcreator/`;
+- `WadCreator` → `apps/wadcreator/` (renamed `apps/client/` on 2026-10-07);
 - `Wadspaces-Tools` (`Workspace-Switcher`) → the Python wadd (removed after the cutover to the Rust one) and `host/`.
 
 `images/` came from `Wadspaces-David`'s `_common` and `_stream` on 2026-10-04, without their history. That repo's hand-written workspaces aren't needed any more: the Builder makes workspaces now.

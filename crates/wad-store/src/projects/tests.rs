@@ -319,7 +319,7 @@ fn another_machines_folder_project_can_still_be_edited_here() {
     assert_eq!(s.get("f9").unwrap()["source"], theirs);
     let renamed = with(&s.get("f9").unwrap(), json!({"name": "Renamed"}));
     assert_eq!(s.put("f9", &renamed).unwrap()["source"], theirs);
-    let resent = with(&theirs, json!({"machineId": "", "machineName": ""})); // as Wad Creator may send it back
+    let resent = with(&theirs, json!({"machineId": "", "machineName": ""})); // as WadSpaces Client may send it back
     assert_eq!(s.put("f9", &with(&s.get("f9").unwrap(), json!({"source": resent}))).unwrap()["source"], theirs);
     let elsewhere = with(&theirs, json!({"path": "/var/home/wad/Other"})); // a new folder here
     assert!(

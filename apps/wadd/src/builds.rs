@@ -1,5 +1,5 @@
 //! Building a design's image on this machine (builds.py, with the build
-//! folder made here): Wad Creator sends the design and its wallpaper (the
+//! folder made here): WadSpaces Client sends the design and its wallpaper (the
 //! app draws it); wad-core turns that into the build folder (Dockerfile,
 //! root/), with its web apps' icons made here first (icons.rs: nothing is
 //! fetched inside the build), which podman builds as

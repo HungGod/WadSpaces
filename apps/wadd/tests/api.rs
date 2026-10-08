@@ -28,9 +28,11 @@ async fn start(allow_self: bool) -> (tempfile::TempDir, std::path::PathBuf, toki
     let offline = Arc::new(wadd::backend::Offline("no machine in tests".into()));
     let mut server =
         Server::new(&cfg, Profile::User, Listen::Path(sock.clone()), LogBuffer::new(100), offline).unwrap();
+    let state = Arc::get_mut(&mut server.state).unwrap();
+    // Never the laptop's own screen.
+    state.backlight = wadd::screen::Backlight::new(dir.path().join("backlight"));
     if !allow_self {
         // As if wadd ran as someone else: this test's user isn't allowed.
-        let state = Arc::get_mut(&mut server.state).unwrap();
         state.policy.own_uid = u32::MAX - 1;
     }
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
@@ -184,7 +186,7 @@ async fn the_view_and_sessions() {
     let (status, body) = send(&sock, "POST", "/v1/session", r#"{"workspaces":["writing"],"minutes":25}"#).await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains(r#""mode":"focus""#), "{body}");
-    // Locked: Wad Creator waits, and ending needs ?force.
+    // Locked: WadSpaces Client waits, and ending needs ?force.
     let (status, body) = request(&sock, "POST", "/v1/view/home").await;
     assert_eq!(status, 409, "{body}");
     let (status, _) = request(&sock, "DELETE", "/v1/session").await;
@@ -329,6 +331,25 @@ async fn network_and_power_without_the_system_bus() {
     assert_eq!(status, 503); // and nothing was asked of the real logind
     let (status, _) = send(&sock, "POST", "/v1/power", r#"{"action":"explode"}"#).await;
     assert_eq!(status, 422);
+    let _ = stop.send(());
+}
+
+#[tokio::test]
+async fn the_screens_brightness() {
+    let (d, sock, stop) = start(true).await;
+    // No backlight (an external monitor): says so.
+    assert_eq!(get(&sock, "/v1/screen/brightness").await.1, r#"{"available":false,"percent":0}"#);
+    assert_eq!(send(&sock, "PUT", "/v1/screen/brightness", r#"{"percent":50}"#).await.0, 404);
+    let dev = d.path().join("backlight/intel_backlight");
+    std::fs::create_dir_all(&dev).unwrap();
+    std::fs::write(dev.join("type"), "raw\n").unwrap();
+    std::fs::write(dev.join("max_brightness"), "7500\n").unwrap();
+    std::fs::write(dev.join("brightness"), "3750\n").unwrap();
+    assert_eq!(get(&sock, "/v1/screen/brightness").await.1, r#"{"available":true,"percent":50}"#);
+    let (status, body) = send(&sock, "PUT", "/v1/screen/brightness", r#"{"percent":80}"#).await;
+    assert_eq!((status, body.as_str()), (200, r#"{"available":true,"percent":80}"#));
+    assert_eq!(std::fs::read_to_string(dev.join("brightness")).unwrap(), "6000");
+    assert_eq!(send(&sock, "PUT", "/v1/screen/brightness", r#"{"percent":"lots"}"#).await.0, 422);
     let _ = stop.send(());
 }
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # greetd session for the kiosk user: wait for wadd, then run sway, which starts
-# Wad Creator on the shell (etc/sway/wadspaces.conf).
+# WadSpaces Client on the shell (etc/sway/wadspaces.conf).
 export XDG_SESSION_TYPE=wayland
 export XCURSOR_THEME=Adwaita
 export XCURSOR_SIZE=24

@@ -256,7 +256,7 @@ async fn read_json<T: serde::de::DeserializeOwned>(res: reqwest::Response) -> Re
 /// collaborations and organisations, most recently pushed first.
 const REPOS_QUERY: &str = "per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member";
 
-/// A GitHub repo as Wad Creator sees it.
+/// A GitHub repo as WadSpaces Client sees it.
 fn repo_of(r: &serde_json::Value) -> Repo {
     let s = |k: &str| r.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
     Repo {

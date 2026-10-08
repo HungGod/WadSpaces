@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::model::WifiNetwork;
+use crate::model::{Brightness, WifiNetwork};
 
 pub enum Incoming {
     /// A wadd event: its name and data.
@@ -61,8 +61,14 @@ impl Wadd {
             head.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n", payload.len()));
         }
         head.push_str("\r\n");
-        s.write_all(head.as_bytes()).and_then(|_| s.write_all(payload.as_bytes())).map_err(|e| e.to_string())?;
-        read_answer(BufReader::new(s))
+        head.push_str(&payload);
+        // One write. wadd may answer (and close) before reading a body its
+        // endpoint doesn't take: a failed write then still has an answer.
+        let sent = s.write_all(head.as_bytes());
+        match read_answer(BufReader::new(s)) {
+            Ok(a) => Ok(a),
+            Err(e) => Err(sent.err().map(|w| w.to_string()).unwrap_or(e)),
+        }
     }
 
     /// wadd's message for a failed call, else the status.
@@ -86,7 +92,23 @@ impl Wadd {
         if (200..300).contains(&status) { Ok(()) } else { Err(Self::failure(status, &text)) }
     }
 
-    /// Wad Creator on screen (what Super+0 does).
+    fn put<T: DeserializeOwned>(&self, path: &str, body: Value) -> Result<T, String> {
+        let (status, text) = self.call("PUT", path, Some(&body), Some(Duration::from_secs(10)))?.text(1 << 20)?;
+        if !(200..300).contains(&status) {
+            return Err(Self::failure(status, &text));
+        }
+        serde_json::from_slice(&text).map_err(|e| e.to_string())
+    }
+
+    pub fn brightness(&self) -> Result<Brightness, String> {
+        self.get("/v1/screen/brightness")
+    }
+
+    pub fn set_brightness(&self, percent: u8) -> Result<Brightness, String> {
+        self.put("/v1/screen/brightness", json!({ "percent": percent }))
+    }
+
+    /// WadSpaces Client on screen (what Super+0 does).
     pub fn home(&self) -> Result<(), String> {
         self.post("/v1/view/home", json!({}))
     }
@@ -327,10 +349,12 @@ mod tests {
             w.home().unwrap();
             assert_eq!(w.bytes("/v1/workspaces/writing/icon").as_deref(), Some(&b"\x89PNG-ish"[..]));
             assert_eq!(w.bytes("/v1/workspaces/nope/icon"), None);
+            // The laptop's own screen is never set from a test: only read.
+            w.brightness().unwrap();
             // No NetworkManager here: wadd says so, in words.
             let e = w.wifi_scan().unwrap_err();
             assert!(!e.is_empty() && !e.starts_with("wadd answered"), "{e}");
-            // A free session with Writing: the switcher offers it and Wad Creator.
+            // A free session with Writing: the switcher offers it and WadSpaces Client.
             w.post("/v1/session", json!({"workspaces": ["writing"], "minutes": null})).unwrap();
             w.post("/v1/carousel/next", json!({})).unwrap();
             let mut names = vec![];

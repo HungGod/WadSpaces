@@ -39,9 +39,6 @@ pub struct AppState {
     pub launches: Arc<crate::launches::Launches>,
     pub builds: Arc<crate::builds::Builds>,
     pub secrets: Arc<crate::secrets::Secrets>,
-    pub streams: Arc<crate::streams::Streams>,
-    /// Other machines' streams viewed here.
-    pub remote: Arc<crate::remote::RemoteViews>,
     pub github: Arc<crate::github::GithubService>,
     pub network: Arc<crate::network::Network>,
     /// The machine the registry manages (podman), for diagnostics.
@@ -49,6 +46,8 @@ pub struct AppState {
     pub meter: crate::metrics::Meter,
     /// Power off and restart (logind); None without the system bus.
     pub power: Option<wad_systemd::Power>,
+    /// The screen's brightness (sysfs).
+    pub backlight: crate::screen::Backlight,
     /// The account link; None without cloud settings.
     pub cloud: Option<Arc<crate::cloud::CloudRelay>>,
     /// The keyboard proxy, while it runs.
@@ -123,11 +122,6 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/workspaces/{id}", get(workspace).put(workspace_put).delete(workspace_delete))
         .route("/v1/workspaces/{id}/state", get(workspace_state))
         .route("/v1/workspaces/{id}/icon", get(workspace_icon))
-        .route("/v1/workspaces/{id}/stream", post(stream_start).delete(stream_stop))
-        .route("/v1/streams", get(streams))
-        .route("/v1/streams/settings", axum::routing::put(streams_settings))
-        .route("/v1/remote-views", post(remote_view_open))
-        .route("/v1/remote-views/{id}", delete(remote_view_close))
         .route("/v1/workspaces/{id}/start", post(start))
         .route("/v1/workspaces/{id}/stop", post(stop))
         .route("/v1/workspaces/{id}/restart", post(restart))
@@ -167,6 +161,7 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/network/wifi/disconnect", post(wifi_disconnect))
         .route("/v1/network/wifi/forget", post(wifi_forget))
         .route("/v1/power", post(power))
+        .route("/v1/screen/brightness", get(brightness).put(brightness_put))
         .route("/v1/secrets", get(secrets))
         .route("/v1/secrets/{name}", axum::routing::put(secret_put).delete(secret_delete))
         .route("/v1/library/{collection}", get(library))
@@ -203,68 +198,6 @@ async fn workspaces(State(app): State<Arc<AppState>>) -> Json<Vec<Workspace>> {
 
 async fn workspace(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<Workspace>, Failure> {
     app.registry.workspaces().into_iter().find(|w| w.id == id).map(Json).ok_or_else(|| no_workspace(&id))
-}
-
-async fn streams(State(app): State<Arc<AppState>>) -> Json<wad_proto::v1::StreamsStatus> {
-    Json(app.streams.status().await)
-}
-
-/// Viewing from other devices: allowed or not. Only through this machine's
-/// own API (Wad Creator on its screen, or an admin): the account can't.
-async fn streams_settings(
-    State(app): State<Arc<AppState>>,
-    Json(s): Json<wad_proto::v1::StreamSettings>,
-) -> Result<Json<wad_proto::v1::StreamsStatus>, Failure> {
-    Ok(Json(app.streams.set_allow_remote(s.allow_remote).await?))
-}
-
-async fn stream_start(
-    State(app): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    body: axum::body::Bytes,
-) -> Result<Json<wad_proto::v1::StreamsStatus>, Failure> {
-    let req: wad_proto::v1::StreamRequest = if body.is_empty() {
-        Default::default()
-    } else {
-        serde_json::from_slice(&body).map_err(|e| Failure(ApiError::new(ErrorCode::BadRequest, e.to_string())))?
-    };
-    Ok(Json(app.streams.start(&id, req.takeover).await?))
-}
-
-async fn stream_stop(
-    State(app): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<wad_proto::v1::StreamsStatus>, Failure> {
-    Ok(Json(app.streams.stop(&id).await?))
-}
-
-/// Views another of the owner's machines' streams here: where it is and the
-/// certificate to pin come from the account (read by this machine), the
-/// password from this machine's secrets.
-async fn remote_view_open(
-    State(app): State<Arc<AppState>>,
-    Json(req): Json<wad_proto::v1::RemoteViewRequest>,
-) -> Result<Json<wad_proto::v1::RemoteView>, Failure> {
-    let relay = app
-        .cloud
-        .as_ref()
-        .ok_or_else(|| Failure(ApiError::new(ErrorCode::Conflict, "this machine isn't linked to an account")))?;
-    let target = relay
-        .sibling_stream(&req.machine_id, &req.ws_id)
-        .await
-        .map_err(|e| Failure(ApiError::new(ErrorCode::Conflict, e)))?;
-    let password = app
-        .registry_backend
-        .secret_value(crate::streams::PASSWORD)
-        .await
-        .map_err(|e| Failure(ApiError::new(ErrorCode::Internal, e)))?
-        .map(|p| p.trim().to_string())
-        .unwrap_or_default();
-    Ok(Json(app.remote.open(target, &password).await?))
-}
-
-async fn remote_view_close(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> StatusCode {
-    if app.remote.close(&id) { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND }
 }
 
 /// Where a workspace's icon may be: the image's icons, and wadd's own.
@@ -502,7 +435,7 @@ async fn launch_create(
     State(app): State<Arc<AppState>>,
     Json(req): Json<LaunchRequest>,
 ) -> Result<(StatusCode, Json<Launch>), Failure> {
-    Ok((StatusCode::CREATED, Json(app.launches.create(&req.workspace, &req.projects, req.restart)?)))
+    Ok((StatusCode::CREATED, Json(app.launches.create_as(&req.workspace, &req.projects, req.restart, req.background)?)))
 }
 
 #[derive(Deserialize)]
@@ -540,7 +473,7 @@ async fn icons_prefetch(State(app): State<Arc<AppState>>, Json(req): Json<IconPr
     StatusCode::ACCEPTED
 }
 
-/// The icon a web app would get in its image (Wad Creator shows it).
+/// The icon a web app would get in its image (WadSpaces Client shows it).
 async fn webapp_icon(
     State(app): State<Arc<AppState>>,
     Json(req): Json<IconSource>,
@@ -596,7 +529,7 @@ async fn switch(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Res
     Ok(Json(app.view.state()))
 }
 
-/// Wad Creator (refused during a focus session's time).
+/// WadSpaces Client (refused during a focus session's time).
 async fn home(State(app): State<Arc<AppState>>) -> Result<Json<ViewState>, Failure> {
     app.view.home(false)?;
     Ok(Json(app.view.state()))
@@ -632,7 +565,7 @@ async fn session_begin(
     State(app): State<Arc<AppState>>,
     Json(req): Json<SessionRequest>,
 ) -> Result<Json<Session>, Failure> {
-    Ok(Json(app.view.session_begin(&req.workspaces, req.minutes)?))
+    Ok(Json(app.view.session_start(&req.workspaces, req.minutes, !req.launched)?))
 }
 
 #[derive(Deserialize)]
@@ -796,6 +729,18 @@ async fn power(
     Ok(StatusCode::ACCEPTED)
 }
 
+async fn brightness(State(app): State<Arc<AppState>>) -> Json<wad_proto::v1::Brightness> {
+    Json(app.backlight.get())
+}
+
+async fn brightness_put(
+    State(app): State<Arc<AppState>>,
+    Json(b): Json<wad_proto::v1::BrightnessRequest>,
+) -> Result<Json<wad_proto::v1::Brightness>, Failure> {
+    let code = if app.backlight.get().available { ErrorCode::Internal } else { ErrorCode::NotFound };
+    app.backlight.set(b.percent).map(Json).map_err(|e| Failure(ApiError::new(code, e)))
+}
+
 /// The secrets' names and where they came from; never their values.
 async fn secrets(State(app): State<Arc<AppState>>) -> Result<Json<Vec<wad_proto::v1::SecretInfo>>, Failure> {
     Ok(Json(app.secrets.list().await?))
@@ -837,7 +782,7 @@ async fn library_get(
     }
 }
 
-/// Saves one of Wad Creator's documents (opaque to wadd).
+/// Saves one of WadSpaces Client's documents (opaque to wadd).
 async fn library_put(
     State(app): State<Arc<AppState>>,
     Path((collection, id)): Path<(String, String)>,

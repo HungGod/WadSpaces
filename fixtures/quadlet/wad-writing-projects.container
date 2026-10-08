@@ -17,6 +17,7 @@ Volume=/var/lib/wadspaces-projects/wrtvault0000000000ab:/config/Desktop/Writing:
 Volume=/var/lib/wadspaces-projects/notes000000000000000:/config/Desktop/Notes:rw,z
 Volume=/var/lib/wadspaces/extra/writing:/run/wadspaces-extra:ro,z
 Volume=/run/user/1000:/run/wadspaces-display
+Environment=PULSE_SERVER=unix:/run/wadspaces-display/pulse/native
 SecurityLabelDisable=true
 AddDevice=/dev/dri
 ShmSize=1g

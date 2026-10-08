@@ -1,6 +1,6 @@
 # IntelligenceQuest dev workspace: C++ game development. Its sites are web
 # apps, each a WadBrowser window (built by hand, they get cards with their
-# sites' names; a Wad Creator build brings their own icons).
+# sites' names; a WadSpaces Client build brings their own icons).
 ARG BASE_IMAGE=localhost/wadspaces-base:trixie
 FROM ${BASE_IMAGE}
 

@@ -3,8 +3,8 @@
 //! - `ci`: everything CI checks (Rust fmt, clippy and tests; the wasm is
 //!   current and in budget; the UI's typecheck and tests).
 //! - `bindings`: regenerate the UI's TypeScript bindings
-//!   (`apps/wadcreator/src/gen/bindings.ts`) from the Tauri commands.
-//! - `wasm`: build wad-core for the UI (`apps/wadcreator/src/gen/wasm/`):
+//!   (`apps/client/src/gen/bindings.ts`) from the Tauri commands.
+//! - `wasm`: build wad-core for the UI (`apps/client/src/gen/wasm/`):
 //!   wasm-bindgen (the same version as the crate) and wasm-opt (binaryen).
 
 use std::path::PathBuf;
@@ -22,7 +22,7 @@ fn run(dir: &str, cmd: &str, args: &[&str]) -> Result<(), String> {
 }
 
 fn bindings() -> Result<(), String> {
-    run(".", "cargo", &["run", "--quiet", "-p", "wadcreator", "--", "--export-bindings"])
+    run(".", "cargo", &["run", "--quiet", "-p", "client", "--", "--export-bindings"])
 }
 
 /// The UI's wasm stays small: raw and gzipped bytes.
@@ -34,7 +34,7 @@ fn wasm() -> Result<(), String> {
         "cargo",
         &["build", "--quiet", "-p", "wad-wasm", "--target", "wasm32-unknown-unknown", "--profile", "wasm"],
     )?;
-    let out = "apps/wadcreator/src/gen/wasm";
+    let out = "apps/client/src/gen/wasm";
     run(
         ".",
         "wasm-bindgen",
@@ -59,11 +59,11 @@ fn ci() -> Result<(), String> {
     run(".", "cargo", &["test", "--workspace"])?;
     // The committed wasm is what wad-core builds now.
     wasm()?;
-    run(".", "git", &["diff", "--exit-code", "--stat", "apps/wadcreator/src/gen/"])?;
-    run("apps/wadcreator", "npm", &["run", "typecheck"])?;
-    // WadBrowser's chrome: plain JS with JSDoc types (Wad Creator's tsc).
-    run("apps/wadcreator", "npx", &["tsc", "-p", "../wadbrowser/ui"])?;
-    run("apps/wadcreator", "npm", &["test"])
+    run(".", "git", &["diff", "--exit-code", "--stat", "apps/client/src/gen/"])?;
+    run("apps/client", "npm", &["run", "typecheck"])?;
+    // WadBrowser's chrome: plain JS with JSDoc types (WadSpaces Client's tsc).
+    run("apps/client", "npx", &["tsc", "-p", "../wadbrowser/ui"])?;
+    run("apps/client", "npm", &["test"])
 }
 
 fn main() -> ExitCode {

@@ -56,16 +56,6 @@ pub trait Backend: Send + Sync + 'static {
     async fn secret_names(&self) -> Result<Vec<String>, String> {
         Err("no podman".into())
     }
-    /// A secret's value, for wadd's own checks (the stream password's
-    /// length); it never leaves wadd. None if there's no such secret.
-    async fn secret_value(&self, _name: &str) -> Result<Option<String>, String> {
-        Err("no podman".into())
-    }
-    /// Something answers on this port of this machine (a stream sidecar).
-    async fn port_open(&self, port: u16) -> bool {
-        let connect = tokio::net::TcpStream::connect(("127.0.0.1", port));
-        matches!(tokio::time::timeout(std::time::Duration::from_secs(2), connect).await, Ok(Ok(_)))
-    }
     /// podman's own description.
     async fn podman_info(&self) -> Result<serde_json::Value, String> {
         Err("no podman".into())
@@ -153,12 +143,6 @@ impl Backend for Offline {
     }
     async fn secret_names(&self) -> Result<Vec<String>, String> {
         Err(self.0.clone())
-    }
-    async fn secret_value(&self, _: &str) -> Result<Option<String>, String> {
-        Err(self.0.clone())
-    }
-    async fn port_open(&self, _: u16) -> bool {
-        false
     }
     async fn create_secret(&self, _: &str, _: &[u8]) -> Result<(), String> {
         Err(self.0.clone())
@@ -280,10 +264,6 @@ impl Backend for Real {
 
     async fn secret_names(&self) -> Result<Vec<String>, String> {
         self.podman.secret_names().await.map_err(|e| e.to_string())
-    }
-
-    async fn secret_value(&self, name: &str) -> Result<Option<String>, String> {
-        self.podman.secret_value(name).await.map_err(|e| e.to_string())
     }
 
     async fn podman_info(&self) -> Result<serde_json::Value, String> {

@@ -1,6 +1,6 @@
 //! Web apps' icons, made before an image builds (wad-icons): the site's own
 //! icon as a silhouette card, the user's picture, or a card with the site's
-//! name. Wad Creator asks for them as a design gets its web apps (prefetch),
+//! name. WadSpaces Client asks for them as a design gets its web apps (prefetch),
 //! so they're in the cache (`<state_dir>/webapp-icons`) by the time it builds;
 //! a build waits for what's missing, but not for long: past its budget, a
 //! web app gets the card with its name.

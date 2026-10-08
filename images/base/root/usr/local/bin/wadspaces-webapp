@@ -12,11 +12,11 @@
 # for the few sites WadBrowser (WebKitGTK) can't run: DRM players, video
 # calls. It opens a Chrome --app window instead (the chrome feature first).
 #
-# Nothing is fetched: the icon is the one Wad Creator made (the design's
+# Nothing is fetched: the icon is the one WadSpaces Client made (the design's
 # root/ puts it at the path below, after this runs); until then, and in
 # images built by hand, a card with the site's name stands in for it.
 #
-# The id defaults to a slug of the name; Wad Creator passes its catalog id,
+# The id defaults to a slug of the name; WadSpaces Client passes its catalog id,
 # and wadspaces-layout finds the launcher through /etc/wadspaces/apps.d/<id>.list.
 set -euo pipefail
 APP_ID=""

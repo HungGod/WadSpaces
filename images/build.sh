@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Build the images every workspace is made from. The workspaces themselves are
-# built by wadd from Wad Creator's designs (or by hand from a downloaded build
+# built by wadd from WadSpaces Client's designs (or by hand from a downloaded build
 # folder: `podman build -t localhost/wadspaces-<id>:latest .` in it).
 #
-#   images/build.sh                  both
-#   images/build.sh --only base      one of them (base or stream)
+#   images/build.sh                  the base
+#   images/build.sh --only base      the same
 #   images/build.sh --example writing   an example workspace (images/examples/):
 #                                    localhost/wadspaces-writing:latest, the
 #                                    bases first if they're missing
@@ -12,29 +12,28 @@
 #   images/build.sh --push           also tag and push to ghcr.io/hunggod
 #
 #   base    localhost/wadspaces-base:trixie    the lean desktop every workspace
-#           builds on; its window goes on the machine's screen, or on a stream.
-#           WadBrowser is built for it first (images/builder/: a Debian
-#           container with Rust; the first build takes a while)
-#   stream  localhost/wadspaces-stream:trixie  the stream sidecar (Selkies) a
-#           workspace draws on when it's viewed from another device
+#           builds on; its window goes on the machine's screen.
+#           WadBrowser and the clipboard bridge are built for it first
+#           (images/builder/: a Debian container with Rust; the first build
+#           takes a while)
 #
-# host/build.sh update|install --bases copies them onto a machine's drive: it
-# builds designs on them and streams with the second.
+# host/build.sh install (or update --bases) copies it onto a machine's drive:
+# the machine builds designs on it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REGISTRY="${REGISTRY:-ghcr.io/hunggod}"
-ALL=(base stream)
+ALL=(base)
 ONLY=()
 EXAMPLES=()
 NO_CACHE=false
 PUSH=false
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --only) [[ $# -gt 1 && " ${ALL[*]} " == *" $2 "* ]] || { echo "--only base|stream" >&2; exit 2; }
+        --only) [[ $# -gt 1 && " ${ALL[*]} " == *" $2 "* ]] || { echo "--only base" >&2; exit 2; }
                 ONLY+=("$2"); shift 2 ;;
         --example) [[ $# -gt 1 && -f "${HERE}/examples/$2/Dockerfile" ]] || {
                        echo "--example: one of $(ls "${HERE}/examples" | tr '\n' ' ')" >&2; exit 2; }
@@ -46,7 +45,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 if [[ ${#EXAMPLES[@]} -gt 0 ]]; then
-    # An example needs the base (and its compose file the stream sidecar).
+    # An example needs the base.
     for name in "${ALL[@]}"; do
         podman image exists "localhost/wadspaces-${name}:trixie" || ONLY+=("${name}")
     done
@@ -63,9 +62,11 @@ fi
 ROOT="$(cd "${HERE}/.." && pwd)"
 STAGE="${ROOT}/.build/wadbrowser"
 
-# WadBrowser and wadspaces-icon, built for trixie in a Debian container (a
-# Fedora build would link another glibc and WebKitGTK), staged for the base
-# image's `wadbrowser` build context with WadBrowser's icons. Cargo's caches
+# WadBrowser, wadspaces-icon and wadspaces-clipboard (crates/wad-clip: the
+# wadspace's clipboard bridged to the machine's), built for trixie in a
+# Debian container (a Fedora build would link another glibc and WebKitGTK),
+# staged for the base image's `wadbrowser` build context with WadBrowser's
+# icons. Cargo's caches
 # live in podman volumes, so a rebuild only builds what changed.
 build_wadbrowser() {
     echo ">> building localhost/wadspaces-builder:trixie from images/builder/"
@@ -77,8 +78,9 @@ build_wadbrowser() {
         -v wadspaces-cargo-registry:/usr/local/cargo/registry \
         -v wadspaces-target-trixie:/target -e CARGO_TARGET_DIR=/target \
         localhost/wadspaces-builder:trixie \
-        sh -c 'cargo build --locked --profile wadbrowser -p wadbrowser -p wad-icons --features wad-icons/cli &&
-               cp /target/wadbrowser/wadbrowser /target/wadbrowser/wadspaces-icon /src/.build/wadbrowser/bin/'
+        sh -c 'cargo build --locked --profile wadbrowser -p wadbrowser -p wad-icons --features wad-icons/cli -p wad-clip &&
+               cp /target/wadbrowser/wadbrowser /target/wadbrowser/wadspaces-icon /target/wadbrowser/wadspaces-clipboard \
+                  /src/.build/wadbrowser/bin/'
     cp -r "${ROOT}/apps/wadbrowser/icons/hicolor/." "${STAGE}/icons/"
 }
 

@@ -73,20 +73,20 @@ echo "== switch to the native workspace (cold): the screen stays put until its w
 t0=$(date +%s%N); api POST /v1/workspaces/trynative/switch
 until_view '"kind":"workspace","id":"trynative"'; echo "shown after $(elapsed)"
 where; echo "focused workspace: $(focused)"
-echo "== Super+Tab (by API) back to Wad Creator"
+echo "== Super+Tab (by API) back to WadSpaces Client"
 api POST /v1/carousel/next; api POST /v1/carousel/commit
 until_view '"kind":"home"'; echo "focused workspace: $(focused)"
 echo "== switch again (warm)"
 t0=$(date +%s%N); api POST /v1/workspaces/trynative/switch >/dev/null
 until_view '"id":"trynative"'; echo "shown after $(elapsed); focused workspace: $(focused)"
-echo "== a focus session on it: Wad Creator and the other workspace wait"
+echo "== a focus session on it: WadSpaces Client and the other workspace wait"
 api POST /v1/session '{"workspaces":["trynative"],"minutes":5}'
 api POST /v1/workspaces/trynative/switch >/dev/null
 api POST /v1/view/home
 api POST /v1/workspaces/trystream/switch
 api GET /v1/session
 api DELETE '/v1/session?force=true'
-echo "== stop it: its window closes, back to Wad Creator"
+echo "== stop it: its window closes, back to WadSpaces Client"
 t0=$(date +%s%N); api POST /v1/workspaces/trynative/stop; echo "stopped after $(elapsed)"
 until_view '"kind":"home"'; where; echo "focused workspace: $(focused)"
 echo "== wadd's log"

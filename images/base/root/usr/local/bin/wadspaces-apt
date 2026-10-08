@@ -8,7 +8,7 @@
 # Writes the launcher's basename to /etc/wadspaces/apps.d/<app-id>.list, where
 # wadspaces-layout looks it up when it puts the app on the desktop. Without
 # --desktop it takes the first new visible launcher the packages added.
-# Wad Creator generates one RUN with every app, ending in --clean, so apt's
+# WadSpaces Client generates one RUN with every app, ending in --clean, so apt's
 # lists are fetched once and don't stay in the image.
 set -euo pipefail
 export CURL_HOME=/usr/local/lib/wadspaces  # .curlrc: retries

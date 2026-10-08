@@ -2,7 +2,7 @@
 //! wad-wasm): a Builder design → the build spec, the build folder's files
 //! (Dockerfile, compose, quadlet, ...), projects, presets and the catalog.
 //!
-//! It replaces the TypeScript core (apps/wadcreator/src/core) and returns the
+//! It replaces the TypeScript core (apps/client/src/core) and returns the
 //! same results, byte for byte: fixtures/core/goldens.json holds what that
 //! returned for a wide corpus, and the tests here check every case. Values are
 //! JSON, as in the TypeScript, so objects keep their keys' order and absent

@@ -1,10 +1,10 @@
 //! What's on screen, and the rules for changing it: switching to a
 //! workspace (at once if it's ready; otherwise the screen stays put until it
-//! is), Wad Creator ("home"), the Super+Tab switcher (most recently used
+//! is), WadSpaces Client ("home"), the Super+Tab switcher (most recently used
 //! first), Super+number, and sessions.
 //!
 //! A session is the workspaces picked for a stretch of work. A focus session
-//! has a timer: until it runs out, only its picks can be shown (Wad Creator
+//! has a timer: until it runs out, only its picks can be shown (WadSpaces Client
 //! and other workspaces wait), and the clock starts the first time a pick is
 //! on screen. A free session has no timer. Sessions survive restarts
 //! (session.json, the Python wadd's format).
@@ -217,18 +217,6 @@ impl View {
         if self.locked() && !self.session_ids().iter().any(|w| w == id) {
             return Err(locked());
         }
-        // Streamed to another device: back on the screen (the stream ends).
-        if self.registry.stream_of(id).is_some() {
-            self.inner.lock().unwrap().pending = Some(id.into());
-            self.publish_view();
-            let (registry, id) = (self.registry.clone(), id.to_string());
-            tokio::spawn(async move {
-                if let Err(e) = registry.to_screen(&id).await.and_then(|_| registry.start(&id)) {
-                    tracing::warn!("{id} back on the screen: {}", e.message);
-                }
-            });
-            return Ok(());
-        }
         let st = self.registry.state(id);
         if st.is_some_and(|s| s.phase == Phase::Ready && s.container == "running") {
             self.inner.lock().unwrap().pending = None;
@@ -240,7 +228,7 @@ impl View {
         self.registry.start(id)
     }
 
-    /// Wad Creator. Refused during a focus session's time unless `force`
+    /// WadSpaces Client. Refused during a focus session's time unless `force`
     /// (nothing else is left to show).
     pub fn home(&self, force: bool) -> Result<(), ApiError> {
         if self.locked() && !force {
@@ -252,7 +240,7 @@ impl View {
     }
 
     /// Stops a workspace; if it was on screen, shows the next running
-    /// session pick, or (with none) Wad Creator.
+    /// session pick, or (with none) WadSpaces Client.
     pub async fn stop(&self, id: &str) -> Result<(), ApiError> {
         {
             let mut i = self.inner.lock().unwrap();
@@ -299,7 +287,7 @@ impl View {
     // ---------------------------------------------------------- switcher
     /// What Super+Tab offers. In a focus session, its picks alone (Wad
     /// Creator joins once the time is up); in a free one, its picks and Wad
-    /// Creator; with no session, Wad Creator and every workspace that runs.
+    /// Creator; with no session, WadSpaces Client and every workspace that runs.
     /// Most recently used first, the current view leading, stopped ones last.
     pub fn carousel_items(&self) -> Vec<CarouselItem> {
         let (session, mru, current) = {
@@ -308,7 +296,7 @@ impl View {
         };
         let mut entries: Vec<CarouselItem> = vec![];
         if !self.locked() {
-            entries.push(CarouselItem { view: V::Home, name: "Wad Creator".into(), icon: None, running: true });
+            entries.push(CarouselItem { view: V::Home, name: "WadSpaces".into(), icon: None, running: true });
         }
         for ws in self.registry.workspaces().into_iter().filter(|w| w.enabled) {
             let picked = match &session {
@@ -415,6 +403,11 @@ impl View {
                 Ok(())
             }
             Action::Bound(b) if b == "home" => self.home(false),
+            // The HUD's to show (it holds the history), during focus time too.
+            Action::Bound(b) if b == "clipboard" => {
+                self.bus.publish(Event::Shortcut { name: b });
+                Ok(())
+            }
             Action::Bound(b) => match b.strip_prefix("switch:") {
                 Some(id) => self.switch(id),
                 None => Ok(()),
@@ -464,9 +457,15 @@ impl View {
         self.bus.publish(Event::Session(self.session()));
     }
 
-    /// Starts a session: brings up the picks and shows Wad Creator's landing
+    /// Starts a session: brings up the picks and shows WadSpaces Client's landing
     /// page (the picks are a Super+Tab away). With `minutes`, a focus session.
     pub fn session_begin(&self, ids: &[String], minutes: Option<u32>) -> Result<Session, ApiError> {
+        self.session_start(ids, minutes, true)
+    }
+
+    /// session_begin; without `start` the picks are left to the caller,
+    /// which launches them with their projects.
+    pub fn session_start(&self, ids: &[String], minutes: Option<u32>, start: bool) -> Result<Session, ApiError> {
         if self.locked() {
             return Err(locked());
         }
@@ -509,8 +508,10 @@ impl View {
         }
         self.save_session();
         self.publish_session();
-        for id in &picks {
-            self.registry.start(id)?;
+        if start {
+            for id in &picks {
+                self.registry.start(id)?;
+            }
         }
         self.home(true)?;
         Ok(self.session().expect("just begun"))
@@ -572,7 +573,7 @@ impl View {
         Some(Duration::from_secs_f64(left))
     }
 
-    /// Time's up: Wad Creator joins Super+Tab. The picks stay until a new
+    /// Time's up: WadSpaces Client joins Super+Tab. The picks stay until a new
     /// session begins.
     pub fn expire_session(&self) {
         {
@@ -585,7 +586,7 @@ impl View {
         tracing::info!("focus session: time is up");
         self.save_session();
         self.publish_session();
-        self.bus.publish(Event::Notice { text: "Time's up: Wad Creator is back in Super+Tab".into() });
+        self.bus.publish(Event::Notice { text: "Time's up: WadSpaces is back in Super+Tab".into() });
     }
 
     /// Ends the session. Not during focus time unless `force` (the user chose
@@ -651,15 +652,18 @@ impl View {
         self.publish_session();
     }
 
-    /// Super+key bindings: Wad Creator's keys, and each workspace's hotkey.
-    pub fn bindings(&self, home_keys: &[String]) -> std::collections::HashMap<u16, String> {
+    /// Super+key bindings: WadSpaces Client's keys, the clipboard history's, and
+    /// each workspace's hotkey.
+    pub fn bindings(&self, keys: &wad_config::Keys) -> std::collections::HashMap<u16, String> {
         let mut b = std::collections::HashMap::new();
-        for k in home_keys {
-            match wad_input::keys::code(k) {
-                Ok(c) => {
-                    b.insert(c, "home".to_string());
+        for (list, name) in [(&keys.home, "home"), (&keys.clipboard, "clipboard")] {
+            for k in list {
+                match wad_input::keys::code(k) {
+                    Ok(c) => {
+                        b.insert(c, name.to_string());
+                    }
+                    Err(e) => tracing::warn!("keys.{name}: {e}"),
                 }
-                Err(e) => tracing::warn!("keys.home: {e}"),
             }
         }
         for ws in self.registry.workspaces().into_iter().filter(|w| w.enabled) {

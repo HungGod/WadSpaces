@@ -70,21 +70,6 @@ enum Cmd {
         #[arg(long)]
         no_grab: bool,
     },
-    /// Views a stream from here without the account (trying streams out):
-    /// prints the address to open, and keeps the view until stopped.
-    View {
-        /// The stream's link (https://<address>:<port>/).
-        #[arg(long)]
-        url: String,
-        /// Its certificate's SHA-256 (from GET /v1/streams on that machine).
-        #[arg(long)]
-        sha256: String,
-        #[arg(long)]
-        user: String,
-        /// A file holding the stream password (not on the command line).
-        #[arg(long)]
-        password_file: PathBuf,
-    },
     /// Print the version.
     Version,
 }
@@ -98,35 +83,7 @@ fn main() -> ExitCode {
         Cmd::Serve { user, config, socket } => serve(user, config, socket),
         Cmd::Migrate { dry_run, force, json, from, user } => migrate(dry_run, force, json, from, user),
         Cmd::Keys { seconds, no_grab } => keys(seconds.min(120), !no_grab),
-        Cmd::View { url, sha256, user, password_file } => view(url, sha256, user, password_file),
     }
-}
-
-fn view(url: String, sha256: String, user: String, password_file: PathBuf) -> ExitCode {
-    let password = match std::fs::read_to_string(&password_file) {
-        Ok(p) => p.trim().to_string(),
-        Err(e) => {
-            eprintln!("wadd view: {}: {e}", password_file.display());
-            return ExitCode::FAILURE;
-        }
-    };
-    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("a runtime");
-    rt.block_on(async {
-        let views = wadd::remote::RemoteViews::new(std::time::Duration::from_secs(3600));
-        let target =
-            wadd::remote::Target { machine: "the stream".into(), urls: vec![url], user, sha256: sha256.to_lowercase() };
-        match views.open(target, &password).await {
-            Ok(v) => {
-                println!("{}", v.url);
-                let _ = tokio::signal::ctrl_c().await;
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("wadd view: {}", e.message);
-                ExitCode::FAILURE
-            }
-        }
-    })
 }
 
 fn keys(seconds: u64, grab: bool) -> ExitCode {

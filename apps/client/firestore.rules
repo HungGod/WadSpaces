@@ -1,0 +1,181 @@
+rules_version = '2';
+// Who can read and write what. People sign in with Firebase Auth; machines
+// sign in with a custom token from the enrollMachine function, carrying
+// {role: "machine", owner: <uid>, machineId}. Cloud Functions (admin SDK)
+// bypass these rules; fields marked "functions only" are theirs.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMachineToken() { return signedIn() && request.auth.token.get("role", "user") == "machine"; }
+    function isUser() { return signedIn() && !isMachineToken(); }
+    function isOwner(uid) { return isUser() && request.auth.uid == uid; }
+    function isMachine(uid, mid) { return isMachineToken() && request.auth.token.owner == uid && request.auth.token.machineId == mid; }
+    function isOwnersMachine(uid) { return isMachineToken() && request.auth.token.owner == uid; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function onlyChanges(keys) { return changed().hasOnly(keys); }
+    function keeps(keys) { return !changed().hasAny(keys); }
+
+    // ---------------------------------------------------------------- people
+    // A username is claimed once, in the same transaction that creates the
+    // profile (see src/data/cloud/auth.ts claimUsername).
+    match /usernames/{name} {
+      // Sign-up checks availability before the account exists. No listing.
+      allow get: if true;
+      allow create: if isUser()
+        && name.matches('^[a-z0-9_.-]{3,24}$')
+        && request.resource.data.keys().hasOnly(["uid"])
+        && request.resource.data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.username == name;
+    }
+
+    match /profiles/{uid} {
+      function profileKeys() {
+        return request.resource.data.keys().hasOnly(["username", "displayName", "color", "photoURL", "onboarded", "lastSession", "createdAt"]);
+      }
+      // Other people see your name and avatar (owners of shared wadspaces).
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && profileKeys()
+        && request.resource.data.username is string
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == uid;
+      allow update: if isOwner(uid) && profileKeys() && keeps(["username", "createdAt"]);
+    }
+
+    // ------------------------------------------------------------ wadspaces
+    // owner and sharedWith are uids.
+    match /wadspaces/{id} {
+      function readable(d) {
+        return (isUser() && (d.owner == request.auth.uid || request.auth.uid in d.sharedWith))
+          || (isMachineToken() && (d.owner == request.auth.token.owner || request.auth.token.owner in d.sharedWith));
+      }
+      allow read: if readable(resource.data);
+      allow create: if isUser()
+        && id.matches('^[a-z0-9][a-z0-9-]{0,62}$')
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.sharedWith is list;
+      allow update: if isUser() && resource.data.owner == request.auth.uid
+        && keeps(["owner", "createdAt"])
+        && request.resource.data.sharedWith is list;
+      allow delete: if isUser() && resource.data.owner == request.auth.uid;
+    }
+
+    // ------------------------------------------------------- per-user data
+    match /users/{uid} {
+      match /drafts/{draftId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Podman secrets for the user's machines (e.g. github_token).
+      match /secrets/{name} {
+        allow read: if isOwnersMachine(uid);
+        allow create, update, delete: if isOwner(uid) && name.matches('^[a-z0-9_-]{1,64}$');
+        allow list: if isOwner(uid);
+      }
+
+      // Projects: folders of work that wadspaces mount at launch
+      // (src/core/projects.ts): a GitHub repository (cloned on each machine),
+      // a folder on one machine, or a drive (a filesystem by UUID). The files
+      // live on the machines; this is what each project is. wadd's relay syncs
+      // it both ways, pushing projects made offline, so the owner's machines
+      // create and update too, but never delete: a deletion is a
+      // `deleted: true` tombstone, so machines that were away learn of it.
+      match /projects/{pid} {
+        function validGit(s) {
+          return s.keys().hasOnly(["kind", "url", "ref"])
+            && s.get("url", null) is string
+            && s.url.matches('^https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?([.]git)?$')
+            && (!("ref" in s) || s.ref is string);
+        }
+        function validFolder(s) {
+          return s.keys().hasOnly(["kind", "machineId", "machineName", "path"])
+            && s.get("machineId", null) is string
+            && s.get("machineName", null) is string
+            && s.get("path", null) is string && s.path.matches('(?s)/.*');
+        }
+        function validDrive(s) {
+          return s.keys().hasOnly(["kind", "uuid", "label", "fstype", "subpath"])
+            && s.get("uuid", null) is string && s.uuid.matches('^[A-Za-z0-9-]{4,64}$')
+            && s.get("label", null) is string
+            && s.get("fstype", null) is string
+            && s.get("subpath", null) is string && !s.subpath.matches('(?s).*[.][.].*');
+        }
+        function validSource(s) {
+          return s is map && s.get("kind", "") in ["git", "folder", "drive"]
+            && (s.kind != "git" || validGit(s))
+            && (s.kind != "folder" || validFolder(s))
+            && (s.kind != "drive" || validDrive(s));
+        }
+        function validProject(d) {
+          return d.name is string && d.name.size() >= 1 && d.name.size() <= 200
+            && d.mountName is string && d.mountName.matches('^[A-Za-z0-9._-]{1,64}$') && !(d.mountName in [".", ".."])
+            && validSource(d.get("source", null))
+            && (!("setup" in d) || d.setup is string)
+            && (!("deleted" in d) || d.deleted is bool)
+            && (!("createdAt" in d) || d.createdAt is timestamp)
+            && (!("updatedAt" in d) || d.updatedAt is timestamp)
+            // Local to wadd (synced, legacy), the document's own name (id), and
+            // what Syncthing needed before projects were GitHub repos.
+            && !d.keys().hasAny(["id", "synced", "legacy", "holders", "ignore", "folderId"]);
+        }
+        allow read: if isOwner(uid) || isOwnersMachine(uid);
+        allow create: if (isOwner(uid) || isOwnersMachine(uid))
+          && pid.matches('^[A-Za-z0-9_-]{1,64}$') && validProject(request.resource.data);
+        allow update: if (isOwner(uid) || isOwnersMachine(uid)) && validProject(request.resource.data);
+        allow delete: if isOwner(uid);
+      }
+
+      // The user's GitHub repositories, for the online app's "Add from GitHub"
+      // (it can't ask GitHub itself: the token stays on the machines). Any of
+      // the owner's machines writes the list (wadd/github.py); the owner reads.
+      match /github/{name} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwnersMachine(uid) && name == "repos"
+          && request.resource.data.keys().hasOnly(["login", "repos", "updatedAt"])
+          && request.resource.data.login is string
+          && request.resource.data.repos is list
+          && request.resource.data.updatedAt is timestamp;
+      }
+
+      // The cloud relay (wadd/cloud.py): heartbeat + commands.
+      match /machines/{mid} {
+        allow read, delete: if isOwner(uid);
+        allow update: if isOwner(uid) && onlyChanges(["name"]);
+        // Every machine of the owner's reads its siblings (tailnet addresses,
+        // the projects mounted there); each writes only its own,
+        // with the types the apps read.
+        function heartbeatTypes(d) {
+          return (!("lastSeen" in changed()) || d.lastSeen is timestamp)
+            && (!("workspaces" in d) || d.workspaces is list)
+            && (!("mountedProjects" in d) || d.mountedProjects is list)
+            && (!("view" in d) || d.view == null || d.view is string);
+        }
+        allow read: if isOwnersMachine(uid);
+        allow update: if isMachine(uid, mid)
+          && onlyChanges(["lastSeen", "hostname", "daemonVersion", "view", "workspaces", "metrics", "installed", "tailnet", "mountedProjects"])
+          && heartbeatTypes(request.resource.data);
+
+        match /commands/{cmdId} {
+          allow read, delete: if isOwner(uid);
+          allow create: if isOwner(uid)
+            && request.resource.data.status == "pending"
+            // "launcher" and "navigate" are the Python wadd's; the Rust one says "home".
+            && request.resource.data.type in ["switch", "start", "stop", "restart", "home", "launcher", "navigate", "refresh", "sync-secrets", "projects-sync", "launch"];
+          allow read: if isMachine(uid, mid);
+          allow update: if isMachine(uid, mid) && onlyChanges(["status", "result", "startedAt", "finishedAt", "progress"]);
+        }
+
+        match /runs/{runId} {
+          allow read: if isOwner(uid);
+          allow create, update: if isMachine(uid, mid);
+        }
+      }
+    }
+
+    // One-time codes for linking a machine; redeemed by enrollMachine.
+    match /enrollCodes/{code} {
+      allow create: if isUser()
+        && code.matches('^[A-Z0-9]{6,12}$')
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.used == false;
+    }
+  }
+}

@@ -31,8 +31,8 @@ TOML
 echo '[{"id":"writing","name":"Writing","image":"localhost/wadspaces-test:latest","display":"host","enabled":true,"autostart":false,"containerName":"wad-writing","containerPort":3000,"env":[],"secrets":[],"volumes":[],"devices":[],"projects":[]}]' \
   >"$dir/state/workspaces.json"
 
-(cd "$root/apps/wadcreator" && npm run -s build:machine >/dev/null)
-(cd "$root" && cargo build -q -p wadd && cargo build -q -p wadcreator --features spike,custom-protocol)
+(cd "$root/apps/client" && npm run -s build:machine >/dev/null)
+(cd "$root" && cargo build -q -p wadd && cargo build -q -p client --features spike,custom-protocol)
 
 "$root/target/debug/wadd" serve --user --config "$dir/wadd.toml" >"$dir/wadd.log" 2>&1 &
 pid=$!
@@ -47,7 +47,7 @@ for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
 
 # WADD_URL points nowhere: every call must go to the Rust wadd.
 WADD_DAEMON=rs WADD_SOCKET=$sock WADD_URL=http://127.0.0.1:9 \
-  "$root/apps/wadcreator/src-tauri/spike/run.sh" "$dir/spike"
+  "$root/apps/client/src-tauri/spike/run.sh" "$dir/spike"
 echo "== the app's log"
 grep -i 'wadd' "$dir/spike/app.log" | grep -v '^SPIKE' | tail -5
 echo "== wadd's warnings"

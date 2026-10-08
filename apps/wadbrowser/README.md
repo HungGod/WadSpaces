@@ -32,7 +32,7 @@ surface of their own, which the compositor blends over the page.
 - **GPU**: on when the container has a usable `/dev/dri` (`gpu.rs`), video
   decoded with VA-API.
 - **What WebKitGTK can't do**: DRM (EME) and video calls (WebRTC). Spotify,
-  Discord, Zoom and Slack are Chrome web apps in Wad Creator for that reason.
+  Discord, Zoom and Slack are Chrome web apps in WadSpaces Client for that reason.
 
 ## Command line
 
@@ -66,4 +66,4 @@ Focus, which has no address bar). `WADBROWSER_DEVTOOLS=1` adds the inspector
   opens one, and a link, in a real workspace.
 
 The icon is the light WadSpaces mark (`icons/`, from
-`apps/wadcreator/public/brand/wadspaces-icon-light-transparent.svg`).
+`apps/client/public/brand/wadspaces-icon-light-transparent.svg`).

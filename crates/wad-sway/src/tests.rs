@@ -53,8 +53,8 @@ fn owner_falls_back_to_the_executable() {
     let p = d.path().join("42");
     std::fs::create_dir_all(&p).unwrap();
     std::fs::write(p.join("cgroup"), "0::/user.slice/user-1000.slice/session-1.scope\n").unwrap();
-    std::os::unix::fs::symlink("/usr/bin/wadcreator", p.join("exe")).unwrap();
-    assert_eq!(pid_owner(42, d.path()), Some(Owner::Exe("/usr/bin/wadcreator".into())));
+    std::os::unix::fs::symlink("/usr/bin/client", p.join("exe")).unwrap();
+    assert_eq!(pid_owner(42, d.path()), Some(Owner::Exe("/usr/bin/client".into())));
     let q = d.path().join("43");
     std::fs::create_dir_all(&q).unwrap();
     std::fs::write(

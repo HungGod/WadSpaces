@@ -23,11 +23,9 @@ pub mod network;
 pub mod projects;
 pub mod pull;
 pub mod registry;
-pub mod remote;
+pub mod screen;
 pub mod secrets;
-pub mod streams;
 pub mod systemd;
-pub mod tls;
 pub mod view;
 
 use std::os::unix::fs::PermissionsExt;
@@ -281,14 +279,6 @@ impl Server {
         let builds =
             builds::Builds::new(registry.clone(), backend.clone(), bus.clone(), &d.state_dir, d.build_min_free_gb);
         let secrets = Arc::new(secrets::Secrets::new(backend.clone(), &d.state_dir));
-        let streams = streams::Streams::new(
-            config.streams.clone(),
-            registry.clone(),
-            backend.clone(),
-            bus.clone(),
-            &d.state_dir,
-            &config.machine.name,
-        );
         let registry_backend = backend.clone();
         let cloud_cfg = cloud_settings(config);
         let github = github::GithubService::new(
@@ -313,7 +303,6 @@ impl Server {
                     secrets: secrets.clone(),
                     launches: launches.clone(),
                     github: github.clone(),
-                    streams: streams.clone(),
                     bus: bus.clone(),
                 },
             )
@@ -323,10 +312,9 @@ impl Server {
             meter: metrics::Meter::default(),
             network: network::Network::new(None, bus.clone()),
             power: None,
+            backlight: screen::Backlight::default(),
             github,
             secrets,
-            streams,
-            remote: remote::RemoteViews::new(Duration::from_secs(600)),
             cloud,
             bus,
             registry,
@@ -372,7 +360,7 @@ impl Server {
             .iter()
             .filter_map(|c| wad_input::Chord::parse(c).inspect_err(|e| tracing::warn!("keys.block: {e}")).ok())
             .collect();
-        let router = wad_input::KeyRouter::new(view.bindings(&self.keys.home), block, self.keys.pass_super);
+        let router = wad_input::KeyRouter::new(view.bindings(&self.keys), block, self.keys.pass_super);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(async move {
             while let Some(action) = rx.recv().await {
@@ -394,17 +382,15 @@ impl Server {
         let watcher = self.sway.clone().map(|d| tokio::spawn(d.run(self.state.view.clone() as Arc<dyn WindowSink>)));
         *self.state.keys.lock().unwrap() = self.start_keys();
         // A build can add a workspace (its hotkey, the secrets it names).
-        let (app, home) = (Arc::downgrade(&self.state), self.keys.home.clone());
+        let (app, keys) = (Arc::downgrade(&self.state), self.keys.clone());
         registry.on_list_change(move || {
             let Some(app) = app.upgrade() else { return };
             if let Some(proxy) = app.keys.lock().unwrap().as_ref() {
-                proxy.router().lock().unwrap().set_bindings(app.view.bindings(&home));
+                proxy.router().lock().unwrap().set_bindings(app.view.bindings(&keys));
             }
             tokio::spawn(placeholders(app));
         });
         tokio::spawn(placeholders(self.state.clone()));
-        self.state.streams.end_leftovers().await;
-        let streams = tokio::spawn(self.state.streams.clone().run(Duration::from_secs(10)));
         let relay = self.state.cloud.clone().map(|c| tokio::spawn(c.run()));
         let reconcile = registry.spawn_reconcile(self.reconcile_every);
         let netwatch = tokio::spawn(self.state.network.clone().run());
@@ -420,7 +406,6 @@ impl Server {
         let res = axum::serve(self.listener, app).with_graceful_shutdown(shutdown).await;
         reconcile.abort();
         netwatch.abort();
-        streams.abort();
         prefetch.abort();
         if let Some(r) = relay {
             r.abort();

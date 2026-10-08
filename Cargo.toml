@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/wadcreator/src-tauri", "apps/wadd", "apps/hud", "apps/wadbrowser", "xtask"]
+members = ["crates/*", "apps/client/src-tauri", "apps/wadd", "apps/hud", "apps/wadbrowser", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -54,7 +54,7 @@ webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
 wiremock = "0.6"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "tower-log"] }
 clap = { version = "4", features = ["derive"] }
-nix = { version = "0.31", features = ["user", "fs", "ioctl", "poll", "hostname", "net"] }
+nix = { version = "0.31", features = ["user", "fs", "ioctl", "poll", "hostname"] }
 evdev = "0.13"
 libc = "0.2"
 futures-util = "0.3"
@@ -62,10 +62,6 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tempfile = "3"
 hyper = { version = "1", features = ["client", "server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
-# Streams: wadd's own certificate, and the viewer's pinned TLS (aws-lc, as reqwest).
-rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
-rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
 http-body-util = "0.1"
 bytes = "1"
 async-trait = "0.1"

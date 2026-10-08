@@ -48,36 +48,6 @@ pub struct Config {
     pub display: Display,
     pub cloud: Cloud,
     pub github: Github,
-    pub streams: Streams,
-}
-
-/// Viewing a workspace from another device (another machine's Wad Creator,
-/// a phone) over the local network: its stream sidecar, behind TLS and a
-/// password. Off until it's allowed on the machine itself (wadd's state),
-/// and refused without a stream password in the account.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Streams {
-    pub enabled: bool,
-    /// The sidecar (images/stream).
-    pub image: String,
-    /// Streams get ports from here on (one per workspace, kept).
-    pub first_port: u16,
-    pub ports: u16,
-    /// The stream password must be at least this long.
-    pub min_password: usize,
-}
-
-impl Default for Streams {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            image: "localhost/wadspaces-stream:trixie".into(),
-            first_port: 47800,
-            ports: 100,
-            min_password: 12,
-        }
-    }
 }
 
 /// GitHub (where projects live).
@@ -129,7 +99,7 @@ impl Default for Cloud {
 }
 
 /// The keyboard proxy: wadd grabs the keyboards and keeps Super for itself
-/// (Super+Tab switcher, Super+1..9 workspaces, Super+`home` Wad Creator).
+/// (Super+Tab switcher, Super+1..9 workspaces, Super+`home` WadSpaces Client).
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Keys {
@@ -137,9 +107,11 @@ pub struct Keys {
     pub enabled: bool,
     /// False: only watch for chords, filter nothing.
     pub grab: bool,
-    /// With Super: back to Wad Creator.
+    /// With Super: back to WadSpaces Client.
     /// (The Python wadd called it `launcher`; that's read too.)
     pub home: Vec<String>,
+    /// With Super: the clipboard history (the HUD shows it).
+    pub clipboard: Vec<String>,
     /// Chords dropped before they reach a workspace (modifiers must match exactly).
     pub block: Vec<String>,
     /// Also send other Super chords on to the workspace.
@@ -164,6 +136,7 @@ impl Keys {
             enabled: profile == Profile::System,
             grab: true,
             home: vec!["KEY_0".into(), "KEY_SPACE".into()],
+            clipboard: vec!["KEY_V".into()],
             block: vec!["alt+f4".into(), "ctrl+shift+q".into(), "ctrl+alt+backspace".into()],
             pass_super: false,
         }
@@ -341,7 +314,6 @@ impl Config {
             display: Display::for_profile(profile),
             cloud: Cloud::default(),
             github: Github::default(),
-            streams: Streams::default(),
         }
     }
 

@@ -7,7 +7,7 @@
 !host/etc
 !host/usr
 !.build/wadd
-!.build/wadcreator-app
+!.build/client-app
 !.build/hud
 !.build/secrets
 !.build/ssh

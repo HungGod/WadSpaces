@@ -171,7 +171,7 @@ impl Secrets {
             made.push(name.clone());
         }
         if !made.is_empty() {
-            tracing::info!("placeholder secrets for {} (set them in Wad Creator)", made.join(", "));
+            tracing::info!("placeholder secrets for {} (set them in WadSpaces)", made.join(", "));
             self.save(&book)?;
         }
         Ok(made)

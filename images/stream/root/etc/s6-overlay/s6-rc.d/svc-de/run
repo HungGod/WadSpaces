@@ -1,3 +1,0 @@
-#!/usr/bin/with-contenv bash
-# No desktop here: the workspace container draws on this compositor.
-exec sleep infinity

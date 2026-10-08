@@ -1,5 +1,5 @@
 //! The browser's settings: `/etc/wadspaces/wadbrowser.conf` (the image's,
-//! written by Wad Creator's design), then `~/.config/wadbrowser/wadbrowser.conf`
+//! written by WadSpaces Client's design), then `~/.config/wadbrowser/wadbrowser.conf`
 //! (the user's) over it. `key = value` lines; `#` starts a comment.
 //!
 //! ```text

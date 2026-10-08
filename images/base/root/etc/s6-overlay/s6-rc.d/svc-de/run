@@ -3,9 +3,8 @@
 #
 # The desktop: labwc as one window on whatever Wayland compositor is mounted at
 # /run/wadspaces-display. The image doesn't care which:
-#   local   the machine's own compositor (wadd mounts sway's runtime dir; a
-#           laptop test mounts $XDG_RUNTIME_DIR)
-#   remote  the wadspaces-stream sidecar's pixelflux, streamed to a browser
+# the machine's own compositor (wadd mounts sway's runtime dir), or a
+# desktop's (docker-compose.yml by hand mounts $XDG_RUNTIME_DIR).
 # WADSPACES_WAYLAND names the socket, else the first wayland-N found is used.
 
 DISPLAY_DIR="/run/wadspaces-display"
@@ -32,7 +31,9 @@ cd "${HOME}"
 # which is how a closed window ends the session. No core dumps from that, as
 # in the Selkies base: on a laptop the host would pop a crash report for each.
 ulimit -c 0
-WAYLAND_DISPLAY="${SOCKET}" s6-setuidgid abc dbus-run-session -- labwc
+# WADSPACES_HOST_WAYLAND: the display under labwc, for the clipboard bridge
+# (labwc-autostart), since labwc points WAYLAND_DISPLAY at itself.
+WADSPACES_HOST_WAYLAND="${SOCKET}" WAYLAND_DISPLAY="${SOCKET}" s6-setuidgid abc dbus-run-session -- labwc
 
 # labwc ended. Either its window was closed (the display is still there): the
 # workspace is done, so stop the container. Or the display went away (the

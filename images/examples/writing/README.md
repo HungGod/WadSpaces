@@ -5,9 +5,9 @@ Obsidian and the `HungGod/Writing` vault, on the WadSpaces base image
 the wallpaper and the blanked Selkies icon. This image adds Obsidian
 (`wadspaces-feature obsidian`) and `init-writing-vault`, which pins the vault in
 `obsidian.json`. On a machine its desktop is a window on the screen (wadd's
-`display: host`); viewed from another device, it draws on the stream sidecar.
+`display: host`); run by hand, it's a window on your own Wayland desktop.
 
-Workspaces are made in Wad Creator's Builder now; this one is hand-written, as
+Workspaces are made in WadSpaces Client's Builder now; this one is hand-written, as
 an example of what goes into an image.
 
 ## Build and try it
@@ -22,15 +22,13 @@ an example of what goes into an image.
 #      remote: Write access to repository not granted.
 printf '%s' '<fine-grained PAT>' | podman secret create github_token -
 
-# 2. build (the base images first, if they're missing), then run it with its
-#    stream sidecar
+# 2. build (the base image first, if it's missing), then run it: it opens as a
+#    window on this desktop
 images/build.sh --example writing
 cd images/examples/writing && podman-compose up -d
 ```
 
-Open <http://127.0.0.1:3100>. The port is bound to loopback only and has no
-password: only this computer can open it. On a WadSpaces machine, wadd runs
-the image itself (and its streams have TLS and a password: `host/STREAMS.md`).
+On a WadSpaces machine, wadd runs the image itself, on the machine's screen.
 
 ## How the pieces fit
 

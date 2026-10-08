@@ -7,11 +7,11 @@
 #
 #   apps/wadd/dev/try-cloud.sh
 #
-# Needs Java (the Firestore emulator) and apps/wadcreator's npm packages.
+# Needs Java (the Firestore emulator) and apps/client's npm packages.
 set -euo pipefail
 ulimit -c 0
 root=$(cd "$(dirname "$0")/../../.." && pwd)
-app=$root/apps/wadcreator
+app=$root/apps/client
 
 if [ -z "${TRY_CLOUD_INSIDE:-}" ]; then
   # The function's WEB_API_KEY, for the emulator only.
@@ -24,13 +24,13 @@ if [ -z "${TRY_CLOUD_INSIDE:-}" ]; then
   (cd "$app" && npm --prefix functions run -s build)
   (cd "$root" && cargo build -q -p wadd)
   cd "$app"
-  TRY_CLOUD_INSIDE=1 npx firebase emulators:exec --project demo-wadcreator --only auth,firestore,functions \
+  TRY_CLOUD_INSIDE=1 npx firebase emulators:exec --project demo-client --only auth,firestore,functions \
     "bash '$root/apps/wadd/dev/try-cloud.sh'" 2>&1 | grep -vE "^i  |^⚠  |^✔  |^\s*$|emulators:|functions\[|Debugger|^Running script"
   exit "${PIPESTATUS[0]}"
 fi
 
 # Inside the emulators.
-P=demo-wadcreator
+P=demo-client
 FS="http://127.0.0.1:8090/v1/projects/$P/databases/(default)/documents"
 AUTH=http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1
 dir=$root/.build/wadd-try-cloud

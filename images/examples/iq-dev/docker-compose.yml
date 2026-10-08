@@ -1,9 +1,7 @@
 ---
-# IntelligenceQuest Dev workspace, run by hand: the workspace plus the stream
-# sidecar that shows it in a browser. On a machine wadd runs the same image on
-# the screen.
+# IntelligenceQuest Dev workspace, run by hand on a Wayland desktop: it opens
+# there as one window, as wadd runs it on a machine's screen.
 #   images/build.sh --example iq-dev && podman-compose up -d
-# then open http://127.0.0.1:3110
 secrets:
   # printf '%s' '<fine-grained PAT>' | podman secret create github_token -
   github_token:
@@ -12,33 +10,8 @@ secrets:
 volumes:
   # all of /config persists: VS Code extensions, Claude Code login (projects are host folders, mounted by wadd)
   wad-iq-dev-config:
-  # The stream's Wayland socket, shared by the two containers. Owned by abc
-  # (1000): podman resets a plain volume to root:root each time a container
-  # mounts it, so the workspace starting second locked the sidecar out.
-  iq-dev-display:
-    driver_opts:
-      o: uid=1000,gid=1000
 
 services:
-  # Selkies: the compositor the workspace draws on, streamed to a browser.
-  display:
-    image: localhost/wadspaces-stream:trixie
-    container_name: wad-iq-dev-display
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Pacific/Fiji
-      - TITLE=IntelligenceQuest Dev
-    volumes:
-      - iq-dev-display:/run/wadspaces-display:z
-    devices:
-      - /dev/dri:/dev/dri
-    ports:
-      # loopback only, plain HTTP; put a proxy with auth in front for real remote use
-      - 127.0.0.1:3110:3000
-    shm_size: "1gb"
-    restart: "no"
-
   iq-dev:
     image: localhost/wadspaces-iq-dev:latest
     container_name: wad-iq-dev
@@ -50,16 +23,20 @@ services:
       - TZ=Pacific/Fiji
       - GIT_USER_NAME=HungGod
       - GIT_USER_EMAIL=throwupcow@gmail.com
+      - WADSPACES_WAYLAND=${WAYLAND_DISPLAY:-wayland-0}
+      - PULSE_SERVER=unix:/run/wadspaces-display/pulse/native
     secrets:
       - github_token
     volumes:
       # :z is required on SELinux hosts (see ../writing/README.md)
       - wad-iq-dev-config:/config:z
-      - iq-dev-display:/run/wadspaces-display:z
+      # The desktop it draws on, and its sound: this session's runtime dir.
+      - ${XDG_RUNTIME_DIR}:/run/wadspaces-display
     devices:
       - /dev/dri:/dev/dri
-    depends_on:
-      - display
+    security_opt:
+      # The runtime dir isn't relabelled: no SELinux separation.
+      - label=disable
     shm_size: "1gb"
     # wadd owns the lifecycle
     restart: "no"

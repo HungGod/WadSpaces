@@ -1,6 +1,6 @@
 [package]
 name = "wad-proto"
-description = "The types wadd and Wad Creator share, exported to TypeScript"
+description = "The types wadd and WadSpaces Client share, exported to TypeScript"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

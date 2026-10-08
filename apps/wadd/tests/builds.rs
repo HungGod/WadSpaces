@@ -65,7 +65,7 @@ async fn env_with(icons: Option<Arc<Icons>>) -> Env {
     Env { _d: d, state, fake, reg, builds }
 }
 
-/// A design as Wad Creator keeps it: no apps, a colour wallpaper.
+/// A design as WadSpaces Client keeps it: no apps, a colour wallpaper.
 fn design(id: &str) -> Value {
     json!({"id": id, "name": "Try build", "description": "", "layout": {"wallpaper": {"type": "color", "value": "#000"}, "icons": [], "grid": true},
         "advanced": {"display": "host", "port": null, "hotkey": 2, "tools": ["git"], "projects": [],

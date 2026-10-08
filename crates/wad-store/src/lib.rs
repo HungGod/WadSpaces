@@ -8,7 +8,7 @@
 //! <state_dir>/extra/<ws>/projects.json what a launch mounted (projects.py write_manifest)
 //! <state_dir>/runs.jsonl               when each workspace ran (runs.py)
 //! <state_dir>/session.json             the session in progress (manager.py)
-//! <state_dir>/library/<coll>/<id>.json Wad Creator's library (library.py)
+//! <state_dir>/library/<coll>/<id>.json WadSpaces Client's library (library.py)
 //! <state_dir>/seeded-secrets.json      secrets seeded from the image (manager.py)
 //! ```
 //!

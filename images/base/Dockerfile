@@ -1,19 +1,15 @@
 # WadSpaces workspace base image (lean).
 #
-# A workspace is one image that runs both locally and remotely; only how it is
-# run differs. The image holds the desktop (labwc + Xwayland + the
-# selkies-desktop icon panel) and the apps, and labwc draws as one window on
-# whatever Wayland compositor is mounted at /run/wadspaces-display:
-#
-#   local   the machine's own screen (wadd's `display: host`)
-#   remote  the wadspaces-stream sidecar (../stream/), which streams it to
-#           another device (wadd's streams, or the workspace's
-#           docker-compose.yml)
+# The image holds the desktop (labwc + Xwayland + the selkies-desktop icon
+# panel) and the apps, and labwc draws as one window on whatever Wayland
+# compositor is mounted at /run/wadspaces-display: the machine's own screen
+# (wadd's `display: host`), or, run by hand from the workspace's
+# docker-compose.yml, the desktop it's run from.
 #
 # A workspace is described by data files in /etc/wadspaces instead of its own
 # init script:
 #
-#   /etc/wadspaces/layout.json           the desktop's icons, in order (Wad Creator)
+#   /etc/wadspaces/layout.json           the desktop's icons, in order (WadSpaces Client)
 #   /etc/wadspaces/desktop-entries.list  .desktop files to seed into ~/Desktop
 #                                        (hand-written images without a layout)
 #   /etc/wadspaces/chown.list            paths handed to abc at boot
@@ -25,8 +21,10 @@
 #   wadspaces-webapp [--id <id>] <name> <url>   a website in its own WadBrowser window
 #
 # WadBrowser (apps/wadbrowser) is the browser, every web app's window, and
-# what links open in. It's built for trixie by images/build.sh, which passes
-# it in as the `wadbrowser` build context (so build with that script).
+# what links open in. wadspaces-clipboard (crates/wad-clip) makes labwc's
+# clipboard the machine's, so a copy in one wadspace pastes in any other.
+# Both are built for trixie by images/build.sh, which passes them in as the
+# `wadbrowser` build context (so build with that script).
 #
 # selkies-desktop lists ~/Desktop in readdir order; this shim sorts it by name
 # so a designed desktop keeps its order (shim/sorted-desktop.c).
@@ -143,6 +141,15 @@ RUN apt-get update && \
     intel-media-va-driver \
     libwebkit2gtk-4.1-0 && \
   rm -rf /var/lib/apt/lists/*
+# Sound: the machine's PipeWire (wadd sets PULSE_SERVER to its PulseAudio
+# socket). The PulseAudio client for apps that speak it (Chrome, Electron,
+# Firefox, GStreamer), and ALSA's default device pointed at it too for apps
+# that only speak ALSA: a wadspace has no sound card of its own.
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libpulse0 libasound2-plugins && \
+  rm -rf /var/lib/apt/lists/* && \
+  printf '%s\n' '# ALSA through PulseAudio (the machine'"'"'s PipeWire): images/base/Dockerfile.' \
+    'pcm.!default { type pulse }' 'ctl.!default { type pulse }' > /etc/asound.conf
 COPY --from=wadbrowser bin/ /usr/local/bin/
 COPY --from=wadbrowser icons/ /usr/share/icons/hicolor/
 RUN \
@@ -151,7 +158,8 @@ RUN \
   echo "**** check it runs here ****" && \
   ! ldd /usr/local/bin/wadbrowser | grep 'not found' && \
   wadbrowser --version && \
-  wadspaces-icon --help > /dev/null
+  wadspaces-icon --help > /dev/null && \
+  wadspaces-clipboard --version
 ENV BROWSER=/usr/local/bin/wadbrowser-link
 
 # Project files are mounted by wadd at run time, never fetched by the image.

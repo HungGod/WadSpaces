@@ -1,8 +1,7 @@
 ---
-# Writing workspace, run by hand: the workspace plus the stream sidecar that
-# shows it in a browser. On a machine wadd runs the same image on the screen.
+# Writing workspace, run by hand on a Wayland desktop: it opens there as one
+# window, as wadd runs it on a machine's screen.
 #   images/build.sh --example writing && podman-compose up -d
-# then open http://127.0.0.1:3100
 secrets:
   # Created out of band so the token never lives in this file or in git:
   #   printf '%s' '<fine-grained PAT>' | podman secret create github_token -
@@ -15,35 +14,8 @@ volumes:
   # recreate. /config as a whole does not; the vault is the Writing project,
   # a folder on the host mounted below.
   obsidian-config:
-  # The stream's Wayland socket, shared by the two containers. Owned by abc
-  # (1000): podman resets a plain volume to root:root each time a container
-  # mounts it, so the workspace starting second locked the sidecar out.
-  writing-display:
-    driver_opts:
-      o: uid=1000,gid=1000
 
 services:
-  # Selkies: the compositor the workspace draws on, streamed to a browser.
-  display:
-    image: localhost/wadspaces-stream:trixie
-    container_name: wad-writing-display
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Pacific/Fiji
-      - TITLE=Writing
-    volumes:
-      - writing-display:/run/wadspaces-display:z
-    devices:
-      - /dev/dri:/dev/dri
-    ports:
-      # Loopback only, plain HTTP. 127.0.0.1 counts as a secure context, so no
-      # HTTPS or basic auth. Put a reverse proxy with auth in front for real
-      # remote use.
-      - 127.0.0.1:3100:3000
-    shm_size: "1gb"
-    restart: "no"
-
   writing:
     image: localhost/wadspaces-writing:latest
     container_name: wad-writing
@@ -56,6 +28,8 @@ services:
       # commit identity inside the container
       - GIT_USER_NAME=HungGod
       - GIT_USER_EMAIL=throwupcow@gmail.com
+      - WADSPACES_WAYLAND=${WAYLAND_DISPLAY:-wayland-0}
+      - PULSE_SERVER=unix:/run/wadspaces-display/pulse/native
       # everything else (VAULT_DIR, SELKIES_DESKTOP, ...) is baked into the
       # image; override here only when you want to deviate
     secrets:
@@ -66,14 +40,16 @@ services:
       # (c85,c628 -> c37,c260 on the next recreate) while the files inside keep
       # the old one, and even root inside the container gets EACCES.
       - obsidian-config:/config/.config/obsidian:z
-      - writing-display:/run/wadspaces-display:z
+      # The desktop it draws on, and its sound: this session's runtime dir.
+      - ${XDG_RUNTIME_DIR}:/run/wadspaces-display
       # The vault: the Writing project on the host (wadd mounts it the same
       # way). Change the left side to wherever your copy lives.
       - ${WRITING_VAULT:-./vault}:/config/Desktop/Writing:z
     devices:
       - /dev/dri:/dev/dri
-    depends_on:
-      - display
+    security_opt:
+      # The runtime dir isn't relabelled: no SELinux separation.
+      - label=disable
     shm_size: "1gb"
     # wadd owns the lifecycle
     restart: "no"

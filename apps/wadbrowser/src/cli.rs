@@ -113,7 +113,7 @@ fn absolute(p: &str, cwd: &Path) -> String {
     if p.is_absolute() { p.to_string_lossy().into() } else { cwd.join(p).to_string_lossy().into() }
 }
 
-/// Wad Creator's app ids: lower-case letters, digits and dashes.
+/// WadSpaces Client's app ids: lower-case letters, digits and dashes.
 pub fn web_app_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64

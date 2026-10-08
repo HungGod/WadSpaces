@@ -8,7 +8,7 @@
 //!     plugged in.
 //!
 //! Each is a small JSON document, `<state_dir>/projects/<id>.json`, the same
-//! shape as Wad Creator's users/{uid}/projects/{id} in Firestore, which the
+//! shape as WadSpaces Client's users/{uid}/projects/{id} in Firestore, which the
 //! cloud relay syncs both ways (last writer wins on updatedAt):
 //!
 //! ```text
@@ -45,7 +45,7 @@ pub const NOT_A_SOURCE: &str = "a project is a GitHub repo, a folder or a drive"
 const NOT_GITHUB: &str = "a git project is a GitHub repo";
 /// A folder project's machineId on a machine that isn't linked (yet).
 pub const LOCAL: &str = "local";
-/// Fields Wad Creator edits; the store keeps the rest.
+/// Fields WadSpaces Client edits; the store keeps the rest.
 const EDITABLE: [&str; 4] = ["name", "mountName", "source", "setup"];
 const OLD_FIELDS: [&str; 3] = ["holders", "ignore", "folderId"];
 

@@ -35,13 +35,6 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-rcgen.workspace = true
-rustls.workspace = true
-tokio-rustls.workspace = true
-hyper.workspace = true
-hyper-util.workspace = true
-http-body-util.workspace = true
-bytes.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

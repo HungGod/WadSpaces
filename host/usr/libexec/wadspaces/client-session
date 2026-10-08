@@ -1,0 +1,8 @@
+#!/bin/bash
+# The WadSpaces Client, the kiosk's shell (etc/sway/wadspaces.conf). Restarted if it
+# ever exits, after a pause so a crash can't spin. Its output goes to the
+# journal: journalctl -b -t client.
+while true; do
+    systemd-cat -t client /usr/bin/client --kiosk
+    sleep 2
+done

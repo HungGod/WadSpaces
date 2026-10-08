@@ -94,7 +94,7 @@ pub fn network_label(n: Option<&Network>) -> Option<(String, bool)> {
 /// One switcher entry (wadd's `carousel` event).
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct CarouselItem {
-    /// "home" (Wad Creator), or the workspace's id.
+    /// "home" (WadSpaces Client), or the workspace's id.
     #[serde(deserialize_with = "view")]
     pub view: String,
     pub name: String,
@@ -142,6 +142,15 @@ pub struct WifiNetwork {
     pub active: bool,
     #[serde(default)]
     pub known: bool,
+}
+
+/// The screen's backlight (GET/PUT /v1/screen/brightness).
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq)]
+pub struct Brightness {
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default)]
+    pub percent: u8,
 }
 
 /// What picking a network does.
@@ -264,7 +273,7 @@ mod tests {
         .unwrap();
         assert_eq!(network_label(Some(&n)), Some(("Home".into(), true)));
         let c: Carousel = serde_json::from_str(
-            r#"{"open":true,"items":[{"view":{"kind":"home"},"name":"Wad Creator","icon":null,"running":true},
+            r#"{"open":true,"items":[{"view":{"kind":"home"},"name":"WadSpaces","icon":null,"running":true},
                 {"view":{"kind":"workspace","id":"writing"},"name":"Writing","icon":"/v1/workspaces/writing/icon","running":false}],"index":1}"#,
         )
         .unwrap();

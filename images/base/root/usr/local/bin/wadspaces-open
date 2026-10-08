@@ -14,4 +14,4 @@ case "${f##*.}" in
   txt|md|json|csv|log|yaml|yml|toml|ini|xml|html|css|js|ts|py|sh)
     exec foot --hold -e cat "$f" ;;
 esac
-exec foot --hold -e sh -c 'echo "Nothing on this desktop opens $(basename "$1")."; echo "Add an app that can in Wad Creator'"'"'s Builder."' _ "$f"
+exec foot --hold -e sh -c 'echo "Nothing on this desktop opens $(basename "$1")."; echo "Add an app that can in the WadSpaces Builder."' _ "$f"

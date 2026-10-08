@@ -1,6 +1,6 @@
 //! wad-core for the UI: one function, [`call`], taking a core function's
 //! TypeScript name and its arguments as JSON, returning its result as JSON.
-//! The UI's wrapper (apps/wadcreator/src/core/wasm.ts) gives each function
+//! The UI's wrapper (apps/client/src/core/wasm.ts) gives each function
 //! its old name and types back.
 
 use wasm_bindgen::prelude::*;

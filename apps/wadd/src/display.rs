@@ -1,4 +1,4 @@
-//! Putting things on screen. Wad Creator is the app's own window on sway's
+//! Putting things on screen. WadSpaces Client is the app's own window on sway's
 //! "shell" workspace; a native workspace (display: host) is its own window
 //! too, which wadd moves to a workspace of its own (`ws-<id>`) and focuses
 //! to show it. Streamed workspaces are shown by the app.

@@ -1,4 +1,4 @@
-//! Diagnostics (manager.py diagnostics and logs), for Wad Creator's
+//! Diagnostics (manager.py diagnostics and logs), for WadSpaces Client's
 //! Diagnostics page: enough to see where a download is and why something
 //! failed, without a shell. Everything is redacted: it's meant to be pasted
 //! into a chat or an issue. Unit logs are read only for an allow-list (wadd,

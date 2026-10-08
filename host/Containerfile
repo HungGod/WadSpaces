@@ -1,18 +1,13 @@
-# WadSpaces host OS: Fedora bootc -> greetd -> sway -> Wad Creator (Tauri),
+# WadSpaces host OS: Fedora bootc -> greetd -> sway -> WadSpaces Client (Tauri),
 # plus wadd (the machine daemon: workspaces, projects, the account link;
 # apps/wadd, Rust). No browser: what the machine shows of
-# the web (GitHub's sign-in, later other machines' streams) opens in Wad
-# Creator's own webview windows. Build from the repo root:
+# the web (GitHub's sign-in) opens in WadSpaces Client's own webview windows. Build from the repo root:
 #   host/build.sh image        (or: podman build -f host/Containerfile -t localhost/wadspaces-host .)
 FROM quay.io/fedora/fedora-bootc:43
 
-# gstreamer1-plugin-openh264 (Fedora's Cisco repo): H.264 for WebKitGTK's
-# WebCodecs, how Wad Creator's stream windows show another machine's
-# wadspace (a Selkies stream).
 RUN dnf -y install \
       sway greetd podman \
       webkit2gtk4.1 librsvg2 shared-mime-info \
-      gstreamer1-plugin-openh264 \
       python3 \
       mesa-dri-drivers libva-utils \
       adwaita-cursor-theme google-noto-sans-fonts google-noto-emoji-fonts liberation-fonts rsms-inter-vf-fonts \
@@ -21,16 +16,29 @@ RUN dnf -y install \
       git-core \
     && dnf clean all
 
-# Hardware video decode for the WebRTC streams. The Intel VA-API drivers
-# (and the full-codec Mesa VA driver for AMD) are only in RPM Fusion.
+# Sound: PipeWire in the kiosk session (socket-activated user units). Native
+# wadspaces play through its PulseAudio socket (wad-core's quadlet sets
+# PULSE_SERVER), and the HUD's volume slider is wpctl (wireplumber).
 RUN dnf -y install \
-      "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
-      "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm" \
-    && dnf -y install intel-media-driver libva-intel-driver \
-    && if rpm -q mesa-va-drivers > /dev/null; then \
-         dnf -y swap mesa-va-drivers mesa-va-drivers-freeworld --allowerasing; \
-       else dnf -y install mesa-va-drivers-freeworld; fi \
-    && dnf clean all
+      pipewire pipewire-pulseaudio pipewire-alsa wireplumber alsa-ucm alsa-sof-firmware \
+    && dnf clean all \
+    && systemctl --global enable pipewire.socket pipewire-pulse.socket wireplumber.service
+
+# The initramfs again, with the Surface's drivers in it, loaded in order in the
+# first seconds of boot: without them the stock kernel's controller hub fails
+# and graphics (so the backlight) and sound stall for minutes or never come
+# (usr/lib/modprobe.d/wadspaces-surface.conf says why). Its own layer, so it
+# only reruns when those two files change.
+COPY host/usr/lib/modprobe.d/wadspaces-surface.conf /usr/lib/modprobe.d/
+COPY host/usr/lib/dracut/dracut.conf.d/60-wadspaces-surface.conf /usr/lib/dracut/dracut.conf.d/
+RUN kver="$(ls /usr/lib/modules)" \
+    && dracut --force --no-hostonly --kver "${kver}" "/usr/lib/modules/${kver}/initramfs.img" \
+    && chmod 644 "/usr/lib/modules/${kver}/initramfs.img" \
+    && lsinitrd "/usr/lib/modules/${kver}/initramfs.img" > /tmp/initrd.txt \
+    && for m in pinctrl-sunrisepoint surface_aggregator.ko i915.ko snd-hda-intel snd-hda-codec-alc269 kbl_dmc; do \
+         grep -q "${m}" /tmp/initrd.txt || { echo "initramfs lacks ${m}" >&2; exit 1; }; \
+       done \
+    && rm /tmp/initrd.txt
 
 # Tailscale, the trusted network between the owner's machines, from
 # Tailscale's own repo. Its own layer, so the ones
@@ -44,9 +52,9 @@ RUN curl -fsSLo /etc/yum.repos.d/tailscale.repo https://pkgs.tailscale.com/stabl
 
 COPY host/etc/ /etc/
 COPY host/usr/ /usr/
-# Wad Creator, the Tauri app (built by host/build.sh from apps/wadcreator).
-# It's the shell: wadd keeps its window (app_id "wadcreator") on screen.
-COPY .build/wadcreator-app/wadcreator /usr/bin/wadcreator
+# The WadSpaces Client, the Tauri app (built by host/build.sh from apps/client).
+# It's the shell: wadd keeps its window (app_id "client") on screen.
+COPY .build/client-app/client /usr/bin/client
 # wadd (apps/wadd), built by host/build.sh. It replaced the Python wadd: on
 # the first boot after that one, `wadd migrate` (wadd.service) moves its
 # state over; `bootc rollback` goes back to it (host/CUTOVER.md).
@@ -59,12 +67,12 @@ COPY .build/hud/hud /usr/libexec/wadspaces/hud
 COPY .build/secrets/ /usr/lib/wadspaces/secrets/
 COPY .build/ssh/ /usr/share/wadspaces/ssh/
 
-RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd /usr/bin/wadcreator && \
-    /usr/bin/wadcreator --version && \
+RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd /usr/bin/client && \
+    /usr/bin/client --version && \
     find /usr/lib/wadspaces/secrets -type d -exec chmod 700 {} + && \
     find /usr/lib/wadspaces/secrets -type f -exec chmod 600 {} + && \
     chmod 644 /usr/share/wadspaces/ssh/* && \
-    for b in dbus-run-session sway curl nmcli skopeo bootc tailscale; do \
+    for b in dbus-run-session sway curl nmcli skopeo bootc tailscale wpctl; do \
       command -v "$b" > /dev/null || { echo "missing $b" >&2; exit 1; }; \
     done && \
     ls /usr/lib/firmware/mrvl/pcie8897_uapsta.bin* /usr/lib64/libgtk4-layer-shell.so.0 > /dev/null && \

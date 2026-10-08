@@ -191,7 +191,7 @@ impl State {
         })
     }
 
-    /// Wad Creator's library: a collection's documents (opaque to wadd).
+    /// WadSpaces Client's library: a collection's documents (opaque to wadd).
     pub fn library(&self, collection: &str) -> Option<Vec<Value>> {
         COLLECTIONS
             .contains(&collection)

@@ -94,7 +94,7 @@ async fn workspace_windows_are_adopted_focused_and_dropped() {
     .unwrap();
     std::fs::create_dir_all(proc.join("200")).unwrap();
     std::fs::write(proc.join("200/cgroup"), "0::/user.slice/user-1000.slice/session-1.scope\n").unwrap();
-    std::os::unix::fs::symlink("/usr/bin/wadcreator", proc.join("200/exe")).unwrap();
+    std::os::unix::fs::symlink("/usr/bin/client", proc.join("200/exe")).unwrap();
     let tree = json!({"type": "root", "nodes": [{"type": "workspace", "nodes": [
         {"type": "con", "id": 1, "pid": 200}, {"type": "con", "id": 5, "pid": 100}]}]});
     let commands = Arc::new(Mutex::new(vec![]));

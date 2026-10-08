@@ -1,4 +1,4 @@
-//! The account link (cloud.py): wadd and Wad Creator meet in Firestore,
+//! The account link (cloud.py): wadd and WadSpaces Client meet in Firestore,
 //! over plain HTTPS. A machine has no inbound port, so wadd polls:
 //!
 //! - link(code): enrollMachine (a callable function) turns a code the owner
@@ -148,7 +148,6 @@ pub struct Parts {
     pub secrets: Arc<Secrets>,
     pub launches: Arc<Launches>,
     pub github: Arc<crate::github::GithubService>,
-    pub streams: Arc<crate::streams::Streams>,
     pub bus: Bus,
 }
 
@@ -444,33 +443,7 @@ impl CloudRelay {
         m.insert("view".into(), view.into());
         m.insert("workspaces".into(), workspaces.into());
         m.insert("mountedProjects".into(), mounted.into());
-        // Viewing from other devices: whether it's allowed here, and the
-        // streams running (their LAN links, the user and the certificate's
-        // fingerprint to pin; never the password).
-        let streams = &self.parts.streams;
-        m.insert("allowRemote".into(), streams.allow_remote().into());
-        let list: Vec<Value> = streams
-            .list()
-            .into_iter()
-            .map(|s| {
-                json!({"wsId": s.ws_id, "name": s.name, "port": s.port, "urls": s.urls, "user": s.user,
-                    "sha256": s.sha256, "ready": s.ready})
-            })
-            .collect();
-        m.insert("streams".into(), list.into());
         m
-    }
-
-    /// The owner's WadSpaces username (profiles/{uid}), the streams' user.
-    pub async fn sync_profile(&self) -> Result<(), String> {
-        let Some((uid, _)) = self.ids() else { return Ok(()) };
-        let tok = self.id_token().await?;
-        let doc = self.firestore()?.get(&tok, &format!("profiles/{uid}")).await.map_err(|e| e.to_string())?;
-        let user = doc
-            .map(|d| from_fields(d.get("fields").unwrap_or(&Value::Null)))
-            .and_then(|f| f.get("username").and_then(Value::as_str).map(String::from));
-        self.parts.streams.set_user(user);
-        Ok(())
     }
 
     pub async fn heartbeat(&self) -> Result<(), String> {
@@ -497,7 +470,7 @@ impl CloudRelay {
         Ok(out)
     }
 
-    /// One command from Wad Creator; its result.
+    /// One command from WadSpaces Client; its result.
     pub async fn execute(&self, cmd: &Value) -> Result<Value, String> {
         let p = &self.parts;
         let ws = s(cmd, "wsId");
@@ -533,14 +506,6 @@ impl CloudRelay {
                     .map(String::from)
                     .collect();
                 let restart = cmd.get("restart").and_then(Value::as_bool).unwrap_or(false);
-                // "stream": to be viewed from the device that asked (the
-                // owner's other machine or phone), if this machine allows it.
-                let stream = cmd.get("view").and_then(Value::as_str) == Some("stream");
-                if stream {
-                    let port = p.streams.prepare(&ws, restart).await.map_err(msg)?;
-                    let l = p.launches.create_as(&ws, &projects, restart, true).map_err(msg)?;
-                    return Ok(json!({"ok": true, "launchId": l.id, "port": port}));
-                }
                 let l = p.launches.create(&ws, &projects, restart).map_err(msg)?;
                 return Ok(json!({"ok": true, "launchId": l.id}));
             }
@@ -724,43 +689,6 @@ impl CloudRelay {
         Ok(out)
     }
 
-    /// Where another of the owner's machines streams a workspace (its
-    /// heartbeat: the links, the user, the certificate to pin). Read with
-    /// this machine's own token, so the fingerprint is the account's word,
-    /// not whoever asked.
-    pub async fn sibling_stream(&self, machine_id: &str, ws_id: &str) -> Result<crate::remote::Target, String> {
-        let (uid, mid) = self.ids().ok_or("this machine isn't linked to an account")?;
-        if machine_id == mid {
-            return Err("that's this machine".into());
-        }
-        let tok = self.id_token().await?;
-        let path = format!("users/{uid}/machines/{machine_id}");
-        let doc = self.firestore()?.get(&tok, &path).await.map_err(|e| e.to_string())?.ok_or("no such machine")?;
-        let f = from_fields(doc.get("fields").unwrap_or(&Value::Null));
-        let name = [s(&f, "name"), s(&f, "hostname")].into_iter().find(|n| !n.is_empty()).unwrap_or(machine_id.into());
-        let entry = f
-            .get("streams")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .find(|e| e.get("wsId").and_then(Value::as_str) == Some(ws_id))
-            .cloned()
-            .ok_or_else(|| format!("{name} isn't streaming that workspace"))?;
-        let urls: Vec<String> = entry
-            .get("urls")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(String::from)
-            .collect();
-        let sha256 = s(&entry, "sha256").to_ascii_lowercase();
-        if urls.is_empty() || sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(format!("{name}'s stream has no address or certificate"));
-        }
-        Ok(crate::remote::Target { machine: name, urls, user: s(&entry, "user"), sha256 })
-    }
-
     // --------------------------------------------------------------- run
     async fn turn(&self, beat: bool) -> Result<(), String> {
         if beat {
@@ -782,12 +710,6 @@ impl CloudRelay {
         {
             self.secrets_due.store(false, Ordering::Relaxed);
             tracing::warn!("secrets sync: {e}");
-        }
-        if beat
-            && beats % SECRETS_EVERY == 1
-            && let Err(e) = self.sync_profile().await
-        {
-            tracing::warn!("profile: {e}");
         }
         if ((beat && beats % SECRETS_EVERY == 1) || self.parts.github.repos_due.load(Ordering::Relaxed))
             && let Err(e) = self.sync_repos(false).await

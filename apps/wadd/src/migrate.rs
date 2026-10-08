@@ -122,7 +122,7 @@ pub async fn reset_baked_token(state_dir: &Path, backend: &dyn Backend) -> Resul
     // podman's value is read trimmed; the baked file may have ended in a newline.
     if hex(token.as_bytes()) == baked || hex(format!("{token}\n").as_bytes()) == baked {
         backend.delete_secret("github_token").await?;
-        Ok("secrets: removed the baked GitHub token (sign in to GitHub from Wad Creator)".into())
+        Ok("secrets: removed the baked GitHub token (sign in to GitHub from WadSpaces)".into())
     } else {
         Ok("secrets: the GitHub token is the machine's own; kept".into())
     }

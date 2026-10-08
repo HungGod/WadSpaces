@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Lay out a wadspace's desktop as it was designed in Wad Creator.
+"""Lay out a wadspace's desktop as it was designed in WadSpaces Client.
 
     wadspaces-layout <desktop-dir> <state-dir> [layout.json]
 
@@ -96,7 +96,7 @@ def main() -> int:
         if icon.get("project"):
             continue  # a project's launcher: wadspaces-projects places it when it's mounted
         if icon.get("file"):
-            continue  # a cloud-file shortcut from an older Wad Creator; cloud files are gone
+            continue  # a cloud-file shortcut from an older WadSpaces Client; cloud files are gone
         launcher = find_launcher(icon)
         if not launcher:
             log(f"WARN: no launcher for {icon.get('app')!r} ({icon.get('label')!r}); skipped")

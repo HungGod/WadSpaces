@@ -72,13 +72,16 @@ pub enum Event {
     Github(crate::github::SignIn),
     /// The network changed (joined, left, connectivity).
     Network(NetworkStatus),
-    /// Streams started or stopped, or their settings changed.
-    Streams(StreamsStatus),
     /// The workspace list changed (added, edited, removed, built).
     Workspaces(Vec<Workspace>),
     /// Something to tell whoever is watching.
     Notice {
         text: String,
+    },
+    /// A Super+key the HUD answers rather than wadd ("clipboard": Super+V,
+    /// the clipboard history). Never replayed to a new watcher.
+    Shortcut {
+        name: String,
     },
 }
 
@@ -97,14 +100,14 @@ impl Event {
             Event::Cloud(_) => "cloud",
             Event::Github(_) => "github",
             Event::Network(_) => "network",
-            Event::Streams(_) => "streams",
             Event::Workspaces(_) => "workspaces",
             Event::Notice { .. } => "notice",
+            Event::Shortcut { .. } => "shortcut",
         }
     }
 }
 
-/// What the machine shows: Wad Creator (the app's own window, "home"), or a
+/// What the machine shows: WadSpaces Client (the app's own window, "home"), or a
 /// workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", content = "id", rename_all = "camelCase")]
@@ -152,6 +155,10 @@ pub struct SessionRequest {
     pub workspaces: Vec<String>,
     /// A focus session's length; none: no timer (a free session).
     pub minutes: Option<u32>,
+    /// The caller launches the picks itself (POST /v1/launches, with their
+    /// projects): the session doesn't start them.
+    #[serde(default)]
+    pub launched: bool,
 }
 
 /// GET /v1/keys: the keyboard proxy.
@@ -448,6 +455,10 @@ pub struct LaunchRequest {
     /// It may be stopped to change what it mounts (the UI asks first).
     #[serde(default)]
     pub restart: bool,
+    /// Started, not switched to (the screen stays put): one of several
+    /// opened at once, the UI shows the first that's ready.
+    #[serde(default)]
+    pub background: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -549,7 +560,7 @@ pub struct IconSource {
     pub custom: Option<String>,
 }
 
-/// POST /v1/icons/prefetch: icons Wad Creator's design has, made in the
+/// POST /v1/icons/prefetch: icons WadSpaces Client's design has, made in the
 /// background so a build finds them ready.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -732,72 +743,21 @@ pub struct PowerRequest {
     pub action: PowerAction,
 }
 
-/// GET /v1/streams: viewing this machine's workspaces from other devices
-/// (another machine's Wad Creator, a phone) on the local network.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+/// GET and PUT /v1/screen/brightness: the screen's backlight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct StreamsStatus {
-    /// Allowed here (only ever turned on at the machine itself).
-    pub allow_remote: bool,
-    /// The account has a stream password long enough to use.
-    pub password_set: bool,
-    /// Why a stream can't start now, if it can't (for people).
-    pub problem: Option<String>,
-    /// The name to sign in to a stream with (the owner's WadSpaces username).
-    pub user: String,
-    /// The streams' certificate: SHA-256, lowercase hex. None until made.
-    pub sha256: Option<String>,
-    pub streams: Vec<StreamInfo>,
+pub struct Brightness {
+    /// False: no backlight wadd can set (an external monitor, a VM).
+    pub available: bool,
+    /// 0 to 100 (wadd never sets it below a dim but readable floor).
+    pub percent: u8,
 }
 
-/// A workspace being streamed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+/// PUT /v1/screen/brightness
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct StreamInfo {
-    pub ws_id: String,
-    pub name: String,
-    pub port: u16,
-    /// https://<this machine's LAN address>:<port>/, one per address.
-    pub urls: Vec<String>,
-    pub user: String,
-    pub sha256: String,
-    /// Its sidecar answers.
-    pub ready: bool,
-}
-
-/// POST /v1/remote-views: view another of the owner's machines' stream here.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteViewRequest {
-    pub machine_id: String,
-    pub ws_id: String,
-}
-
-/// A view: the address for Wad Creator's viewer window (this machine only,
-/// good for that window alone).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteView {
-    pub id: String,
-    pub machine: String,
-    pub url: String,
-}
-
-/// PUT /v1/streams/settings
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct StreamSettings {
-    pub allow_remote: bool,
-}
-
-/// POST /v1/workspaces/{id}/stream: show it on another device instead of the
-/// screen.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct StreamRequest {
-    /// It's open on the screen: take it off (else that's refused).
-    #[serde(default)]
-    pub takeover: bool,
+pub struct BrightnessRequest {
+    pub percent: u8,
 }
 
 /// GET /v1/metrics: how busy the machine is.

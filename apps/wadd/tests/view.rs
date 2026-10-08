@@ -1,4 +1,4 @@
-//! What's on screen: switching, Wad Creator, Super+Tab, sessions and native
+//! What's on screen: switching, WadSpaces Client, Super+Tab, sessions and native
 //! windows, against a fake machine and a fake display, with time paused.
 
 mod common;
@@ -52,6 +52,7 @@ struct Setup {
     fake: Fake,
     screen: Arc<FakeScreen>,
     dir: Arc<tempfile::TempDir>,
+    bus: Bus,
 }
 
 fn stream(id: &str, port: u16, hotkey: u8) -> Workspace {
@@ -95,8 +96,8 @@ async fn setup_in(dir: Arc<tempfile::TempDir>, list: Vec<Workspace>, fake: Fake)
     }
     reg.load(list).await.unwrap();
     let screen = Arc::new(FakeScreen::default());
-    let view = View::new(reg.clone(), Arc::new(fake.clone()), screen.clone(), bus, dir.path().into());
-    Setup { view, reg, fake, screen, dir }
+    let view = View::new(reg.clone(), Arc::new(fake.clone()), screen.clone(), bus.clone(), dir.path().into());
+    Setup { view, reg, fake, screen, dir, bus }
 }
 
 async fn setup(list: Vec<Workspace>) -> Setup {
@@ -230,7 +231,7 @@ async fn a_focus_session_narrows_the_switcher_and_locks_the_rest() {
     settle(&s).await;
     assert_eq!(s.view.current(), V::Home); // the landing page; picks are a Tab away
     assert_eq!(s.fake.calls().iter().filter(|c| c.starts_with("start")).count(), 2);
-    assert_eq!(sorted(items(&s)), [wsv("a"), wsv("b")]); // no Wad Creator, no c
+    assert_eq!(sorted(items(&s)), [wsv("a"), wsv("b")]); // no WadSpaces Client, no c
     s.view.switch("b").unwrap();
     assert_eq!(s.view.home(false).unwrap_err().code, ErrorCode::Conflict);
     assert_eq!(s.view.session_end(false).unwrap_err().code, ErrorCode::Conflict);
@@ -244,7 +245,7 @@ async fn a_focus_session_narrows_the_switcher_and_locks_the_rest() {
     s.view.home(false).unwrap(); // allowed now; the picks stay until a new session
     assert!(s.view.session().is_some());
     s.view.session_end(false).unwrap();
-    // No session: Wad Creator and whatever still runs.
+    // No session: WadSpaces Client and whatever still runs.
     assert_eq!(sorted(items(&s)), sorted(vec![V::Home, wsv("a"), wsv("b")]));
 }
 
@@ -288,6 +289,21 @@ async fn sessions_refuse_bad_input() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_session_the_app_launches_leaves_starting_to_it() {
+    let s = abc().await;
+    let sess = s.view.session_start(&["a".into(), "b".into()], Some(25), false).unwrap();
+    settle(&s).await;
+    assert_eq!(sess.workspaces, ["a", "b"]);
+    assert_eq!(s.reg.state("a").unwrap().phase, Phase::Idle);
+    assert_eq!(s.reg.state("b").unwrap().phase, Phase::Idle);
+    // Locked to its picks all the same: the first one ready is shown.
+    assert_eq!(s.view.switch("c").unwrap_err().code, ErrorCode::Conflict);
+    s.view.switch("a").unwrap();
+    settle(&s).await;
+    assert_eq!(s.view.current(), wsv("a"));
+}
+
+#[tokio::test(start_paused = true)]
 async fn stopping_the_shown_pick_moves_to_the_next() {
     let s = abc().await;
     s.view.session_begin(&["a".into(), "b".into()], Some(25)).unwrap();
@@ -296,7 +312,7 @@ async fn stopping_the_shown_pick_moves_to_the_next() {
     s.view.stop("a").await.unwrap();
     settle(&s).await;
     assert_eq!(s.view.current(), wsv("b"));
-    s.view.stop("b").await.unwrap(); // nothing left: Wad Creator, though locked
+    s.view.stop("b").await.unwrap(); // nothing left: WadSpaces Client, though locked
     assert_eq!(s.view.current(), V::Home);
     assert!(s.view.locked());
 }
@@ -365,11 +381,21 @@ async fn time_running_out_says_so() {
 #[tokio::test(start_paused = true)]
 async fn super_keys_are_bound_to_hotkeys_and_home() {
     let s = abc().await;
-    let b = s.view.bindings(&["KEY_0".into(), "KEY_SPACE".into()]);
+    let b = s.view.bindings(&wad_config::Keys::for_profile(wad_config::Profile::System));
     assert_eq!(b[&2], "switch:a");
     assert_eq!(b[&3], "switch:b");
     assert_eq!(b[&11], "home");
     assert_eq!(b[&57], "home");
+    assert_eq!(b[&47], "clipboard"); // Super+V
+}
+
+#[tokio::test(start_paused = true)]
+async fn super_v_asks_the_hud_for_the_clipboard() {
+    let s = abc().await;
+    let (_, mut rx) = s.bus.subscribe();
+    s.view.on_key(Action::Bound("clipboard".into()));
+    let e = rx.recv().await.unwrap();
+    assert_eq!(e, wad_proto::v1::Event::Shortcut { name: "clipboard".into() });
 }
 
 // ------------------------------------------------------ native workspaces
@@ -449,7 +475,7 @@ async fn windows_are_matched_to_workspaces() {
     use wad_sway::Owner;
     assert_eq!(s.view.resolve(Owner::Workspace("n".into())).await.as_deref(), Some("n"));
     assert_eq!(s.view.resolve(Owner::Workspace("other".into())).await, None);
-    assert_eq!(s.view.resolve(Owner::Exe("/usr/bin/wadcreator".into())).await, None); // the app stays on the shell
+    assert_eq!(s.view.resolve(Owner::Exe("/usr/bin/client".into())).await, None); // the app stays on the shell
     s.fake.with(|m| {
         m.labels.insert("c0ffee".into(), "n".into());
     });

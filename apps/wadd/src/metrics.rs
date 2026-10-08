@@ -1,4 +1,4 @@
-//! How busy the machine is (metrics.py), for Wad Creator's Manager: CPU,
+//! How busy the machine is (metrics.py), for WadSpaces Client's Manager: CPU,
 //! memory, disk, load and the GPU, from /proc and /sys. CPU is the share of
 //! busy time since the last look (or over a short sample the first time).
 

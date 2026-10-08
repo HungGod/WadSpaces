@@ -1,5 +1,5 @@
 //! wadspaces-icon: a web app's icon, for images built without wadd (and by
-//! hand). Inside a build, wadspaces-webapp runs `fallback` when Wad Creator
+//! hand). Inside a build, wadspaces-webapp runs `fallback` when WadSpaces Client
 //! gave no icon: nothing is fetched while an image builds.
 //!
 //!   wadspaces-icon fallback --url <site> --out <png>    the text card

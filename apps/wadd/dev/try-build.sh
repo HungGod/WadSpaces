@@ -56,7 +56,7 @@ api() { curl -sS --unix-socket "$sock" -X "$1" "http://wadd$2"; echo; }
 post() { curl -sS --unix-socket "$sock" -X POST -H 'Content-Type: application/json' --data-binary @- "http://wadd$1"; echo; }
 view() { curl -sS --unix-socket "$sock" http://wadd/v1/view; }
 
-# The design, as Wad Creator keeps it, and a wallpaper it would have drawn.
+# The design, as WadSpaces Client keeps it, and a wallpaper it would have drawn.
 request() { # name
   python3 - "$1" "$rt_name" <<'PY'
 import json, sys

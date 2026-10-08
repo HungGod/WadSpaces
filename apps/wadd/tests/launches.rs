@@ -178,6 +178,17 @@ async fn launch(e: &Env, ws: &str, projects: &[&str], restart: bool) -> LaunchLo
     wait(e, &l.id).await
 }
 
+#[tokio::test]
+async fn a_background_launch_starts_it_without_switching() {
+    let e = env().await;
+    let l = e.launches.create_as("a", &["vault".into()], false, true).unwrap();
+    let l = wait(&e, &l.id).await;
+    assert_eq!(l.launch.status, LaunchStatus::Done, "{l:?}");
+    assert_eq!(e.reg.state("a").unwrap().phase, Phase::Ready);
+    assert_eq!(e.view.current(), V::Home);
+    assert!(l.lines.iter().any(|x| x.contains("in the background")), "{:?}", l.lines);
+}
+
 fn starts(e: &Env, unit: &str) -> usize {
     e.fake.calls().iter().filter(|c| **c == format!("start {unit}")).count()
 }
@@ -266,7 +277,7 @@ async fn a_missing_local_image_says_build_it() {
     e.fake.with(|m| m.images.clear());
     let l = launch(&e, "a", &["notes"], false).await;
     assert_eq!(l.launch.status, LaunchStatus::Error);
-    assert!(l.launch.error.as_deref().unwrap().contains("build A in Wad Creator"), "{l:?}");
+    assert!(l.launch.error.as_deref().unwrap().contains("build A in WadSpaces"), "{l:?}");
     assert_eq!(l.launch.parts[0].state, PartState::Error);
 }
 

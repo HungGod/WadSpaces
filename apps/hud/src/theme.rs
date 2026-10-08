@@ -1,5 +1,5 @@
-//! The HUD in the site's colours (apps/wadcreator/src/styles/globals.css),
-//! dark or light as Wad Creator is: the app writes its choice to
+//! The HUD in the site's colours (apps/client/src/styles/globals.css),
+//! dark or light as WadSpaces Client is: the app writes its choice to
 //! ~/.config/wadspaces/theme (src-tauri/src/theme.rs), and the HUD follows
 //! that file.
 
@@ -17,7 +17,7 @@ impl Theme {
     }
 }
 
-/// Where Wad Creator keeps its theme for the HUD.
+/// Where WadSpaces Client keeps its theme for the HUD.
 pub fn file() -> PathBuf {
     let config = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|v| !v.is_empty())
@@ -92,9 +92,20 @@ window { background: transparent; }
 .pill.done { color: @accent; border-color: @accent; }
 .pill.focus { color: @accent; border-color: alpha(@accent, 0.45); }
 .pill.logo-button { padding: 3px 9px; }
+.pill.icon-pill { padding: 5px 11px; }
+.pill image { color: @fg; }
+.pill.battery { padding: 4px 11px 4px 9px; color: @muted; font-feature-settings: "tnum"; }
+.pill.battery.low, .pill.battery.low image { color: @warn; border-color: alpha(@warn, 0.5); }
+.pill.clock { font-feature-settings: "tnum"; color: @muted; }
+.pill.arrow { padding: 4px 10px; font-size: 15px; font-weight: 600; color: @muted; }
+.pill.arrow:hover { color: @fg; }
+.pill.arrow.attention { color: @accent; border-color: @accent; }
 
 button.dim, button.dim:hover, button.dim:active {
   background: @dim; background-image: none; border: none; border-radius: 0; box-shadow: none; outline: none;
+}
+button.catcher, button.catcher:hover, button.catcher:active {
+  background: transparent; background-image: none; border: none; border-radius: 0; box-shadow: none; outline: none;
 }
 .card {
   background: @surface; color: @fg; border: 1px solid @line;
@@ -129,6 +140,45 @@ entry, passwordentry {
   background: @bg; color: @fg; border: 1px solid @line_strong; border-radius: 10px; padding: 6px 10px; box-shadow: none;
 }
 entry:focus-within, passwordentry:focus-within { border-color: @accent; }
+
+.tip {
+  background: @surface; color: @fg; border: 1px solid @line_strong; border-radius: 10px;
+  padding: 6px 10px; font-size: 12px; box-shadow: 0 8px 24px -10px rgba(3, 2, 8, 0.5);
+}
+.card.level { padding: 14px 16px; border-radius: 20px; }
+.card.osd { padding: 12px 16px; border-radius: 18px; }
+.card.osd image { color: @fg; }
+.card.osd .value { color: @muted; font-size: 12px; font-feature-settings: "tnum"; }
+progressbar trough { background: @surface3; border: none; border-radius: 999px; min-height: 6px; }
+progressbar progress { background: @accent; border: none; border-radius: 999px; min-height: 6px; min-width: 6px; margin: 0; }
+.slider-row { min-height: 34px; }
+.slider-icon { min-width: 32px; color: @fg; }
+.slider-row.muted .slider-icon image { color: @faint; }
+button.slider-icon { padding: 2px 4px; min-height: 0; min-width: 0; }
+.slider-row .value { color: @muted; font-size: 12px; font-feature-settings: "tnum"; }
+.slider-row.muted .value { color: @faint; }
+scale { padding: 6px 0; }
+scale trough { background: @surface3; border: none; border-radius: 999px; min-height: 6px; }
+scale highlight { background: @accent; border: none; border-radius: 999px; margin: 0; min-height: 6px; }
+.slider-row.muted scale highlight { background: @faint; }
+scale slider {
+  background: @fg; border: 2px solid @surface; border-radius: 999px; min-width: 18px; min-height: 18px;
+  margin: -7px 0; box-shadow: none;
+}
+
+list.clips { background: transparent; }
+row.clip { background: transparent; border-radius: 12px; padding: 10px 12px; margin: 1px 0; color: @fg; outline: none; }
+row.clip:hover { background: @surface2; }
+row.clip:selected { background: @accent_soft; }
+row.clip .text { color: @fg; font-size: 13px; }
+row.clip .when { color: @faint; font-size: 11px; }
+row.clip .thumb { border-radius: 8px; }
+button.forget {
+  background: transparent; background-image: none; border: none; box-shadow: none;
+  color: @faint; padding: 2px 6px; min-height: 0; min-width: 0; font-size: 12px;
+}
+button.forget:hover { color: @fg; background: @surface3; }
+.empty { padding: 18px 0; }
 
 .switcher { background: alpha(@surface, 0.96); border: 1px solid @line_strong; border-radius: 28px; padding: 18px; }
 .item { border-radius: 18px; padding: 14px; min-width: 128px; border: 2px solid transparent; }

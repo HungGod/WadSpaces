@@ -96,7 +96,7 @@ asabc git config --global credential.https://github.com.username "x-access-token
 # selkies-desktop draws an icon for every .desktop file in $HOME/Desktop. The
 # entries are shipped in /usr/share/applications and copied here each boot.
 #
-# A wadspace designed in Wad Creator has /etc/wadspaces/layout.json: its icons
+# A wadspace designed in WadSpaces Client has /etc/wadspaces/layout.json: its icons
 # in order, with their labels, placed by wadspaces-layout. Hand-written images
 # list launchers in desktop-entries.list / desktop-entries.d/*.list instead.
 SEEDED="${STATE_DIR}/seeded-desktop-entries"
