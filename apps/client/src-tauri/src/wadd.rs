@@ -5,8 +5,9 @@
 //!
 //! Which one: WADD_DAEMON=rs|py, else the Rust wadd if its socket is there.
 //!
-//! The UI keeps its Python-shaped types (`src/lib/wadd.ts`) and calls
-//! [`wadd_request`] where it used to `fetch`; wadd's event stream arrives as
+//! The UI calls [`wadd_request`] (`src/lib/wadd.ts`): its older calls in the
+//! Python wadd's shapes, which rswadd.rs answers from `/v1`, and the newer
+//! ones as `/v1` itself; wadd's event stream arrives as
 //! [`WaddEvent`]s. Secrets are left out: the app sets those itself (the GitHub
 //! token never passes through the page).
 
@@ -167,14 +168,6 @@ pub async fn wadd_request(
         None => req,
     };
     wadd.finish(req.send().await).await
-}
-
-/// Which wadd the app talks to: "rs" or "py" (builds differ: the Rust one
-/// builds from the design).
-#[tauri::command]
-#[specta::specta]
-pub fn wadd_kind(wadd: State<'_, Wadd>) -> String {
-    if wadd.rs.is_some() { "rs".into() } else { "py".into() }
 }
 
 /// The last `state` event (wadd's snapshot), if one has arrived.

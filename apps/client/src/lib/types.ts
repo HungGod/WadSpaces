@@ -81,15 +81,6 @@ export interface Draft {
   updatedAt: string;
 }
 
-export interface App {
-  id: string;
-  name: string;
-  domain: string;
-  color: string;
-  /** Local icon for apps whose website favicon doesn't match (otherwise the Google favicon is used). */
-  iconUrl?: string;
-}
-
 /** Where a wadspace is on a machine. */
 export type ContainerPhase = "idle" | "pulling" | "starting" | "waiting" | "ready" | "stopping" | "error";
 

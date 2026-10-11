@@ -6,9 +6,8 @@
 //! account link, the network, the workspace list) are mirrored into the
 //! `state` snapshot the UI reads.
 //!
-//! Two flows differ, and the UI asks which wadd it has (`wadd_kind`):
-//! builds (the Rust wadd builds from the design: POST /api/builds/design)
-//! and secrets (set by the app, not the page).
+//! Calls the UI makes in wadd's own words (`/v1/...`) pass through as they
+//! are. Secrets are set by the app, not the page.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -181,13 +180,6 @@ fn spec_of(ws: &Value) -> Value {
     }
 }
 
-/// A WaddSpec as the Rust wadd's Workspace, checked as workspaces.yaml would be.
-fn workspace_of(spec: &Value) -> Result<Value, WaddFailure> {
-    let ws = wad_store::legacy::check_workspaces(vec![spec.clone()])
-        .map_err(|e| WaddFailure { status: 422, message: e.to_string() })?;
-    Ok(serde_json::to_value(&ws[0]).expect("json"))
-}
-
 fn diagnostics_py(d: &Value) -> Value {
     let p = s(d, "podman");
     let disk = s(d, "disk");
@@ -294,16 +286,6 @@ impl RsWadd {
                 let list = self.v1(Get, "/v1/workspaces", None).await?;
                 Value::Array(list.as_array().into_iter().flatten().map(spec_of).collect())
             }
-            (Post, ["api", "workspaces"]) => {
-                let w = self.v1(Post, "/v1/workspaces", Some(&workspace_of(&b)?)).await?;
-                spec_of(&w)
-            }
-            (Put, ["api", "workspaces", id]) => {
-                let mut w = workspace_of(&b)?;
-                w["id"] = Value::String(id.to_string());
-                let r = self.v1(Put, &format!("/v1/workspaces/{}", enc(id)), Some(&w)).await?;
-                json!({"workspace": spec_of(s(&r, "workspace")), "restart_required": s(&r, "restartRequired")})
-            }
             (Delete, ["api", "workspaces", id]) => {
                 self.v1(Delete, &format!("/v1/workspaces/{}", enc(id)), None).await?;
                 ok()
@@ -316,19 +298,6 @@ impl RsWadd {
                 self.v1(Post, "/v1/view/home", None).await?;
                 ok()
             }
-            (Post, ["api", "session"]) => session_py(
-                &self
-                    .v1(
-                        Post,
-                        "/v1/session",
-                        Some(&json!({
-                            "workspaces": s(&b, "workspaces"),
-                            "minutes": s(&b, "minutes"),
-                            "launched": s(&b, "launched").as_bool().unwrap_or(false),
-                        })),
-                    )
-                    .await?,
-            ),
             (Post, ["api", "session", "end"]) => {
                 let force = s(&b, "force").as_bool().unwrap_or(false);
                 self.v1(Delete, &format!("/v1/session?force={force}"), None).await?;
@@ -339,9 +308,8 @@ impl RsWadd {
                 json!({"ok": true, "machineId": s(&l, "machineId")})
             }
             (Get, ["api", "diagnostics"]) => diagnostics_py(&self.v1(Get, "/v1/diagnostics", None).await?),
-            (Get, ["api", "network"]) => self.v1(Get, "/v1/network", None).await?,
             (Get, ["api", "network", "wifi"]) => self.v1(Get, "/v1/network/wifi?rescan=true", None).await?,
-            (Post, ["api", "network", "wifi", what @ ("connect" | "disconnect" | "forget")]) => {
+            (Post, ["api", "network", "wifi", what @ ("connect" | "disconnect")]) => {
                 let body = (*what != "disconnect").then_some(&b);
                 self.v1(Post, &format!("/v1/network/wifi/{what}"), body).await?;
                 ok()
@@ -355,19 +323,6 @@ impl RsWadd {
             (Get, ["api", "builds"]) => Value::Array(
                 self.v1(Get, "/v1/builds", None).await?.as_array().into_iter().flatten().map(build_py).collect(),
             ),
-            (Post, ["api", "builds"]) | (Put, ["api", "builds", _, "context"]) => {
-                return Err(WaddFailure {
-                    status: 409,
-                    message: "this machine's wadd builds from the design (POST /api/builds/design)".into(),
-                });
-            }
-            (Post, ["api", "builds", "design"]) => build_py(&self.v1(Post, "/v1/builds", Some(&b)).await?),
-            // Web apps' icons, made before a build (prefetch) or shown in the Builder.
-            (Post, ["api", "icons", "prefetch"]) => {
-                self.v1(Post, "/v1/icons/prefetch", Some(&b)).await?;
-                ok()
-            }
-            (Post, ["api", "icons", "webapp"]) => self.v1(Post, "/v1/icons/webapp", Some(&b)).await?,
             (Get, ["api", "builds", id]) => {
                 let since = q.get("since").cloned().unwrap_or_else(|| "0".into());
                 let l = self.v1(Get, &format!("/v1/builds/{}?since={since}", enc(id)), None).await?;
@@ -385,7 +340,6 @@ impl RsWadd {
                 .await?
             }
             (Post, ["api", "projects"]) => self.v1(Post, "/v1/projects", Some(&b)).await?,
-            (Get, ["api", "projects", id]) => self.v1(Get, &format!("/v1/projects/{}", enc(id)), None).await?,
             (Put, ["api", "projects", id]) => self.v1(Put, &format!("/v1/projects/{}", enc(id)), Some(&b)).await?,
             (Delete, ["api", "projects", id]) => {
                 let purge = q.get("purge").is_some_and(|v| v == "1" || v == "true");
@@ -405,7 +359,6 @@ impl RsWadd {
             }
             (Get, ["api", "signins"]) => self.v1(Get, "/v1/signins", None).await?,
             (Post, ["api", "signins"]) => self.v1(Post, "/v1/signins", Some(&b)).await?,
-            (Get, ["api", "signins", id]) => self.v1(Get, &format!("/v1/signins/{}", enc(id)), None).await?,
             (Put, ["api", "signins", id]) => self.v1(Put, &format!("/v1/signins/{}", enc(id)), Some(&b)).await?,
             (Delete, ["api", "signins", id]) => {
                 self.v1(Delete, &format!("/v1/signins/{}", enc(id)), None).await?;
@@ -439,15 +392,6 @@ impl RsWadd {
             (Get, ["api", "launches"]) => Value::Array(
                 self.v1(Get, "/v1/launches", None).await?.as_array().into_iter().flatten().map(launch_py).collect(),
             ),
-            (Post, ["api", "launches"]) => {
-                let body = json!({
-                    "workspace": s(&b, "workspace"),
-                    "projects": s(&b, "projects"),
-                    "restart": s(&b, "restart").as_bool().unwrap_or(false),
-                    "background": s(&b, "background").as_bool().unwrap_or(false),
-                });
-                launch_py(&self.v1(Post, "/v1/launches", Some(&body)).await?)
-            }
             (Get, ["api", "launches", id]) => {
                 let since = q.get("since").cloned().unwrap_or_else(|| "0".into());
                 let l = self.v1(Get, &format!("/v1/launches/{}?since={since}", enc(id)), None).await?;
@@ -457,9 +401,6 @@ impl RsWadd {
                 launch_py(&self.v1(Delete, &format!("/v1/launches/{}", enc(id)), None).await?)
             }
             (Get, ["api", "library", c]) => self.v1(Get, &format!("/v1/library/{}", enc(c)), None).await?,
-            (Get, ["api", "library", c, id]) => {
-                self.v1(Get, &format!("/v1/library/{}/{}", enc(c), enc(id)), None).await?
-            }
             (Put, ["api", "library", c, id]) => {
                 self.v1(Put, &format!("/v1/library/{}/{}", enc(c), enc(id)), Some(&b)).await?
             }
@@ -472,10 +413,6 @@ impl RsWadd {
                 let limit = q.get("limit").cloned().unwrap_or_else(|| "200".into());
                 let ws = q.get("workspace").map(|w| format!("&workspace={w}")).unwrap_or_default();
                 self.v1(Get, &format!("/v1/runs?limit={limit}{ws}"), None).await?
-            }
-            (Get, ["api", "secrets"]) => {
-                let list = self.v1(Get, "/v1/secrets", None).await?;
-                Value::Array(list.as_array().into_iter().flatten().map(|x| s(x, "name").clone()).collect())
             }
             (Get, ["api", "logs", "daemon"]) => {
                 let lines = q.get("lines").cloned().unwrap_or_else(|| "200".into());

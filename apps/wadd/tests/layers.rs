@@ -1,19 +1,22 @@
 //! The Builder's layers on a machine: a template's and a customization's
 //! images (the template built first when it's missing or out of date), their
 //! labels and listing, deleting one, and wadspaces installed on them with
-//! their wallpaper. A fake podman builds; the real registry installs.
+//! their wallpaper; and what any build does: one at a time, cancelling, a
+//! missing base or too little disk, and web apps' icons made first. A fake
+//! podman builds; the real registry installs.
 
 mod common;
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::Fake;
+use common::{Fake, ws};
 use serde_json::{Value, json};
 use wad_proto::ErrorCode;
-use wad_proto::v1::{BuildLog, BuildStatus, LayerBuildRequest, WallpaperUpload};
+use wad_proto::v1::{BuildLog, BuildStatus, Display, LayerBuildRequest, WallpaperUpload};
 use wadd::builds::{Builds, FROM_LABEL, SHA_LABEL};
 use wadd::events::Bus;
+use wadd::icons::Icons;
 use wadd::images::{self, Install};
 use wadd::registry::{Registry, Settings};
 
@@ -29,6 +32,10 @@ struct Env {
 }
 
 async fn env() -> Env {
+    env_with(None).await
+}
+
+async fn env_with(icons: Option<Arc<Icons>>) -> Env {
     let d = tempfile::tempdir().unwrap();
     let state = d.path().join("state");
     let fake = Fake::default();
@@ -58,7 +65,10 @@ async fn env() -> Env {
         },
     );
     reg.load(vec![]).await.unwrap();
-    let builds = Builds::new(reg.clone(), Arc::new(fake.clone()), bus, &state, 8);
+    let builds = match icons {
+        Some(i) => Builds::with_icons(Arc::new(fake.clone()), bus, &state, 8, i),
+        None => Builds::new(Arc::new(fake.clone()), bus, &state, 8),
+    };
     Env { _d: d, state, fake, reg, builds }
 }
 
@@ -287,4 +297,115 @@ async fn an_image_isnt_deleted_while_a_wadspace_runs_on_it() {
         ErrorCode::NotFound
     );
     assert_eq!(images::delete(&e.reg, &e.builds, &e.fake, "../x").await.unwrap_err().code, ErrorCode::BadRequest);
+}
+
+fn template(t: Value) -> LayerBuildRequest {
+    LayerBuildRequest { layer: format!("template:{}", t["id"].as_str().unwrap()), template: t, customization: None }
+}
+
+#[tokio::test]
+async fn a_missing_base_says_how_to_get_it() {
+    let e = env().await;
+    e.fake.with(|m| m.images.clear());
+    let l = wait(&e, &e.builds.create_layer(&template(dev())).unwrap().id).await;
+    assert_eq!(l.build.status, BuildStatus::Error);
+    assert_eq!(
+        l.build.error.as_deref(),
+        Some(
+            "localhost/wadspaces-base:trixie is not on this machine — update the drive with host/build.sh update --bases"
+        )
+    );
+    assert!(e.fake.0.lock().unwrap().builds.is_empty());
+}
+
+#[tokio::test]
+async fn short_on_disk_and_failed_builds() {
+    let e = env().await;
+    e.fake.with(|m| m.free_gb = 3.0);
+    let l = wait(&e, &e.builds.create_layer(&template(dev())).unwrap().id).await;
+    assert_eq!(l.build.error.as_deref(), Some("only 3.0 GB free; building needs at least 8 GB"));
+    e.fake.with(|m| {
+        m.free_gb = 100.0;
+        m.build_fails = Some("RUN apt-get install: exit status 100".into());
+    });
+    let l = wait(&e, &e.builds.create_layer(&template(dev())).unwrap().id).await;
+    assert_eq!(
+        (l.build.status, l.build.error.as_deref()),
+        (BuildStatus::Error, Some("RUN apt-get install: exit status 100"))
+    );
+    assert!(l.build.progress < 1.0); // STEP n/m counts what came before n
+}
+
+#[tokio::test]
+async fn one_build_at_a_time_and_cancelling() {
+    let e = env().await;
+    e.fake.with(|m| m.build_slow = true);
+    let first = e.builds.create_layer(&template(dev())).unwrap();
+    let err = e.builds.create_layer(&template(dev())).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict); // the same one: once
+    let mut writing = dev();
+    writing["id"] = "writing".into();
+    writing["apps"] = json!(["obsidian"]);
+    let second = e.builds.create_layer(&template(writing)).unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(e.builds.log(&first.id, 0).unwrap().build.status, BuildStatus::Building);
+    assert_eq!(e.builds.log(&second.id, 0).unwrap().build.status, BuildStatus::Queued); // waits its turn
+    assert_eq!(e.builds.cancel(&first.id).unwrap().status, BuildStatus::Cancelled);
+    assert_eq!(e.builds.log(&first.id, 0).unwrap().lines.last().map(String::as_str), Some("✗ cancelled"));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(e.builds.log(&second.id, 0).unwrap().build.status, BuildStatus::Building); // its turn now
+    e.builds.cancel(&second.id).unwrap();
+    assert_eq!(e.builds.list().len(), 2);
+    assert_eq!(e.builds.log("nope", 0).unwrap_err().code, ErrorCode::NotFound);
+}
+
+const DOT: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+#[tokio::test]
+async fn web_apps_get_their_icons_before_the_build() {
+    use wiremock::matchers::path;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let site = MockServer::start().await;
+    Mock::given(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html><head></head></html>"))
+        .mount(&site)
+        .await;
+    let favicon = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, DOT).unwrap();
+    Mock::given(path("/favicon.ico"))
+        .respond_with(ResponseTemplate::new(200).insert_header("content-type", "image/png").set_body_bytes(favicon))
+        .mount(&site)
+        .await;
+
+    let e = env_with(Some(Icons::for_tests())).await;
+    let mut c = plus();
+    c["webapps"] = json!([
+        {"id": "site", "name": "Site", "url": site.uri()},
+        // Nobody answers there: a card with its name.
+        {"id": "gone", "name": "Gone", "url": "http://127.0.0.1:9/"},
+    ]);
+    let l = wait(&e, &e.builds.create_layer(&custom(dev(), c)).unwrap().id).await;
+    assert_eq!(l.build.status, BuildStatus::Done, "{l:?}");
+    assert!(
+        l.lines.iter().any(|x| x == "» icons for 2 web apps: 1 from their sites, 0 chosen, 1 with their names"),
+        "{:?}",
+        l.lines
+    );
+    let builds = e.fake.0.lock().unwrap().builds.clone();
+    let (_, _, context) = builds.last().unwrap().clone();
+    let files = common::tar_names(&context);
+    for id in ["site", "gone"] {
+        let want = format!("root/usr/share/icons/hicolor/512x512/apps/wadspaces-webapp-{id}.png");
+        assert!(files.contains(&want), "{want} not in {files:?}");
+    }
+}
+
+#[test]
+fn a_wadspace_cannot_take_an_apps_id() {
+    let current = vec![common::app("terminal", "/usr/bin/foot"), ws("w", "i", Display::Host, None)];
+    let fresh =
+        json!({"id": "terminal", "name": "T", "image": "localhost/wadspaces-terminal:latest", "display": "host"});
+    let e = wadd::builds::merged(&current, &fresh).unwrap_err();
+    assert!(e.contains("one of this machine's own apps"), "{e}");
+    let other = json!({"id": "w", "name": "W2", "image": "localhost/wadspaces-w:latest", "display": "host"});
+    assert!(wadd::builds::merged(&current, &other).unwrap().1);
 }

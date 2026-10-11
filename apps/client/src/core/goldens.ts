@@ -98,13 +98,6 @@ const WADSPACES: WadspaceSpec[] = [
   { ...ws("files-abc123", [icon("vscode", 0)]), layout: { ...layout([icon("vscode", 0), { ...icon("x", 1), kind: "file" } as LayoutIcon]) } },
 ];
 
-const BUILD_OPTS = [
-  {},
-  { imagePrefix: "ghcr.io/hunggod/wadspaces-" },
-  { image: "localhost/explicit:2", baseImage: "localhost/other-base:1", wallpaperFile: "wallpaper.jpg", projects: PROJECTS },
-  { projects: PROJECTS, wallpaperFile: "wallpaper.png" },
-];
-
 const CREATOR: CreatorSpec[] = [
   newSpec(),
   newSpec({ id: "x", name: "X" }),
@@ -256,7 +249,6 @@ export function cases(): Case[] {
 
   // model
   for (const tz of [undefined, "Pacific/Fiji"]) add("defaultAdvanced", ...(tz ? [tz] : []));
-  for (const s of STRINGS) add("newWadspaceId", s, [0, 0.5, 0.999, 0.1, 0.25, 0.75]);
   for (const w of WADSPACES) {
     add("dropFileIcons", w.layout);
     add("orderedIcons", w.layout);
@@ -266,34 +258,11 @@ export function cases(): Case[] {
   // spec
   for (const s of STRINGS) add("slugify", s);
   for (const p of [{}, { id: "x", display: "stream" as const }, { id: "y", name: "Y", features: [] as never[], env: {} }]) add("newSpec", p);
-  for (const s of CREATOR) {
-    add("resolveFeatures", s);
-    add("volumesFor", s);
-    add("toWaddSpec", s);
-    add("validate", s);
-    add("dockerfile", s);
-    add("compose", s);
-    add("readme", s);
-    add("wadbrowserConf", s);
-    add("layoutJson", s);
-    add("bundleFiles", s);
-    add("bundleFiles", s, { $bytes: "iVBORw0KGgo=" }, "FROM scratch\n");
-  }
-  // Web apps' icons, made by wadd: only the spec's own web apps, by a valid id.
-  add("bundleFiles", CREATOR[3], null, null, { slack: { $bytes: "iVBORw0KGgo=" }, mine: { $bytes: "AAEC" }, other: { $bytes: "AA==" }, "Bad Id": { $bytes: "AA==" } });
+  for (const s of CREATOR) add("wadbrowserConf", s);
   for (const w of WADD) {
     add("quadlet", w);
     add("quadlet", w, "/srv/p", "/srv/s");
-    add("workspacesYamlSnippet", w);
-    add("fromWaddSpec", w);
-    add("fromWaddSpec", w, CREATOR[3]);
   }
-  add("baseImageFor", "host");
-  add("baseImageFor", "stream");
-
-  // build
-  for (const w of WADSPACES) for (const o of BUILD_OPTS) add("toBuildSpec", w, o);
-  for (const p of presets()) add("toBuildSpec", presetWadspace(p.id), { projects: PROJECTS });
 
   // recipes and icons
   for (const [id, d] of [["vscode"], ["brave"], ["unknown-app"], ["unknown-app", "example.com"], ["unknown-app", "http://x.org/a"], ["claude", "ignored.com"], ["wadbrowser"], ["wadbrowser-focus"], ["spotify"], ["zoom"]] as [string, string?][]) {

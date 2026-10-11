@@ -9,10 +9,6 @@ Wants=network-online.target podman.socket
 [Service]
 Type=notify
 NotifyAccess=main
-# Once, on the first boot after the Python wadd: its workspaces.yaml becomes
-# state, its units in /etc/containers/systemd go, the baked GitHub token
-# goes. "+": with full privileges (it writes /etc); "-": wadd starts anyway.
-ExecStartPre=-+/usr/bin/wadd migrate
 ExecStart=/usr/bin/wadd serve
 Restart=always
 RestartSec=2

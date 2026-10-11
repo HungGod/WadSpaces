@@ -21,13 +21,6 @@ const BINDINGS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/gen/bindings
 
 const USAGE: &str = "usage: client [--kiosk | --version | --export-bindings]";
 
-/// The app's version, for Settings and support.
-#[tauri::command]
-#[specta::specta]
-fn app_version() -> String {
-    env!("CARGO_PKG_VERSION").into()
-}
-
 /// This boot's id (the kernel's, new on every boot): the UI forgets the
 /// account sign-in when it changes, so every boot starts at sign-in.
 #[tauri::command]
@@ -43,7 +36,6 @@ fn commands() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new()
         .error_handling(ErrorHandlingMode::Throw)
         .commands(collect_commands![
-            app_version,
             boot_id,
             github::github_sign_in,
             github::github_sign_in_cancel,
@@ -52,7 +44,6 @@ fn commands() -> tauri_specta::Builder<tauri::Wry> {
             theme::set_theme,
             wadd::wadd_request,
             wadd::wadd_last_state,
-            wadd::wadd_kind,
         ])
         .events(tauri_specta::collect_events![wadd::WaddEvent])
 }

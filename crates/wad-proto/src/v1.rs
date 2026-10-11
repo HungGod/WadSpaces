@@ -771,67 +771,6 @@ pub struct LaunchLog {
     pub lines: Vec<String>,
 }
 
-/// POST /v1/builds: build a design on this machine and add it (or update
-/// it) as a workspace. Not in the TypeScript bindings: the design is the
-/// UI's own document (src/core/model.ts), which wadd reads with wad-core.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BuildRequest {
-    pub design: serde_json::Value,
-    /// The wallpaper, drawn by the app (it renders the design's canvas).
-    #[serde(default)]
-    pub wallpaper: Option<Wallpaper>,
-    /// The projects the design names, for its README.
-    #[serde(default)]
-    pub projects: Vec<serde_json::Value>,
-}
-
-/// A web app's icon to have ready: its site, and the picture the user chose
-/// for it (a data: URL or an address), if any.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct IconSource {
-    pub site: String,
-    #[serde(default)]
-    pub custom: Option<String>,
-}
-
-/// POST /v1/icons/prefetch: icons WadSpaces Client's design has, made in the
-/// background so a build finds them ready.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct IconPrefetch {
-    pub apps: Vec<IconSource>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub enum IconKind {
-    /// The site's own icon, as a silhouette card.
-    Site,
-    /// The user's picture.
-    Custom,
-    /// A card with the site's name (it gave no icon, or is on this network).
-    Fallback,
-}
-
-/// GET /v1/icons/webapp?site=&custom=: the icon a web app would get.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WebappIcon {
-    /// PNG, base64.
-    pub png: String,
-    pub kind: IconKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct Wallpaper {
-    pub file_name: String,
-    /// The image, base64.
-    pub data: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum BuildStatus {

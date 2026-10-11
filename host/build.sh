@@ -17,14 +17,16 @@
 # end (a drive copy takes longer than sudo remembers a password). The drive's
 # partitions are unmounted first if the desktop mounted them.
 #
-#   --images writing,iq-dev        with install/update: also copy these workspaces'
-#                                  images onto the drive (as their workspaces.d/<id>.toml
-#                                  names them, from this machine's podman), so the
-#                                  machine never downloads them
+#   --layers template:writing,custom:vanua-academy-dev
+#                                  with install/update: also copy these Builder
+#                                  layers' images (localhost/wadspaces-template-<id>
+#                                  and -custom-<id>, built here by images/build.sh
+#                                  --example or wadd) onto the drive, labels and
+#                                  ids intact, so the machine counts them built
 #   --bases                        with update: also copy the base image
 #                                  (localhost/wadspaces-base:trixie, built by
 #                                  images/build.sh) onto the drive; the machine
-#                                  builds designs on it. install copies it unless
+#                                  builds templates on it. install copies it unless
 #                                  --no-bases
 #   --stage-only DIR               with update: write what would go onto the
 #                                  drive into DIR instead (for testing)
@@ -56,7 +58,7 @@ SECRETS_DIR="${ROOT}/host/secrets"
 BIB_CONFIG="${ROOT}/host/bib-config.toml"
 TARGET="${1:-image}"
 DISK=""
-IMAGES=""
+LAYERS=""
 BASES=""
 STAGE_ONLY=""
 # The background job keeping sudo fresh, and a drive mounted for a copy:
@@ -69,7 +71,7 @@ if [[ "${TARGET}" == "install" || "${TARGET}" == "update" ]] && [[ $# -gt 0 && "
 fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --images) IMAGES="$2"; shift 2 ;;
+        --layers) LAYERS="$2"; shift 2 ;;
         --bases) BASES=1; shift ;;
         --no-bases) BASES=0; shift ;;
         --stage-only) STAGE_ONLY="$2"; shift 2 ;;
@@ -250,22 +252,19 @@ check_update_target() {
 
 # ------------------------------------------------------------ drive updates
 # What goes onto the drive: an OCI directory holding the host image ("host"),
-# workspace images ("ws-<id>") and base images ("base-<name>"), with layers left
+# Builder layers' images ("layer-<kind>-<id>") and base images ("base-<name>"), with layers left
 # uncompressed, so a file name is its content digest and stays the same in every
 # build that didn't change it.
 # rsync then writes only new layers. On the drive, wadspaces-import.service
 # (host/usr/libexec/wadspaces/import-updates) imports them at the next boot.
 
-# The image name wadd runs a workspace as (image = in the image's
-# workspaces.d/<id>.toml).
-workspace_target() {
-    python3 -c '
-import sys, tomllib
-try:
-    print(tomllib.load(open(sys.argv[1], "rb"))["image"])
-except FileNotFoundError:
-    sys.exit(sys.argv[2] + " is not one of the image'"'"'s workspaces (host/usr/lib/wadspaces/workspaces.d)")
-' "${ROOT}/host/usr/lib/wadspaces/workspaces.d/$1.toml" "$1"
+# A Builder layer's image name, as wadd builds it: template:<id> or custom:<id>.
+layer_image() {
+    case "$1" in
+        template:*) echo "localhost/wadspaces-template-${1#template:}:latest" ;;
+        custom:*) echo "localhost/wadspaces-custom-${1#custom:}:latest" ;;
+        *) echo "--layers: template:<id> or custom:<id>, not $1" >&2; exit 2 ;;
+    esac
 }
 
 stage_stick() {
@@ -276,13 +275,14 @@ stage_stick() {
         skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${IMAGE}" "oci:${STICK_OCI}:host"
         podman image inspect --format '{{.Id}}' "${IMAGE}" > "${STICK_OCI}/host.id"
     fi
-    local id target
-    for id in ${IMAGES//,/ }; do
-        target="$(workspace_target "${id}")"
-        podman image exists "${target}" || { echo "${target} isn't here: podman pull ${target}" >&2; exit 1; }
+    local key target tag
+    for key in ${LAYERS//,/ }; do
+        target="$(layer_image "${key}")"
+        tag="layer-${key/:/-}"
+        podman image exists "${target}" || { echo "${target} isn't built: images/build.sh --example <name>" >&2; exit 1; }
         echo ">> staging ${target}"
-        skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${target}" "oci:${STICK_OCI}:ws-${id}"
-        echo "ws-${id} ${target}" >> "${STICK_OCI}/import.list"
+        skopeo copy -q --dest-oci-accept-uncompressed-layers "containers-storage:${target}" "oci:${STICK_OCI}:${tag}"
+        echo "${tag} ${target}" >> "${STICK_OCI}/import.list"
     done
     # Bases keep their own names: wadd builds on them as they are.
     local b
@@ -332,7 +332,7 @@ case "${TARGET}" in
             check_update_target; sudo_once "updating ${DISK}"; unmount_disk
         fi
         ;;
-    *) echo "usage: host/build.sh [image|qcow2|iso|raw|install [/dev/sdX]|update [/dev/sdX]] [--images a,b] [--bases|--no-bases]" >&2; exit 2 ;;
+    *) echo "usage: host/build.sh [image|qcow2|iso|raw|install [/dev/sdX]|update [/dev/sdX]] [--layers template:a,custom:b] [--bases|--no-bases]" >&2; exit 2 ;;
 esac
 
 stage_client
@@ -365,8 +365,8 @@ case "${TARGET}" in
             --security-opt label=type:unconfined_t \
             -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
             "${IMAGE}" bootc install to-disk --wipe "${DISK}"
-        if [[ -n "${IMAGES}" || -n "${BASES}" ]]; then
-            # The host image is installed already; only the workspaces and bases go over.
+        if [[ -n "${LAYERS}" || -n "${BASES}" ]]; then
+            # The host image is installed already; only the layers and bases go over.
             stage_stick
             push_to_drive
         fi

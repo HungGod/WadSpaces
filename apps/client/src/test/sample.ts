@@ -1,8 +1,8 @@
-// The WadBuilder mockup's sample library for the app's tests, on the fake
+// The sample library for the app's tests, on the fake
 // backend: the starters (Writing, Dev), a customization of Dev with web apps
 // and Claude Code, a wadspace on each kind of base, a saved WadBrowser setup,
 // saved sign-ins (some shared) and the layer images built. Sign-in names are
-// made up; the mockup's mirror a real setup.
+// made up (images/examples has the real VanuaAcademy's).
 import { customizationLayer, templateLayer, webappId, type BrowserSetup, type Customization, type SignInRef, type Template, type WadspaceV2 } from "@core/layers";
 import type { Project } from "@core/projects";
 import { FakeBackend } from "./fakeBackend";

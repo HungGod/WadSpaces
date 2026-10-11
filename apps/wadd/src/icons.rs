@@ -11,7 +11,6 @@ use std::time::Duration;
 use futures_util::{StreamExt, stream};
 use tokio::time::Instant;
 use wad_icons::{Icon, Resolver, Source, cache::Cache, label_for, png, style};
-use wad_proto::v1::{IconKind, IconSource};
 
 /// A build waits this long for all its icons together.
 const BUILD_BUDGET: Duration = Duration::from_secs(20);
@@ -52,21 +51,6 @@ impl Icons {
         self.resolver.icon(site, custom).await
     }
 
-    /// Makes `apps`' icons in the background (into the cache).
-    pub fn prefetch(self: &Arc<Self>, apps: Vec<IconSource>) {
-        let me = self.clone();
-        tokio::spawn(async move {
-            stream::iter(apps)
-                .for_each_concurrent(AT_ONCE, |a| {
-                    let me = me.clone();
-                    async move {
-                        me.icon(&a.site, a.custom.as_deref()).await;
-                    }
-                })
-                .await;
-        });
-    }
-
     /// A build's icons, by app id, within the build's budget.
     pub async fn for_build(&self, jobs: &[IconJob]) -> (Vec<(String, Vec<u8>)>, Made) {
         let deadline = Instant::now() + BUILD_BUDGET;
@@ -97,13 +81,5 @@ impl Icons {
             })
             .collect();
         (icons, counts)
-    }
-}
-
-pub fn kind(source: Source) -> IconKind {
-    match source {
-        Source::Site => IconKind::Site,
-        Source::Custom => IconKind::Custom,
-        Source::Fallback => IconKind::Fallback,
     }
 }

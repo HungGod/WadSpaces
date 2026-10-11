@@ -40,25 +40,6 @@ enum Cmd {
         #[arg(long)]
         socket: Option<PathBuf>,
     },
-    /// Moves this machine over from the Python wadd (once; wadd.service runs
-    /// it before each start).
-    Migrate {
-        /// Only say what would happen.
-        #[arg(long)]
-        dry_run: bool,
-        /// Run it again even though it's done.
-        #[arg(long)]
-        force: bool,
-        /// As JSON.
-        #[arg(long)]
-        json: bool,
-        /// The Python wadd's workspaces.yaml (default: the config's).
-        #[arg(long)]
-        from: Option<PathBuf>,
-        /// Read the laptop profile's config.
-        #[arg(long)]
-        user: bool,
-    },
     /// Try the keyboard proxy for a while: grabs the keyboards (as root),
     /// passes typing on, and prints what Super chords would do. Every key is
     /// let go when it ends (and the kernel drops the grab if it dies).
@@ -81,7 +62,6 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Cmd::Serve { user, config, socket } => serve(user, config, socket),
-        Cmd::Migrate { dry_run, force, json, from, user } => migrate(dry_run, force, json, from, user),
         Cmd::Keys { seconds, no_grab } => keys(seconds.min(120), !no_grab),
     }
 }
@@ -114,53 +94,6 @@ fn keys(seconds: u64, grab: bool) -> ExitCode {
     drop(proxy);
     println!("done: keyboards released");
     ExitCode::SUCCESS
-}
-
-fn migrate(dry_run: bool, force: bool, json: bool, from: Option<PathBuf>, user: bool) -> ExitCode {
-    let profile = if user { Profile::User } else { Profile::System };
-    let mut cfg = match Config::load(profile, &Config::files(profile)) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("wadd: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    if let Some(f) = from {
-        cfg.daemon.legacy_config = f;
-    }
-    if dry_run {
-        let plan = wad_store::migrate::plan(&cfg.daemon.legacy_config, Some(&cfg.daemon.vendor_cloud));
-        if json {
-            println!("{}", serde_json::to_string_pretty(&plan).expect("plans serialize"));
-        } else {
-            print!("{}", plan.text());
-        }
-        return ExitCode::SUCCESS;
-    }
-    tracing_subscriber::fmt().with_env_filter(EnvFilter::new("info")).with_writer(std::io::stderr).init();
-    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("wadd: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let result = rt.block_on(async {
-        let backend = backend::connect(&cfg, profile).await.inspect_err(|e| eprintln!("wadd migrate: {e}")).ok();
-        wadd::migrate::apply(&cfg, backend.as_ref().map(|b| b as &dyn Backend), force).await
-    });
-    match result {
-        Ok(report) => {
-            for line in report {
-                println!("wadd migrate: {line}");
-            }
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("wadd migrate: {e}");
-            ExitCode::FAILURE
-        }
-    }
 }
 
 fn serve(user: bool, config: Option<PathBuf>, socket: Option<PathBuf>) -> ExitCode {

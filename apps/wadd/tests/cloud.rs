@@ -109,7 +109,7 @@ async fn env() -> Env {
         wadd::github::Parts { backend: Arc::new(fake.clone()), secrets: secrets.clone(), projects: projects.clone() },
     );
     let gh_keep = Arc::new(gh_server);
-    let builds = wadd::builds::Builds::new(reg.clone(), Arc::new(fake.clone()), bus.clone(), &state, 1);
+    let builds = wadd::builds::Builds::new(Arc::new(fake.clone()), bus.clone(), &state, 1);
     let signins = wadd::signins::SignIns::new(&state, state.join("signins-data"), 1000, reg.clone(), bus.clone());
     let make = {
         let (builds, signins, backend) = (builds.clone(), signins.clone(), Arc::new(fake.clone()));

@@ -19,7 +19,6 @@ pub mod joblog;
 pub mod launches;
 pub mod logbuf;
 pub mod metrics;
-pub mod migrate;
 pub mod network;
 pub mod projects;
 pub mod pull;
@@ -285,8 +284,7 @@ impl Server {
             bus.clone(),
             &d.state_dir,
         );
-        let builds =
-            builds::Builds::new(registry.clone(), backend.clone(), bus.clone(), &d.state_dir, d.build_min_free_gb);
+        let builds = builds::Builds::new(backend.clone(), bus.clone(), &d.state_dir, d.build_min_free_gb);
         let secrets = Arc::new(secrets::Secrets::new(backend.clone(), &d.state_dir));
         let signins =
             signins::SignIns::new(&d.state_dir, d.signins_dir.clone(), d.projects_uid, registry.clone(), bus.clone());

@@ -20,7 +20,7 @@ import type { WaddSignIn } from "./wadd";
 import type { BuildJob } from "./build";
 import type { LaunchJob } from "./launch";
 import { THIS_MACHINE, hasAccount } from "./machine";
-import type { App, FocusLock, LastSession, Machine, PublicUser } from "./types";
+import type { FocusLock, LastSession, Machine, PublicUser } from "./types";
 
 /** The machine the offline app runs on. */
 export { THIS_MACHINE } from "./machine";
@@ -49,15 +49,10 @@ export type LayerKind = "template" | "customization" | "wadspace" | "browser";
 /** A document to save: its id (a new one gets one from its name), the rest the store fills in. */
 export type New<T> = Omit<T, "id" | "owner" | "createdAt" | "updatedAt"> & { id?: string };
 
-/** A saved sign-in as the Builder offers it: one on the machine, or one a
- *  wadspace or setup already names (online, made on the machine at its first launch). */
-export type KnownSignIn = SignInRef;
-
 interface AppState {
   user: PublicUser | null;
   users: PublicUser[];
   machines: Machine[];
-  apps: App[];
   focus: FocusLock | null;
   lastSession: LastSession | null;
   /** serverNow - clientNow, so countdowns agree with the server clock. */
@@ -106,7 +101,7 @@ interface AppState {
   /** How a layer's image stands on the launch machine. */
   imageState: (key: LayerKey) => ImageState;
   /** Saved sign-ins of every kind the Builder can offer. */
-  knownSignIns: () => KnownSignIn[];
+  knownSignIns: () => SignInRef[];
 
   saveTemplate: (t: New<Template>) => Promise<Template>;
   saveCustomization: (c: New<Customization>) => Promise<Customization>;
@@ -126,10 +121,7 @@ interface AppState {
   launch: (items: RunItem[], focusMinutes: number | null) => Promise<boolean>;
 
   toast: (t: Omit<Toast, "id">) => number;
-  updateToast: (id: number, t: Partial<Toast>) => void;
   dismiss: (id: number) => void;
-  addBuild: (b: BuildJob) => void;
-  patchBuild: (id: string, b: Partial<BuildJob>) => void;
   removeBuild: (id: string) => void;
   setBuildLog: (id: string | null) => void;
   setLaunchLog: (id: string | null) => void;
@@ -219,7 +211,6 @@ export const useApp = create<AppState>((set, get) => {
     user: null,
     users: [],
     machines: [],
-    apps: [],
     focus: null,
     lastSession: null,
     clockSkew: 0,
@@ -244,8 +235,8 @@ export const useApp = create<AppState>((set, get) => {
     setLaunchTarget: (launchTarget) => set({ launchTarget }),
 
     loadAll: async () => {
-      const [users, apps] = await Promise.all([backend.users(), backend.apps()]);
-      set({ users, apps, launchTarget: backend.defaultMachineId() ?? THIS_MACHINE });
+      const users = await backend.users();
+      set({ users, launchTarget: backend.defaultMachineId() ?? THIS_MACHINE });
       follow();
       backend.listBuilds?.().then((bs) => bs.forEach(get().applyBuild)).catch(() => {});
       backend.listLaunches?.().then((ls) => ls.forEach(get().applyLaunch)).catch(() => {});
@@ -439,11 +430,8 @@ export const useApp = create<AppState>((set, get) => {
       if (t.progress === undefined) setTimeout(() => get().dismiss(id), t.action ? 10000 : 4200);
       return id;
     },
-    updateToast: (id, t) => set({ toasts: get().toasts.map((x) => (x.id === id ? { ...x, ...t } : x)) }),
     dismiss: (id) => set({ toasts: get().toasts.filter((x) => x.id !== id) }),
 
-    addBuild: (b) => set({ builds: [...get().builds, b] }),
-    patchBuild: (id, b) => set({ builds: get().builds.map((x) => (x.id === id ? { ...x, ...b } : x)) }),
     removeBuild: (id) => set({ builds: get().builds.filter((x) => x.id !== id), buildLog: get().buildLog === id ? null : get().buildLog }),
     setBuildLog: (buildLog) => set({ buildLog }),
     setLaunchLog: (launchLog) => set({ launchLog }),

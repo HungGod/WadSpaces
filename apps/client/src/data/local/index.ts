@@ -10,14 +10,13 @@
 // account when the machine is linked, clones them from GitHub with the
 // machine's github_token (/api/github) and mounts the clones when it launches
 // a wadspace (/api/launches). Tailscale is wadd's as well (/api/tailnet).
-import catalog from "@core-data/apps.json";
 import { defaultAdvanced, type WadspaceSpec } from "@core/model";
 import { cleanDraft, toProjectDoc, type Project, type ProjectDraft } from "@core/projects";
 import { presetProjects, presetWadspace } from "@core/presets";
 import { type WaddSpec } from "@core/spec";
 import { imageDataUrl } from "@/lib/images";
 import { THIS_MACHINE } from "@/lib/machine";
-import type { App, Container, ContainerRun, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
+import type { Container, ContainerRun, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
 import {
   waddEvents,
   WaddError,
@@ -238,8 +237,14 @@ export class LocalBackend implements Backend {
   deleteImage(key: LayerKey) {
     return this.machine.deleteImage(key);
   }
-  launchItems(items: RunItem[], focusMinutes: number | null, lib: LayerLibrary) {
-    return this.machine.launch(items, focusMinutes, lib);
+  /** Launched together; kept as the last session for Home's Jump back in
+   *  (a throwaway run's workspace is gone after it, so it isn't kept). */
+  async launchItems(items: RunItem[], focusMinutes: number | null, lib: LayerLibrary) {
+    const ids = await this.machine.launch(items, focusMinutes, lib);
+    const again = ids.filter((id) => !id.startsWith("run-") && !id.startsWith("browser-run-"));
+    if (again.length) lastSession.set({ kind: focusMinutes ? "focus" : "wadspace", wadspaceIds: again, machineId: THIS_MACHINE, ...(focusMinutes && { minutes: focusMinutes }) });
+    this.emit("session");
+    return ids;
   }
   machineScreen() {
     return this.machine.screen();
@@ -371,9 +376,6 @@ export class LocalBackend implements Backend {
   }
   async users() {
     return [await this.me()];
-  }
-  async apps() {
-    return catalog as App[];
   }
 
   // ------------------------------------------------------------ wadspaces

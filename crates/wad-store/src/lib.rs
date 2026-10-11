@@ -12,14 +12,13 @@
 //! <state_dir>/seeded-secrets.json      secrets seeded from the image (manager.py)
 //! ```
 //!
-//! The one that moves is the workspace list: /etc/wadspaces/workspaces.yaml
-//! (legacy.rs reads it) becomes state, `<state_dir>/workspaces.json`, at the
-//! cutover (migrate.rs plans that), and the image's own workspaces come in
-//! as updates to it (vendor.rs).
+//! The workspace list is state, `<state_dir>/workspaces.json` (it was
+//! /etc/wadspaces/workspaces.yaml, which legacy.rs still reads when there's
+//! no state yet), and the image's own workspaces come in as updates to it
+//! (vendor.rs).
 
 pub mod folders;
 pub mod legacy;
-pub mod migrate;
 pub mod projects;
 pub mod runs;
 pub mod state;

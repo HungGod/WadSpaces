@@ -66,7 +66,7 @@ fn gh(repo: &str, mount: &str, setup: &str) -> Value {
 }
 
 /// Each preset's default projects. Writing's folder must stay "Writing": the
-/// image's init-writing-vault looks for ~/Desktop/Writing.
+/// image looked for ~/Desktop/Writing.
 pub fn preset_projects(id: &str) -> Value {
     json!(match id {
         "writing" => vec![gh("Writing", "Writing", "")],

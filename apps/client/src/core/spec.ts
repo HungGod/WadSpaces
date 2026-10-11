@@ -197,39 +197,8 @@ export interface WaddSignIn {
 }
 
 export const DEFAULT_BASE_IMAGE = "localhost/wadspaces-base:trixie";
-export const SELKIES_BASE_IMAGE = "localhost/wadspaces-selkies:trixie";
-export const baseImageFor = (d: Display): string => call("baseImageFor", d);
-export const DEFAULT_IMAGE_PREFIX = "localhost/wadspaces-";
 export const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 export function newSpec(partial: Partial<CreatorSpec> = {}): CreatorSpec {
   return call("newSpec", partial);
-}
-
-export function slugify(s: string): string {
-  return call("slugify", s);
-}
-
-/** Features in install order. Web apps run in WadBrowser (in the base); only
- *  those marked chrome bring chrome. Other dependencies are installed by the
- *  feature scripts themselves (`need nodejs`), so they are not listed. */
-export function resolveFeatures(spec: Pick<CreatorSpec, "features" | "webapps">): FeatureId[] {
-  return call("resolveFeatures", spec);
-}
-
-export function volumesFor(spec: Pick<CreatorSpec, "id" | "persistConfig">): string[] {
-  return call("volumesFor", spec);
-}
-
-export function toWaddSpec(spec: CreatorSpec): WaddSpec {
-  return call("toWaddSpec", spec);
-}
-
-/** Merge a machine's runtime spec into a creator spec (for editing). */
-export function fromWaddSpec(w: WaddSpec, base?: CreatorSpec): CreatorSpec {
-  return call("fromWaddSpec", w, ...(base ? [base] : []));
-}
-
-export function validate(spec: CreatorSpec): string[] {
-  return call("validate", spec);
 }

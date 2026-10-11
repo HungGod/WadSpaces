@@ -19,7 +19,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_CORE ?? `${repo}.build/uitoo
 const base = process.argv[2] ?? "http://localhost:5199";
 const exe = process.env.CHROMIUM ?? `${homedir()}/.cache/ms-playwright/chromium-1148/chrome-linux/chrome`;
 
-const PAGES = process.env.PROBE_PAGES?.split(",") ?? ["/", "/wadspaces", "/projects", "/launch", "/manager", "/builder"];
+const PAGES = process.env.PROBE_PAGES?.split(",") ?? ["/", "/builder", "/projects", "/secrets", "/machines"];
 // Surface Pro (2736x1824 at 2x), the spike's screen, and a wider one.
 const SIZES = [
   [1368, 912],

@@ -5,16 +5,10 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { layoutJson, toBuildSpec } from "./build";
-import { localIcon } from "./catalog/icons";
-import { recipeFor } from "./catalog/recipes";
-import { bundleFiles, compose, dockerfile, quadlet, readme, wadbrowserConf, workspacesYamlSnippet } from "./generator";
 import { cases } from "./goldens";
-import { defaultAdvanced, dropFileIcons, newWadspaceId, orderedIcons } from "./model";
+import { defaultAdvanced, dropFileIcons } from "./model";
 import * as projects from "./projects";
 import { presetProjects, presetWadspace } from "./presets";
-import { baseImageFor, fromWaddSpec, newSpec, resolveFeatures, slugify, toWaddSpec, validate, volumesFor } from "./spec";
-import { tar } from "./tar";
 import { call } from "./wasm";
 import * as layers from "./layers";
 
@@ -42,33 +36,11 @@ function plain(v: unknown): unknown {
 }
 
 type Fn = (...args: never[]) => unknown;
+// The TypeScript wrappers where there are any; anything else is called in
+// the core by name (Rust-only functions the corpus still checks).
 const IMPL: Record<string, Fn> = {
   defaultAdvanced,
-  newWadspaceId: ((name: string, rand: number[]) => {
-    let i = 0;
-    return newWadspaceId(name, () => rand[i++ % rand.length]);
-  }) as Fn,
   dropFileIcons,
-  orderedIcons,
-  slugify,
-  newSpec,
-  resolveFeatures,
-  volumesFor,
-  toWaddSpec,
-  fromWaddSpec,
-  validate,
-  baseImageFor,
-  dockerfile,
-  compose,
-  readme,
-  wadbrowserConf,
-  layoutJson,
-  quadlet,
-  workspacesYamlSnippet,
-  bundleFiles,
-  toBuildSpec,
-  recipeFor,
-  localIcon,
   presetWadspace,
   presetProjects,
   validateProject: projects.validateProject,
@@ -88,7 +60,6 @@ const IMPL: Record<string, Fn> = {
   reposToProjects: projects.reposToProjects,
   projectForRepo: projects.projectForRepo,
   findProject: projects.findProject,
-  tar,
   // the Builder's layers and catalog (the data itself is JSON: catalog.ts)
   catalog: (() => call("catalog")) as Fn,
   starters: (() => call("starters")) as Fn,
@@ -131,8 +102,7 @@ const IMPL: Record<string, Fn> = {
 };
 
 export function run(fn: string, args: unknown[]): unknown {
-  const f = IMPL[fn];
-  if (!f) throw new Error(`no core function ${fn}`);
+  const f = IMPL[fn] ?? (((...a: unknown[]) => call(fn, ...a)) as Fn);
   try {
     return { out: plain(f(...(revive(args) as never[]))) };
   } catch (e) {

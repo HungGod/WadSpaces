@@ -6,7 +6,6 @@
 // fetch to 127.0.0.1:8080. The online app never calls wadd: it reaches
 // machines through the cloud relay (relay.ts).
 
-import type { WadspaceSpec } from "@core/model";
 import type { GithubRepo, Project, ProjectDraft } from "@core/projects";
 import type { WaddSpec } from "@core/spec";
 import { inTauri } from "./shell";
@@ -336,49 +335,25 @@ async function call<T>(method: Method, path: string, body?: unknown): Promise<T>
 }
 
 export const wadd = {
-  /** Which wadd answers: "rs" (the Rust one) or "py". A browser only reaches the Python one. */
-  kind: async (): Promise<"rs" | "py"> => {
-    if (!inTauri) return "py";
-    const { commands } = await import("@/gen/bindings");
-    return (await commands.waddKind()) === "rs" ? "rs" : "py";
-  },
   specs: () => call<WaddSpec[]>("GET", "/api/specs"),
   action: (id: string, action: "switch" | "start" | "stop" | "restart" | "download") =>
     call<{ ok: boolean }>("POST", `/api/workspaces/${encodeURIComponent(id)}/${action}`),
   launcher: () => call("POST", "/api/launcher"),
-  /** Start a session with these workspaces. With minutes, a focus session: the
-   *  machine locks to them until time's up. `launched`: the app launches them
-   *  itself (with their projects), so the session doesn't start them. */
-  session: (workspaces: string[], minutes: number | null, launched = false) =>
-    call<Session>("POST", "/api/session", { workspaces, minutes, ...(launched && { launched }) }),
   /** End the session; `force` ends a focus session before its time is up. */
   endSession: (force = false) => call<{ ok: boolean }>("POST", "/api/session/end", force ? { force: true } : undefined),
   enroll: (code: string) => call<{ ok: boolean; machineId: string }>("POST", "/api/enroll", { code }),
-  create: (spec: WaddSpec) => call<WaddSpec>("POST", "/api/workspaces", spec),
-  update: (id: string, spec: WaddSpec) =>
-    call<{ workspace: WaddSpec; restart_required: boolean }>("PUT", `/api/workspaces/${encodeURIComponent(id)}`, spec),
   remove: (id: string) => call("DELETE", `/api/workspaces/${encodeURIComponent(id)}`),
   diagnostics: () => call<Diagnostics>("GET", "/api/diagnostics"),
   // Wi-Fi and power (the machine app's menus)
-  network: () => call<NetworkStatus>("GET", "/api/network"),
   wifiScan: () => call<WifiNetwork[]>("GET", "/api/network/wifi"),
   wifiConnect: (ssid: string, password?: string) => call<{ ok: boolean }>("POST", "/api/network/wifi/connect", { ssid, ...(password && { password }) }),
   wifiDisconnect: () => call<{ ok: boolean }>("POST", "/api/network/wifi/disconnect"),
-  wifiForget: (ssid: string) => call<{ ok: boolean }>("POST", "/api/network/wifi/forget", { ssid }),
   power: (action: "poweroff" | "reboot") => call<{ ok: boolean }>("POST", "/api/power", { action }),
 
   /** The HUD's menu was closed: wadd puts back what was on screen. */
   hudClosed: () => call<{ ok: boolean }>("POST", "/api/hud/closed"),
   // Builds on this machine
   builds: () => call<BuildSummary[]>("GET", "/api/builds"),
-  /** The Rust wadd: build from the design (it makes the build folder itself). */
-  buildDesign: (req: { design: WadspaceSpec; wallpaper: { fileName: string; data: string }; projects: Project[] }) =>
-    call<BuildSummary>("POST", "/api/builds/design", req),
-  /** Web apps' icons for wadd to make ahead of a build (it keeps them). */
-  prefetchIcons: (apps: { site: string; custom?: string }[]) => call<{ ok: boolean }>("POST", "/api/icons/prefetch", { apps }),
-  /** The icon a web app gets in its image: a PNG (base64), and how it was made. */
-  webappIcon: (site: string, custom?: string) =>
-    call<{ png: string; kind: "site" | "custom" | "fallback" }>("POST", "/api/icons/webapp", { site, ...(custom && { custom }) }),
   build: (id: string, since = 0) => call<BuildUpdate>("GET", `/api/builds/${encodeURIComponent(id)}?since=${since}`),
   cancelBuild: (id: string) => call<BuildSummary>("DELETE", `/api/builds/${encodeURIComponent(id)}`),
   // Projects (folders mounted at launch) and launches
@@ -420,9 +395,6 @@ export const wadd = {
   tailnetLogin: () => call<{ url: string | null; online?: boolean }>("POST", "/api/tailnet/login"),
   tailnetLogout: () => call<{ ok: boolean }>("POST", "/api/tailnet/logout"),
   launches: () => call<LaunchSummary[]>("GET", "/api/launches"),
-  /** `background`: started, not switched to (one of several opened at once). */
-  createLaunch: (body: { workspace: string; projects: string[]; restart?: boolean; background?: boolean }) =>
-    call<LaunchSummary>("POST", "/api/launches", body),
   launch: (id: string, since = 0) => call<LaunchUpdate>("GET", `/api/launches/${encodeURIComponent(id)}?since=${since}`),
   cancelLaunch: (id: string) => call<LaunchSummary>("DELETE", `/api/launches/${encodeURIComponent(id)}`),
   // The WadSpaces Client's library, kept by wadd

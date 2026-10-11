@@ -56,9 +56,6 @@ export const library = {
 
 export const drafts = {
   all: () => read<Record<string, Draft>>(KEYS.drafts, {}),
-  put(d: Draft) {
-    write(KEYS.drafts, { ...drafts.all(), [d.id]: d });
-  },
   remove(id: string) {
     const all = drafts.all();
     delete all[id];

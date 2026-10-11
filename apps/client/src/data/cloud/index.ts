@@ -35,12 +35,11 @@ import {
   type Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
-import catalog from "@core-data/apps.json";
 import { defaultAdvanced, dropFileIcons } from "@core/model";
 import { cleanDraft, toProjectDoc, validateProject, type GithubRepo, type Project, type ProjectDraft } from "@core/projects";
 import { presetProjects, presetWadspace } from "@core/presets";
 import { imageDataUrl } from "@/lib/images";
-import type { App, Container, LastSession, Machine, PublicUser, Wadspace } from "@/lib/types";
+import type { Container, LastSession, Machine, PublicUser, Wadspace } from "@/lib/types";
 import {
   Unsupported,
   type Backend,
@@ -278,9 +277,6 @@ export class CloudBackend implements Backend {
     return this.profiles.get(uid)?.username ?? uid;
   }
 
-  async apps() {
-    return catalog as App[];
-  }
 
   // ------------------------------------------------------------ wadspaces
   private targetMachine() {

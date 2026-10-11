@@ -6,6 +6,11 @@
 //!   (`apps/client/src/gen/bindings.ts`) from the Tauri commands.
 //! - `wasm`: build wad-core for the UI (`apps/client/src/gen/wasm/`):
 //!   wasm-bindgen (the same version as the crate) and wasm-opt (binaryen).
+//! - `layer <layers.json> <dir>`: the build folders wadd would build a
+//!   wadspace's layers from (`{template, customization}`, as in
+//!   images/examples/), written to `<dir>/template` and
+//!   `<dir>/customization`; one line per layer on stdout:
+//!   `<key> <image ref> <FROM> <sha>`. images/build.sh --example uses it.
 
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -66,13 +71,46 @@ fn ci() -> Result<(), String> {
     run("apps/client", "npm", &["test"])
 }
 
+/// Writes a wadspace's layers' build folders (see the module's docs).
+fn layer(docs: &str, dir: &str) -> Result<(), String> {
+    let text = std::fs::read_to_string(docs).map_err(|e| format!("{docs}: {e}"))?;
+    let docs: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{docs}: {e}"))?;
+    let template = &docs["template"];
+    let mut layers = vec![("template", wad_core::layers::template_layer(template))];
+    if !docs["customization"].is_null() {
+        layers.push(("customization", wad_core::layers::customization_layer(&docs["customization"], template)));
+    }
+    for (name, l) in layers {
+        let out = PathBuf::from(dir).join(name);
+        if out.exists() {
+            std::fs::remove_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+        }
+        for f in l["files"].as_array().into_iter().flatten() {
+            let path = out.join(f["path"].as_str().unwrap_or_default());
+            std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::fs::write(&path, f["content"].as_str().unwrap_or_default())
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+        let s = |k: &str| l[k].as_str().unwrap_or_default().to_string();
+        println!("{} {} {} {}", s("key"), s("ref"), s("from"), s("sha"));
+    }
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let task = std::env::args().nth(1).unwrap_or_default();
     let result = match task.as_str() {
         "ci" => ci(),
         "bindings" => bindings(),
         "wasm" => wasm(),
-        _ => Err("usage: cargo xtask <ci|bindings|wasm>".into()),
+        "layer" => {
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            match args.as_slice() {
+                [docs, dir] => layer(docs, dir),
+                _ => Err("usage: cargo xtask layer <layers.json> <dir>".into()),
+            }
+        }
+        _ => Err("usage: cargo xtask <ci|bindings|wasm|layer>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

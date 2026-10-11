@@ -1,12 +1,12 @@
-// An in-memory backend for the WadSpaces Client's tests, after the WadBuilder
-// mockup's mock backend (data/mock): the Builder's documents, layer images
-// that build when asked (or on `finishBuilds`), launches recorded instead of
-// run, saved sign-ins, and the older wadspaces and drafts a migration moves.
+// An in-memory backend for the WadSpaces Client's tests: the Builder's
+// documents, layer images that build when asked (or on `finishBuilds`),
+// launches recorded instead of run, saved sign-ins, and the older wadspaces
+// and drafts a migration moves.
 import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
 import { customizationLayer, templateLayer } from "@core/layers";
 import type { Project, ProjectDraft } from "@core/projects";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
-import type { App, ContainerRun, Draft, FocusLock, LastSession, Machine, PublicUser, Wadspace } from "@/lib/types";
+import type { ContainerRun, Draft, FocusLock, LastSession, Machine, PublicUser, Wadspace } from "@/lib/types";
 import type { Backend, BuildProgress, Caps, LayerLibrary, LayerPatch, Topic } from "@/data/backend";
 import type { ImageRow, RunItem } from "@/data/layers";
 import { STARTERS } from "@core/catalog/catalog";
@@ -207,9 +207,6 @@ export class FakeBackend implements Backend {
   async setOnboarded() {}
   async users() {
     return [await this.me()];
-  }
-  async apps(): Promise<App[]> {
-    return [];
   }
   async listOldWadspaces() {
     return this.old;

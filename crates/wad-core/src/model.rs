@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::js::{self, Obj};
+use crate::js;
 
 /// `defaultAdvanced(tz)`.
 pub fn default_advanced(tz: &str) -> Value {
@@ -20,24 +20,6 @@ pub fn default_advanced(tz: &str) -> Value {
         "persistConfig": true,
         "autostart": false,
     })
-}
-
-const ALPHABET: &[u8; 36] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-
-/// `slug-xxxxxx`: lowercase, valid as a wadd id, a container name and an
-/// image path. `rand`: six numbers in [0, 1) (Math.random's), for the tail.
-pub fn new_wadspace_id(name: &str, rand: &[f64]) -> String {
-    let lower = name.to_lowercase();
-    let slug = js::replace_runs(&lower, |c| !(c.is_ascii_lowercase() || c.is_ascii_digit()), "-");
-    let slug = js::ascii_prefix(js::trim_dashes(&slug), 40);
-    let slug = if slug.is_empty() { "wadspace" } else { slug };
-    let tail: String = (0..6)
-        .map(|i| {
-            let r = rand.get(i % rand.len().max(1)).copied().unwrap_or(0.0);
-            ALPHABET[((r * 36.0).floor() as usize).min(35)] as char
-        })
-        .collect();
-    format!("{slug}-{tail}")
 }
 
 /// Desktops saved with cloud-file shortcuts (`kind: "file"`) lose them.
@@ -79,9 +61,4 @@ pub fn ordered_icons(layout: &Value) -> Vec<Value> {
         d.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)
     });
     icons
-}
-
-/// A layout's object form, for building on.
-pub fn layout_obj(v: &Value) -> Obj {
-    js::obj(v)
 }

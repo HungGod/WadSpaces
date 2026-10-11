@@ -39,18 +39,6 @@ fn bytes_json(b: &[u8]) -> Value {
     json!({ "$bytes": B64.encode(b) })
 }
 
-fn files_json(files: Vec<(String, generator::Content)>) -> Value {
-    Value::Array(
-        files
-            .into_iter()
-            .map(|(path, c)| match c {
-                generator::Content::Text(t) => json!({ "path": path, "content": t }),
-                generator::Content::Bytes(b) => json!({ "path": path, "content": bytes_json(&b) }),
-            })
-            .collect(),
-    )
-}
-
 /// Calls a core function by its TypeScript name with JSON arguments. Errors
 /// are what the TypeScript threw (its message), or an unknown name.
 pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
@@ -61,28 +49,14 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
     Ok(match name {
         // model
         "defaultAdvanced" => model::default_advanced(opt_s(0).unwrap_or("Etc/UTC")),
-        "newWadspaceId" => {
-            let rand: Vec<f64> = list(1).iter().filter_map(Value::as_f64).collect();
-            model::new_wadspace_id(s(0), &rand).into()
-        }
         "dropFileIcons" => model::drop_file_icons(a(0)),
         "orderedIcons" => Value::Array(model::ordered_icons(a(0))),
         // spec
         "slugify" => spec::slugify(s(0)).into(),
         "newSpec" => spec::new_spec(a(0)),
-        "resolveFeatures" => json!(spec::resolve_features(a(0))),
-        "volumesFor" => json!(spec::volumes_for(a(0))),
-        "toWaddSpec" => spec::to_wadd_spec(a(0)),
-        "fromWaddSpec" => spec::from_wadd_spec(a(0), args.get(1)),
-        "validate" => json!(spec::validate(a(0))),
-        "baseImageFor" => spec::base_image_for(opt_s(0)).into(),
         "features" => json!(spec::FEATURES),
         // generator
-        "dockerfile" => generator::dockerfile(a(0)).into(),
-        "compose" => generator::compose(a(0)).into(),
-        "readme" => generator::readme(a(0)).into(),
         "wadbrowserConf" => generator::wadbrowser_conf(a(0)).map(Value::from).unwrap_or(Value::Null),
-        "layoutJson" => build::layout_json(a(0)).into(),
         "quadlet" => generator::quadlet(
             a(0),
             opt_s(1).unwrap_or(generator::PROJECTS_DIR),
@@ -90,21 +64,6 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
             args.get(3).and_then(Value::as_u64).map(|u| u as u32),
         )
         .into(),
-        "workspacesYamlSnippet" => generator::workspaces_yaml_snippet(a(0)).into(),
-        "bundleFiles" => {
-            let wallpaper = args.get(1).and_then(bytes_of);
-            // Web apps' icons: {"<app id>": {"$bytes": png}}.
-            let icons: Vec<(String, Vec<u8>)> = args
-                .get(3)
-                .and_then(Value::as_object)
-                .into_iter()
-                .flatten()
-                .filter_map(|(id, b)| Some((id.clone(), bytes_of(b)?)))
-                .collect();
-            files_json(generator::bundle_files(a(0), wallpaper.as_deref(), opt_s(2), &icons))
-        }
-        // build
-        "toBuildSpec" => build::to_build_spec(a(0), a(1)),
         // catalog
         "recipeFor" => recipes::recipe_for(s(0), opt_s(1)).to_json(),
         "localIcon" => icons::local_icon(s(0)).into(),

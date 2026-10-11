@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Build the images every workspace is made from. The workspaces themselves are
-# built by wadd from WadSpaces Client's designs (or by hand from a downloaded build
-# folder: `podman build -t localhost/wadspaces-<id>:latest .` in it).
+# Build the base every template is made from. Templates and customizations
+# are built by wadd from the WadSpaces Client's Builder, on the machine.
 #
 #   images/build.sh                  the base
 #   images/build.sh --only base      the same
-#   images/build.sh --example writing   an example workspace (images/examples/):
-#                                    localhost/wadspaces-writing:latest, the
-#                                    bases first if they're missing
+#   images/build.sh --example vanua-academy
+#                                    an example wadspace's layers
+#                                    (images/examples/<name>/layers.json):
+#                                    its template's image, then its
+#                                    customization's, as wadd builds and
+#                                    labels them (so wadd counts them built),
+#                                    the base first if it's missing
 #   images/build.sh --no-cache       without podman's layer cache
 #   images/build.sh --push           also tag and push to ghcr.io/hunggod
 #
@@ -20,7 +23,7 @@
 #           gets a newer one)
 #
 # host/build.sh install (or update --bases) copies it onto a machine's drive:
-# the machine builds designs on it.
+# the machine builds templates and customizations on it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -31,13 +34,13 @@ EXAMPLES=()
 NO_CACHE=false
 PUSH=false
 
-usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --only) [[ $# -gt 1 && " ${ALL[*]} " == *" $2 "* ]] || { echo "--only base" >&2; exit 2; }
                 ONLY+=("$2"); shift 2 ;;
-        --example) [[ $# -gt 1 && -f "${HERE}/examples/$2/Dockerfile" ]] || {
+        --example) [[ $# -gt 1 && -f "${HERE}/examples/$2/layers.json" ]] || {
                        echo "--example: one of $(ls "${HERE}/examples" | tr '\n' ' ')" >&2; exit 2; }
                    EXAMPLES+=("$2"); shift 2 ;;
         --no-cache) NO_CACHE=true; shift ;;
@@ -132,10 +135,20 @@ for name in "${ONLY[@]}"; do
     fi
 done
 for name in "${EXAMPLES[@]}"; do
-    img="localhost/wadspaces-${name}:latest"
-    args=()
-    ${NO_CACHE} && args+=(--no-cache)
-    echo ">> building ${img} from images/examples/${name}/"
-    podman build "${args[@]}" -t "${img}" "${HERE}/examples/${name}"
+    # wad-core writes each layer's build folder (cargo xtask layer); built
+    # FROM the one before, labelled with its folder's sha and that image's id.
+    out="${ROOT}/.build/examples/${name}"
+    mkdir -p "${out}"
+    (cd "${ROOT}" && cargo run -q -p xtask -- layer "${HERE}/examples/${name}/layers.json" "${out}") > "${out}/layers.txt"
+    folders=(template customization)
+    i=0
+    while read -r key ref from sha; do
+        args=(--label "io.wadspaces.layer=${key}" --label "io.wadspaces.dockerfile-sha256=${sha}"
+              --label "io.wadspaces.from=$(podman image inspect -f '{{.Id}}' "${from}")")
+        ${NO_CACHE} && args+=(--no-cache)
+        echo ">> building ${ref} (${key}) from images/examples/${name}/"
+        podman build "${args[@]}" -t "${ref}" "${out}/${folders[i]}"
+        i=$((i + 1))
+    done < "${out}/layers.txt"
 done
 echo ">> built: ${ONLY[*]} ${EXAMPLES[*]}"

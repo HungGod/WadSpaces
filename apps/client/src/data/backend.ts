@@ -11,7 +11,7 @@
 // The UI keys people by username (owner, sharedWith, run history); each
 // backend translates to whatever it stores.
 import type { GithubRepo, Project, ProjectDraft, ProjectStatus } from "@core/projects";
-import type { App, ContainerRun, FocusLock, LastSession, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
+import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
 import type { BrowserSetup, Customization, LayerKey, Library, Template, WadspaceV2 } from "@core/layers";
 import type { ImageRow, RunItem } from "./layers";
@@ -213,7 +213,6 @@ export interface Backend {
   /** People the UI may show: you, owners of wadspaces shared with you, share candidates. */
   users(): Promise<PublicUser[]>;
 
-  apps(): Promise<App[]>;
 
   /** The wadspaces from before the layers, for the migration (data/migrate.ts). */
   listOldWadspaces(): Promise<Wadspace[]>;

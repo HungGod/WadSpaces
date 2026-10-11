@@ -18,7 +18,7 @@ export function presets(): CreatorSpec[] {
 export const preset = (id: string) => presets().find((p) => p.id === id);
 
 /** Each preset's default projects. Writing's folder must stay "Writing": the
- *  image's init-writing-vault looks for ~/Desktop/Writing. */
+ *  image looked for ~/Desktop/Writing. */
 export const presetProjects = (id: string): ProjectDraft[] => call("presetProjects", id);
 
 /** A preset as a Builder wadspace: its real desktop plus its build and run

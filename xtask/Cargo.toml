@@ -6,3 +6,5 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+wad-core.workspace = true
+serde_json.workspace = true

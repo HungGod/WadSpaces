@@ -297,3 +297,18 @@ pub fn ws(id: &str, image: &str, display: Display, port: Option<u16>) -> Workspa
         ephemeral: false,
     }
 }
+
+/// The file names in a tar (a build folder the fake was given).
+pub fn tar_names(tar: &[u8]) -> Vec<String> {
+    let mut out = vec![];
+    let mut at = 0;
+    while at + 512 <= tar.len() && tar[at] != 0 {
+        let head = &tar[at..at + 512];
+        let name = String::from_utf8_lossy(&head[..100]).trim_end_matches('\0').to_string();
+        let size =
+            usize::from_str_radix(String::from_utf8_lossy(&head[124..135]).trim_matches(['\0', ' ']), 8).unwrap_or(0);
+        out.push(name);
+        at += 512 + size.div_ceil(512) * 512;
+    }
+    out
+}

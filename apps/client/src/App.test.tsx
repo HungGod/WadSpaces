@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
-// The WadSpaces Client as you use it, after the WadBuilder mockup's own tests:
-// Step 1 lists template stacks, Step 2 customizes a template and saves it as
-// a customization, Step 3 constructs a wadspace with secrets, and the
-// sidebar's launcher launches them. Against the fake backend with the
-// mockup's sample library (test/sample.ts): what's launched is what the fake
-// records.
+// The WadSpaces Client as you use it: Step 1 lists template stacks, Step 2
+// customizes a template and saves it as a customization, Step 3 constructs a
+// wadspace with secrets, and the sidebar's launcher launches them. Against
+// the fake backend with the sample library (test/sample.ts): what's launched
+// is what the fake records.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";

@@ -146,22 +146,13 @@ fn method(m: &str) -> Method {
 /// What the UI might send with each call (enough to get past the router).
 fn body_for(m: &str, path: &str) -> Option<Value> {
     Some(match (m, path) {
-        ("POST", "/api/session") => json!({"workspaces": ["writing"], "minutes": 25}),
         ("POST", "/api/enroll") => json!({"code": "ABC123"}),
-        ("POST", "/api/workspaces") | ("PUT", "/api/workspaces/writing") => {
-            json!({"id": "writing", "name": "W", "image": "i", "display": "host"})
-        }
-        ("POST", "/api/network/wifi/connect") | ("POST", "/api/network/wifi/forget") => json!({"ssid": "Home"}),
+        ("POST", "/api/network/wifi/connect") => json!({"ssid": "Home"}),
         ("POST", "/api/power") => json!({"action": "reboot"}),
-        ("POST", "/api/builds") => json!({"workspace": {}, "base_image": "x"}),
-        ("POST", "/api/icons/prefetch") => json!({"apps": []}),
-        // On this network: a card with its name, nothing fetched.
-        ("POST", "/api/icons/webapp") => json!({"site": "http://127.0.0.1:9/"}),
         ("POST", "/api/projects") | ("PUT", "/api/projects/writing") => {
             json!({"name": "N", "mountName": "N", "source": {"kind": "git", "url": "https://github.com/o/n"}})
         }
         ("POST", "/api/github/repos") => json!({"name": "n"}),
-        ("POST", "/api/launches") => json!({"workspace": "writing", "projects": []}),
         ("PUT", p) if p.starts_with("/api/library/") => json!({"name": "doc"}),
         _ => return None,
     })
@@ -241,30 +232,10 @@ async fn shapes_the_ui_reads() {
     assert_eq!(specs[0]["container_name"], "wad-writing");
     assert_eq!(specs[0]["env"]["PUID"], "1000");
     // A session, then ending it (forced: it's a focus one).
-    let sess = r(Method::Post, "/api/session", Some(json!({"workspaces": ["writing"], "minutes": 25}))).await.unwrap();
+    let sess = r(Method::Post, "/v1/session", Some(json!({"workspaces": ["writing"], "minutes": 25}))).await.unwrap();
     assert_eq!((sess["mode"].as_str(), sess["minutes"].as_u64()), (Some("focus"), Some(25)));
     assert_eq!(r(Method::Post, "/api/session/end", None).await.unwrap_err().status, 409);
     r(Method::Post, "/api/session/end", Some(json!({"force": true}))).await.unwrap();
-    // A workspace edited as a spec, answered as one.
-    let up = r(
-        Method::Put,
-        "/api/workspaces/writing",
-        Some(json!({"id": "writing", "name": "Writing 2", "image": "i", "display": "host", "hotkey": 1})),
-    )
-    .await
-    .unwrap();
-    assert_eq!((up["workspace"]["name"].as_str(), up["restart_required"].as_bool()), (Some("Writing 2"), Some(false)));
-    assert_eq!(
-        r(
-            Method::Put,
-            "/api/workspaces/writing",
-            Some(json!({"id": "writing", "name": "W", "image": "i", "display": "stream"}))
-        )
-        .await
-        .unwrap_err()
-        .status,
-        422
-    ); // streamed, with no port
     // Projects and their status.
     let p = r(Method::Post, "/api/projects", Some(json!({"name": "Notes", "mountName": "Notes", "source": {"kind": "git", "url": "https://github.com/o/notes"}}))).await.unwrap();
     let id = p["id"].as_str().unwrap().to_string();
@@ -272,16 +243,11 @@ async fn shapes_the_ui_reads() {
     assert_eq!((st["exists_on_disk"].as_bool(), st["available"].as_bool()), (Some(false), Some(true)));
     let gone = e.rs.request(Method::Delete, &format!("/api/projects/{id}?purge=1"), None).await.unwrap();
     assert_eq!((gone["deleted"].as_bool(), gone["purged"].as_bool()), (Some(true), Some(false)));
-    // Builds: the Rust wadd builds from the design.
-    assert_eq!(r(Method::Post, "/api/builds", Some(json!({}))).await.unwrap_err().status, 409);
-    let b = r(Method::Post, "/api/builds/design", Some(json!({"design": {"id": "trybuild", "name": "T", "layout": {"wallpaper": {"type": "color", "value": "#000"}, "icons": []}, "advanced": {"display": "host", "hotkey": 3}}}))).await.unwrap();
-    assert_eq!((b["wsId"].as_str(), b["installed"].as_bool()), (Some("trybuild"), Some(false)));
-    // Diagnostics, logs, secrets: the Python names.
+    // Diagnostics and logs: the Python names.
     let d = r(Method::Get, "/api/diagnostics", None).await.unwrap();
     assert_eq!(d["kiosk"]["view"], "launcher");
     assert!(d["disk"]["free_bytes"].as_u64().is_some() && d["podman"]["error"] == "no machine in tests");
     assert!(r(Method::Get, "/api/logs/daemon?lines=5", None).await.unwrap()["lines"].is_array());
-    assert_eq!(r(Method::Get, "/api/secrets", None).await.unwrap_err().status, 503);
     // Tailscale is parked.
     assert_eq!(r(Method::Get, "/api/tailnet", None).await.unwrap_err().status, 404);
 }

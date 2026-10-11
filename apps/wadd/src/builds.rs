@@ -1,44 +1,33 @@
-//! Building a design's image on this machine (builds.py, with the build
-//! folder made here): WadSpaces Client sends the design and its wallpaper (the
-//! app draws it); wad-core turns that into the build folder (Dockerfile,
-//! root/), with its web apps' icons made here first (icons.rs: nothing is
-//! fetched inside the build), which podman builds as
-//! localhost/wadspaces-<id>:latest on the design's base. The workspace is then added, or the one already here
-//! updated: it keeps its own icon, extra volumes and projects, and takes the
-//! design's settings for the rest.
+//! Building the Builder's layers on this machine: a template's image FROM
+//! the base, a customization's FROM its template's, each from wad-core's
+//! build folder (with its web apps' icons made here first, icons.rs: nothing
+//! is fetched inside the build). Each image is labelled with the sha of its
+//! build folder and the id of the image it was built on, which is how
+//! WadSpaces tells a built layer from a changed one. A customization whose
+//! template image is missing, or older than the template, builds the
+//! template first in the same job. Neither adds a workspace: a wadspace
+//! installs on its layer's image (images.rs, with `merged`).
 //!
-//! The merged workspace list is checked as a whole before anything is built
-//! (ids, ports, hotkeys), and again when it's installed. One build runs at a
-//! time; bases are never downloaded (they reach a machine on the update
-//! drive), and a build needs some free disk. Progress goes out as `build`
-//! events: the job, plus the log lines since the last event.
-//!
-//! The Builder's layers build here too (`create_layer`): a template's image
-//! FROM the base, a customization's FROM its template's. Each is labelled
-//! with the sha of its build folder (wad-core's layers) and the id of the
-//! image it was built on, which is how WadSpaces tells a built layer from a
-//! changed one. A customization whose template image is missing, or older
-//! than the template, builds the template first in the same job. Neither
-//! adds a workspace: a wadspace installs on its layer's image (images.rs).
+//! One build runs at a time; bases are never downloaded (they reach a
+//! machine on the update drive), and a build needs some free disk. Progress
+//! goes out as `build` events: the job, plus the log lines since the last
+//! event.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use base64::Engine;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use wad_core::generator::Content;
-use wad_proto::v1::{Build, BuildLog, BuildRequest, BuildStatus, Event, LayerBuildRequest, Skipped, Workspace};
+use wad_proto::v1::{Build, BuildLog, BuildStatus, Event, LayerBuildRequest, Workspace};
 use wad_proto::{ApiError, ErrorCode};
 
 use crate::backend::Backend;
 use crate::events::Bus;
 use crate::icons::{IconJob, Icons};
 use crate::joblog::Lines;
-use crate::registry::Registry;
 
 pub const MAX_CONTEXT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_LINES: usize = 4000;
@@ -71,42 +60,6 @@ fn step(line: &str) -> Option<(u32, u32)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-/// What a design makes: its build spec (the build folder's makings), the
-/// workspace entry (workspaces.yaml's shape), what it left out, and the
-/// icons its web apps need.
-pub struct Made {
-    pub spec: Value,
-    wallpaper: Option<Vec<u8>>,
-    dockerfile: Option<String>,
-    pub workspace: Value,
-    pub base_image: String,
-    pub skipped: Vec<Skipped>,
-    pub icons: Vec<IconJob>,
-}
-
-impl Made {
-    /// The build folder as a tar, with the web apps' icons (PNG, by app id).
-    pub fn context(&self, icons: &[(String, Vec<u8>)]) -> Result<Vec<u8>, ApiError> {
-        let files =
-            wad_core::generator::bundle_files(&self.spec, self.wallpaper.as_deref(), self.dockerfile.as_deref(), icons);
-        let entries: Vec<wad_core::tar::Entry> = files
-            .iter()
-            .map(|(path, c)| wad_core::tar::Entry {
-                path,
-                content: match c {
-                    Content::Text(t) => t.as_bytes(),
-                    Content::Bytes(b) => b,
-                },
-            })
-            .collect();
-        let context = wad_core::tar::tar(&entries).map_err(bad)?;
-        if context.len() > MAX_CONTEXT_BYTES {
-            return Err(bad("build folder too big (64 MB max)"));
-        }
-        Ok(context)
-    }
-}
-
 /// The icons a spec's web apps need: their sites, and the user's pictures.
 fn icon_jobs(spec: &Value) -> Vec<IconJob> {
     spec["webapps"]
@@ -123,61 +76,6 @@ fn icon_jobs(spec: &Value) -> Vec<IconJob> {
             })
         })
         .collect()
-}
-
-/// The build folder and workspace entry for a design (the app's
-/// buildRequest, done here).
-pub fn make(req: &BuildRequest) -> Result<Made, ApiError> {
-    if !req.design.is_object() {
-        return Err(bad("the design is a JSON object"));
-    }
-    let wallpaper = match &req.wallpaper {
-        Some(w) => Some((
-            w.file_name.clone(),
-            base64::engine::general_purpose::STANDARD.decode(&w.data).map_err(|e| bad(format!("wallpaper: {e}")))?,
-        )),
-        None => None,
-    };
-    let opts = json!({
-        "wallpaperFile": wallpaper.as_ref().map(|(n, _)| n.clone()),
-        "projects": req.projects,
-    });
-    let built = wad_core::build::to_build_spec(&req.design, &opts);
-    let spec = &built["spec"];
-    let problems = wad_core::spec::validate(spec);
-    if !problems.is_empty() {
-        return Err(bad(problems.join(" ")));
-    }
-    let skipped = built["skipped"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|s| Skipped {
-            label: s.get("label").and_then(Value::as_str).unwrap_or_default().into(),
-            reason: s.get("reason").and_then(Value::as_str).unwrap_or_default().into(),
-        })
-        .collect();
-    let base_image = spec.get("baseImage").and_then(Value::as_str).unwrap_or_default().to_string();
-    if !is_local_base(&base_image) && !base_image.contains('/') {
-        return Err(bad(format!("bad base image {base_image:?}")));
-    }
-    let dockerfile =
-        req.design.get("dockerfile").and_then(Value::as_str).filter(|d| !d.trim().is_empty()).map(String::from);
-    let mut workspace = wad_core::spec::to_wadd_spec(spec);
-    let id = workspace.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
-    workspace["image"] = format!("localhost/wadspaces-{id}:latest").into();
-    let made = Made {
-        icons: icon_jobs(spec),
-        spec: spec.clone(),
-        wallpaper: wallpaper.map(|(_, b)| b),
-        dockerfile,
-        workspace,
-        base_image,
-        skipped,
-    };
-    // Too big already without its icons: say so now, not when it runs.
-    made.context(&[])?;
-    Ok(made)
 }
 
 /// The workspace list with `fresh` added, or merged into the one already
@@ -318,21 +216,11 @@ fn layer_context(step: &LayerStep, icons: &[(String, Vec<u8>)]) -> Result<Vec<u8
     Ok(context)
 }
 
-/// What a job does when it runs.
-enum Work {
-    /// A design: its build folder, then the workspace it adds.
-    Design {
-        made: Box<Made>,
-        workspace: Value,
-    },
-    Layers(Vec<LayerStep>),
-}
-
 struct Job {
     build: Build,
     log: Lines,
-    /// Taken when it starts.
-    work: Option<Work>,
+    /// The images to build, in order; taken when it starts.
+    work: Option<Vec<LayerStep>>,
     /// Which of how many images is building now (for the progress bar).
     group: u32,
     groups: u32,
@@ -340,7 +228,6 @@ struct Job {
 
 pub struct Builds {
     me: Weak<Builds>,
-    registry: Arc<Registry>,
     backend: Arc<dyn Backend>,
     bus: Bus,
     icons: Arc<Icons>,
@@ -354,18 +241,11 @@ pub struct Builds {
 }
 
 impl Builds {
-    pub fn new(
-        registry: Arc<Registry>,
-        backend: Arc<dyn Backend>,
-        bus: Bus,
-        state_dir: &Path,
-        min_free_gb: u64,
-    ) -> Arc<Self> {
-        Self::with_icons(registry, backend, bus, state_dir, min_free_gb, Icons::new(&state_dir.join("webapp-icons")))
+    pub fn new(backend: Arc<dyn Backend>, bus: Bus, state_dir: &Path, min_free_gb: u64) -> Arc<Self> {
+        Self::with_icons(backend, bus, state_dir, min_free_gb, Icons::new(&state_dir.join("webapp-icons")))
     }
 
     pub fn with_icons(
-        registry: Arc<Registry>,
         backend: Arc<dyn Backend>,
         bus: Bus,
         state_dir: &Path,
@@ -374,7 +254,6 @@ impl Builds {
     ) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
-            registry,
             backend,
             bus,
             icons,
@@ -391,56 +270,6 @@ impl Builds {
     /// Web apps' icons (the API's prefetch and preview use them too).
     pub fn icons(&self) -> Arc<Icons> {
         self.icons.clone()
-    }
-
-    /// Makes the build folder and checks the workspace it would add, then
-    /// starts (it waits its turn behind another build).
-    pub fn create(&self, req: &BuildRequest) -> Result<Build, ApiError> {
-        let made = make(req)?;
-        let ws_id = made.workspace["id"].as_str().unwrap_or_default().to_string();
-        let busy = |j: &Job| j.build.ws_id == ws_id && !j.build.status.finished();
-        if self.jobs.lock().unwrap().iter().any(busy) {
-            return Err(ApiError::new(ErrorCode::Conflict, format!("{ws_id} is already building")));
-        }
-        let (_, updated) = merged(&self.registry.workspaces(), &made.workspace).map_err(bad)?;
-        let id = wad_store::projects::new_id()[..12].to_lowercase();
-        let build = Build {
-            id: id.clone(),
-            ws_id: ws_id.clone(),
-            name: made.workspace["name"].as_str().unwrap_or(&ws_id).to_string(),
-            status: BuildStatus::Queued,
-            progress: 0.0,
-            error: None,
-            image: made.workspace["image"].as_str().unwrap_or_default().to_string(),
-            base_image: made.base_image.clone(),
-            created: now(),
-            started: None,
-            finished: None,
-            updated,
-            restart_required: false,
-            skipped: made.skipped.clone(),
-            line_count: 0,
-            layer: None,
-        };
-        let mut log = Lines::new(&self.log_dir, &id, MAX_LINES);
-        for s in &build.skipped {
-            log.push(&format!("⚠ left out {}: {}", s.label, s.reason));
-        }
-        let workspace = made.workspace.clone();
-        let job = Job {
-            build: build.clone(),
-            log,
-            work: Some(Work::Design { made: Box::new(made), workspace }),
-            group: 0,
-            groups: 1,
-        };
-        self.jobs.lock().unwrap().push(job);
-        self.trim();
-        self.publish(&id, true);
-        let me = self.me.upgrade().expect("builds outlive their calls");
-        let task_id = id.clone();
-        self.tasks.lock().unwrap().insert(id, tokio::spawn(async move { me.run(task_id).await }));
-        Ok(build)
     }
 
     /// Builds a layer's image (a customization's, its template's first when
@@ -474,13 +303,7 @@ impl Builds {
         };
         let log = Lines::new(&self.log_dir, &id, MAX_LINES);
         let groups = steps.len() as u32;
-        self.jobs.lock().unwrap().push(Job {
-            build: build.clone(),
-            log,
-            work: Some(Work::Layers(steps)),
-            group: 0,
-            groups,
-        });
+        self.jobs.lock().unwrap().push(Job { build: build.clone(), log, work: Some(steps), group: 0, groups });
         self.trim();
         self.publish(&id, true);
         let me = self.me.upgrade().expect("builds outlive their calls");
@@ -612,14 +435,14 @@ impl Builds {
         self.publish(&id, true);
     }
 
-    /// The build (and a design's install); the image's tag when it's done.
+    /// The build; the last image's tag when it's done.
     async fn go(&self, id: &str) -> Result<String, String> {
-        let (work, tag, base) = {
+        let steps = {
             let mut jobs = self.jobs.lock().unwrap();
             let j = jobs.iter_mut().find(|j| j.build.id == id).ok_or("the build is gone")?;
             j.build.status = BuildStatus::Building;
             j.build.started = Some(now());
-            (j.work.take().ok_or("the build already ran")?, j.build.image.clone(), j.build.base_image.clone())
+            j.work.take().ok_or("the build already ran")?
         };
         self.publish(id, true);
         if let Some(free) = self.backend.free_gb().await
@@ -627,10 +450,7 @@ impl Builds {
         {
             return Err(format!("only {free:.1} GB free; building needs at least {} GB", self.min_free_gb));
         }
-        match work {
-            Work::Design { made, workspace } => self.go_design(id, *made, workspace, tag, base).await,
-            Work::Layers(steps) => self.go_layers(id, steps).await,
-        }
+        self.go_layers(id, steps).await
     }
 
     /// A layer build: each image in turn (a template only when needed),
@@ -684,58 +504,6 @@ impl Builds {
             last = step.tag;
         }
         Ok(last)
-    }
-
-    async fn go_design(
-        &self,
-        id: &str,
-        made: Made,
-        workspace: Value,
-        tag: String,
-        base: String,
-    ) -> Result<String, String> {
-        // Bases aren't downloaded: they come on the update drive.
-        if !self.backend.image_exists(&base).await? {
-            let hint =
-                if is_local_base(&base) { " — update the drive with host/build.sh update --bases" } else { "" };
-            return Err(format!("base image {base} is not on this machine{hint}"));
-        }
-        let icons = if made.icons.is_empty() {
-            vec![]
-        } else {
-            let (icons, how) = self.icons.for_build(&made.icons).await;
-            self.line(
-                id,
-                &format!(
-                    "» icons for {} web apps: {} from their sites, {} chosen, {} with their names",
-                    icons.len(),
-                    how.site,
-                    how.custom,
-                    how.fallback
-                ),
-            );
-            icons
-        };
-        let context = made.context(&icons).map_err(|e| e.message)?;
-        self.line(id, &format!("» building {tag} on {base}"));
-        let me = self.me.upgrade().ok_or("wadd is stopping")?;
-        let line_id = id.to_string();
-        self.backend.build(context, &tag, &base, Default::default(), Box::new(move |l| me.line(&line_id, l))).await?;
-        // Install: the list may have changed while it built, so merge again.
-        let ws_id = workspace["id"].as_str().unwrap_or_default().to_string();
-        let (list, updated) = merged(&self.registry.workspaces(), &workspace)?;
-        self.registry.set_workspaces(list).await?;
-        self.registry.image_here(&ws_id);
-        // The image changed under the same name: a running container has the
-        // old one until it restarts.
-        let running = self.registry.state(&ws_id).is_some_and(|s| s.container == "running");
-        self.with(id, |b| {
-            b.updated = updated;
-            b.restart_required = updated && running;
-        });
-        let what = if updated { "updated" } else { "added" };
-        self.line(id, &format!("{what} the workspace {ws_id}"));
-        Ok(tag)
     }
 }
 

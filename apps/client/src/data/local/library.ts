@@ -46,13 +46,6 @@ export class LocalLibrary {
     this.wadspaces[e.spec.id] = e;
   }
 
-  async remove(id: string): Promise<void> {
-    if (!this.wadspaces[id]) return;
-    if (this.inWadd) await wadd.libraryDelete("wadspaces", id).catch(() => {});
-    else legacyLibrary.remove(id);
-    delete this.wadspaces[id];
-  }
-
   drafts(): Draft[] {
     return Object.values(this.draftMap);
   }

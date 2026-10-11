@@ -106,18 +106,8 @@ export function defaultAdvanced(tz?: string): Advanced {
   return call("defaultAdvanced", ...(tz ? [tz] : []));
 }
 
-/** Lowercase `slug-xxxxxx`: valid as a wadd id, a container name and an image path. */
-export function newWadspaceId(name: string, rand: () => number = Math.random): string {
-  return call("newWadspaceId", name, Array.from({ length: 6 }, rand));
-}
-
 /** Desktops saved with cloud-file shortcuts (`kind: "file"`, removed with
  *  cloud files) lose them when they're loaded. */
 export function dropFileIcons(layout: Layout): Layout {
   return call("dropFileIcons", layout);
-}
-
-/** Icons in desktop order: by grid cell (column-major), else top-to-bottom, left-to-right. */
-export function orderedIcons(layout: Layout): LayoutIcon[] {
-  return call("orderedIcons", layout);
 }

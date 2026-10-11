@@ -92,8 +92,8 @@ bar), under WadBrowser's logo on the machine's own WadBrowser. `WADBROWSER_DEVTO
 - `spike/instances.sh` checks two instances side by side, a setup's
   ephemeral profile leaving nothing behind, and a saved sign-in's cookie
   landing in its folder.
-- `apps/wadd/dev/try-build.sh` builds a design with web apps through wadd and
-  opens one, and a link, in a real workspace.
+- `apps/wadd/dev/try-layers.sh` builds a customization with a web app
+  through wadd and opens the wadspace on it in a real workspace.
 
 ## Inside wadspaces, and on the machine
 

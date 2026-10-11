@@ -100,16 +100,13 @@ fn a_clash_with_the_machines_workspaces_is_left_out_and_retried() {
 }
 
 /// The image's own workspaces (host/usr/lib/wadspaces/workspaces.d) read
-/// and check.
+/// and check: the machine's apps alone (wadspaces are the Builder's now).
 #[test]
 fn the_images_workspaces_are_valid() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../host/usr/lib/wadspaces/workspaces.d");
     let v = read(&dir).unwrap();
     let ids: Vec<&str> = v.iter().map(|w| w.workspace.id.as_str()).collect();
-    assert_eq!(
-        ids,
-        ["browser-focus", "browser", "iq-dev", "kale-b", "kale-p", "terminal", "vanua-academy", "wad-c", "writing"]
-    );
+    assert_eq!(ids, ["browser-focus", "browser", "terminal"]);
     for w in &v {
         let w = &w.workspace;
         assert_eq!(w.display, Display::Host, "{}", w.id);

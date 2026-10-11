@@ -1,5 +1,4 @@
-//! The layers' rules, ported from the WadBuilder mockup's model tests
-//! (src/data/wad/model.test.ts), on the same sample library: the Writing and
+//! The layers' rules, on a sample library: the Writing and
 //! Dev starters, a Dev customization with seven web apps, and a wadspace on
 //! each kind of base. Secret names here are made up.
 

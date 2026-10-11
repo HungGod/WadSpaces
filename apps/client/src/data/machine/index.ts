@@ -158,9 +158,6 @@ export class MachineBackend implements Backend {
   users() {
     return this.cloud.users();
   }
-  apps() {
-    return this.cloud.apps();
-  }
 
   /** Who this machine is linked to (wadd's enrollment). */
   linkInfo() {

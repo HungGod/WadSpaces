@@ -6,8 +6,6 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
-	/**  The app's version, for Settings and support. */
-	appVersion: () => __TAURI_INVOKE<string>("app_version"),
 	/**
 	 *  This boot's id (the kernel's, new on every boot): the UI forgets the
 	 *  account sign-in when it changes, so every boot starts at sign-in.
@@ -42,11 +40,6 @@ export const commands = {
 	waddRequest: (method: Method, path: string, body: unknown | null) => __TAURI_INVOKE<Json>("wadd_request", { method, path, body }),
 	/**  The last `state` event (wadd's snapshot), if one has arrived. */
 	waddLastState: () => __TAURI_INVOKE<unknown | null>("wadd_last_state"),
-	/**
-	 *  Which wadd the app talks to: "rs" or "py" (builds differ: the Rust one
-	 *  builds from the design).
-	 */
-	waddKind: () => __TAURI_INVOKE<string>("wadd_kind"),
 };
 
 /** Events */

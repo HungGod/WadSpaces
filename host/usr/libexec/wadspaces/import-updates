@@ -1,7 +1,7 @@
 #!/bin/bash
-# Imports what `host/build.sh update|install --images|--bases` copied onto this
+# Imports what `host/build.sh update|install --layers|--bases` copied onto this
 # drive (/var/lib/wadspaces/incoming, an OCI directory), as import.list says:
-#   ws-<id>      workspace images -> podman storage, under the name wadd runs
+#   layer-<kind>-<id>  Builder layers' images -> podman storage, as wadd names them
 #   base-<name>  base images -> podman storage as localhost/wadspaces-<name>:trixie
 #   host     a new system image -> `bootc switch` (or `bootc upgrade` when this
 #            machine already follows incoming:host), checked, then one restart into it
@@ -20,7 +20,7 @@ while read -r tag target; do
     if ! skopeo copy -q "oci:${IN}:${tag}" "containers-storage:${target}"; then
         case "${tag}" in
             base-*) say "could not import ${target}; building on this machine needs it, so copy it again" ;;
-            *) say "could not import ${target}; it will be downloaded on first use instead" ;;
+            *) say "could not import ${target}; it will be built on this machine when first needed instead" ;;
         esac
     fi
 done < "${IN}/import.list"
