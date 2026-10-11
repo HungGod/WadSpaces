@@ -115,7 +115,10 @@ fn an_app_is_a_program_not_an_image() {
         (json!({"id": "t", "name": "T", "kind": "app", "exec": []}), "exec must name a program"),
         (json!({"id": "t", "name": "T", "kind": "app", "exec": ["x"], "image": "i"}), "an app has no image"),
         (json!({"id": "t", "name": "T", "kind": "app", "exec": ["x"], "volumes": ["a:/b"]}), "an app has no volumes"),
-        (json!({"id": "t", "name": "T", "kind": "app", "exec": ["x"], "display": "stream", "port": 3100}), "display must be 'host'"),
+        (
+            json!({"id": "t", "name": "T", "kind": "app", "exec": ["x"], "display": "stream", "port": 3100}),
+            "display must be 'host'",
+        ),
         (json!({"id": "t", "name": "T", "kind": "vm", "exec": ["x"]}), "kind must be one of"),
         (json!({"id": "t", "name": "T", "image": "i", "exec": ["x"]}), "only an app has exec"),
         (json!({"id": "t", "name": "T", "kind": "app", "exec": ["x\ny"]}), "control character"),

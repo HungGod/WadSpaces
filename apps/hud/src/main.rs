@@ -485,7 +485,8 @@ impl Hud {
             row.append(w);
         }
         row.append(&notes_button);
-        for w in [power_button.upcast_ref::<gtk::Widget>(), battery.upcast_ref(), clock.upcast_ref(), collapse.upcast_ref()]
+        for w in
+            [power_button.upcast_ref::<gtk::Widget>(), battery.upcast_ref(), clock.upcast_ref(), collapse.upcast_ref()]
         {
             row.append(w);
         }
@@ -1204,7 +1205,11 @@ impl Hud {
 
     /// Lit while WadNotes is on screen.
     fn update_notes_button(&self) {
-        if self.notes.showing() { self.notes_button.add_css_class("on") } else { self.notes_button.remove_css_class("on") }
+        if self.notes.showing() {
+            self.notes_button.add_css_class("on")
+        } else {
+            self.notes_button.remove_css_class("on")
+        }
     }
 
     fn open_notes_menu_soon(self: &Rc<Self>) {
@@ -2034,10 +2039,19 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
     hud.toggle_clips();
     // WadNotes: on Writing, every section on, and the reminder due.
     hud.state.borrow_mut().view = Some("writing".into());
-    hud.state.borrow_mut().workspaces = [("writing", "Writing", None), ("iq-dev", "IntelligenceQuest Dev", None), ("terminal", "Terminal", Some("app"))]
-        .into_iter()
-        .map(|(id, name, kind)| model::Space { id: id.into(), name: name.into(), kind: kind.map(String::from), enabled: true })
-        .collect();
+    hud.state.borrow_mut().workspaces = [
+        ("writing", "Writing", None),
+        ("iq-dev", "IntelligenceQuest Dev", None),
+        ("terminal", "Terminal", Some("app")),
+    ]
+    .into_iter()
+    .map(|(id, name, kind)| model::Space {
+        id: id.into(),
+        name: name.into(),
+        kind: kind.map(String::from),
+        enabled: true,
+    })
+    .collect();
     hud.follow_view();
     for s in [notes::Section::Notes, notes::Section::Tasks, notes::Section::Calendar] {
         hud.show_section(s, true);
@@ -2169,7 +2183,8 @@ fn main() -> glib::ExitCode {
         if p.collapsed {
             hud.set_collapsed(true, false);
         }
-        for (s, on) in [(notes::Section::Notes, p.notes), (notes::Section::Tasks, p.tasks), (notes::Section::Calendar, p.calendar)]
+        for (s, on) in
+            [(notes::Section::Notes, p.notes), (notes::Section::Tasks, p.tasks), (notes::Section::Calendar, p.calendar)]
         {
             if on {
                 hud.show_section(s, true);

@@ -84,8 +84,7 @@ impl Reminders {
 
     /// Forgets what's about events that are gone or long over.
     pub fn prune(&mut self, events: &[Event], now: NaiveDateTime) {
-        let live: Vec<String> =
-            events.iter().filter(|e| e.over_at() + STALE > now).map(Self::key).collect();
+        let live: Vec<String> = events.iter().filter(|e| e.over_at() + STALE > now).map(Self::key).collect();
         self.dismissed.retain(|k| live.contains(k));
         self.snoozed.retain(|k, _| live.contains(k));
     }

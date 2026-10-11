@@ -284,7 +284,9 @@ fn scope_rules() -> String {
     wad_notes::PALETTE
         .iter()
         .enumerate()
-        .map(|(i, (_, hex))| format!(".dot.scope-{i} {{ color: {hex}; }}\n.stripe.scope-{i} {{ background: {hex}; }}\n"))
+        .map(|(i, (_, hex))| {
+            format!(".dot.scope-{i} {{ color: {hex}; }}\n.stripe.scope-{i} {{ background: {hex}; }}\n")
+        })
         .collect()
 }
 

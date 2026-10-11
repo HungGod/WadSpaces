@@ -323,7 +323,8 @@ async fn web_apps_get_their_icons_before_the_build() {
 #[test]
 fn a_design_cannot_take_an_apps_id() {
     let current = vec![common::app("terminal", "/usr/bin/foot"), ws("w", "i", Display::Host, None)];
-    let fresh = json!({"id": "terminal", "name": "T", "image": "localhost/wadspaces-terminal:latest", "display": "host"});
+    let fresh =
+        json!({"id": "terminal", "name": "T", "image": "localhost/wadspaces-terminal:latest", "display": "host"});
     let e = wadd::builds::merged(&current, &fresh).unwrap_err();
     assert!(e.contains("one of this machine's own apps"), "{e}");
     let other = json!({"id": "w", "name": "W2", "image": "localhost/wadspaces-w:latest", "display": "host"});

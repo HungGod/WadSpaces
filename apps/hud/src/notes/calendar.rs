@@ -305,7 +305,8 @@ impl CalendarCard {
         let events = self.events.borrow();
         for (d, day) in self.days.iter().zip(month_grid(y, m)) {
             d.num.set_label(&day.day().to_string());
-            for (class, on) in [("other", day.month() != m), ("today", day == today), ("selected", day == self.picked.get())]
+            for (class, on) in
+                [("other", day.month() != m), ("today", day == today), ("selected", day == self.picked.get())]
             {
                 if on { d.button.add_css_class(class) } else { d.button.remove_css_class(class) }
             }
@@ -323,7 +324,8 @@ impl CalendarCard {
         }
 
         let picked = self.picked.get();
-        self.day_title.set_label(&format!("{} · {}", day_words(picked, today), picked.format("%A %-d %B")).to_uppercase());
+        self.day_title
+            .set_label(&format!("{} · {}", day_words(picked, today), picked.format("%A %-d %B")).to_uppercase());
         clear(&self.agenda);
         let on = on_day(&events, picked);
         if on.is_empty() {
@@ -401,8 +403,7 @@ impl CalendarCard {
         clear(&self.scopes_box);
         let spaces = self.ctx.spaces();
         let ids: Vec<String> = spaces.iter().map(|(id, _)| id.clone()).collect();
-        let chips =
-            Chips::with(spaces.iter().map(|(id, name)| (Some(self.ctx.color_of(id)), name.clone())).collect());
+        let chips = Chips::with(spaces.iter().map(|(id, name)| (Some(self.ctx.color_of(id)), name.clone())).collect());
         chips.set(ids.iter().position(|id| id == e.scope_or_default()).unwrap_or(0));
         self.scopes_box.append(&chips.row);
         self.scopes.replace(Some((chips, ids)));

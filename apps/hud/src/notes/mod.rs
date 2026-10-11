@@ -27,8 +27,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use chrono::{Local, NaiveDateTime};
-use gtk::prelude::*;
 use gtk::glib;
+use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, LayerShell};
 use wad_notes::{Colors, DEFAULT, ReminderFile, Store, Trashed};
 
@@ -667,7 +667,11 @@ impl ScopeTag {
     pub fn set(&self, color: usize, name: &str, looking: bool) {
         set_scope_class(&self.dot, color);
         self.name.set_label(name);
-        if looking { self.row.add_css_class("looking") } else { self.row.remove_css_class("looking") }
+        if looking {
+            self.row.add_css_class("looking")
+        } else {
+            self.row.remove_css_class("looking")
+        }
         self.row.set_tooltip_text(Some(&if looking {
             format!("Looking at {name}'s (the bar's WadNotes menu goes back)")
         } else {

@@ -197,10 +197,8 @@ impl Sway {
             .filter(|d| !d.is_empty() && !d.contains('/'))
             .or_else(|| newest_wayland_socket(&runtime_dir))
             .unwrap_or_else(|| "wayland-1".into());
-        let env = environ
-            .into_iter()
-            .filter(|(k, _)| PASSED_ON.contains(&k.as_str()) || k.starts_with("LC_"))
-            .collect();
+        let env =
+            environ.into_iter().filter(|(k, _)| PASSED_ON.contains(&k.as_str()) || k.starts_with("LC_")).collect();
         let uid = ids.map(|(uid, _)| uid).ok_or_else(|| Error::NoSway(socket.clone()))?;
         Ok(Session { uid, runtime_dir, wayland_display, env })
     }

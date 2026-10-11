@@ -305,7 +305,11 @@ impl Event {
         let first = self.start.date();
         let last = self.end.map(|e| {
             // A timed event ending at midnight ends the day before.
-            if !self.all_day && e.time() == NaiveTime::MIN && e.date() > first { e.date().pred_opt().unwrap() } else { e.date() }
+            if !self.all_day && e.time() == NaiveTime::MIN && e.date() > first {
+                e.date().pred_opt().unwrap()
+            } else {
+                e.date()
+            }
         });
         (first, last.unwrap_or(first).max(first))
     }
@@ -330,7 +334,12 @@ mod tests {
 
     #[test]
     fn a_note_round_trips() {
-        let n = Note { id: "a".into(), title: "Plan".into(), body: "# Plan\n\n- one\n".into(), updated: t("2026-10-09T14:30") };
+        let n = Note {
+            id: "a".into(),
+            title: "Plan".into(),
+            body: "# Plan\n\n- one\n".into(),
+            updated: t("2026-10-09T14:30"),
+        };
         let text = n.render();
         assert!(text.starts_with("+++\ntitle = \"Plan\"\nupdated = \"2026-10-09T14:30\"\n+++\n\n# Plan"), "{text}");
         assert_eq!(Note::parse("a", &text, t("2000-01-01")).unwrap(), n);

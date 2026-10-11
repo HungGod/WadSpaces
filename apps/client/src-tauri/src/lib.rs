@@ -33,7 +33,10 @@ fn app_version() -> String {
 #[tauri::command]
 #[specta::specta]
 fn boot_id() -> Option<String> {
-    std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
+    std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
 }
 
 fn commands() -> tauri_specta::Builder<tauri::Wry> {

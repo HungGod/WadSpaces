@@ -126,7 +126,8 @@ pub struct ScreenUser {
 /// own env comes last, so it wins.
 pub fn app_spec(ws: &Workspace, session: &wad_sway::Session, user: Option<&ScreenUser>) -> TransientSpec {
     let runtime = session.runtime_dir.to_string_lossy().into_owned();
-    let mut environment = vec![format!("XDG_RUNTIME_DIR={runtime}"), format!("WAYLAND_DISPLAY={}", session.wayland_display)];
+    let mut environment =
+        vec![format!("XDG_RUNTIME_DIR={runtime}"), format!("WAYLAND_DISPLAY={}", session.wayland_display)];
     if let Some(u) = user {
         environment.push(format!("HOME={}", u.home));
         environment.push(format!("USER={}", u.name));
@@ -421,7 +422,10 @@ mod tests {
             uid: 1000,
             runtime_dir: "/run/user/1000".into(),
             wayland_display: "wayland-1".into(),
-            env: vec![("DBUS_SESSION_BUS_ADDRESS".into(), "unix:path=/tmp/dbus-x".into()), ("LANG".into(), "C.UTF-8".into())],
+            env: vec![
+                ("DBUS_SESSION_BUS_ADDRESS".into(), "unix:path=/tmp/dbus-x".into()),
+                ("LANG".into(), "C.UTF-8".into()),
+            ],
         };
         let wad = ScreenUser { name: "wad".into(), group: "wad".into(), home: "/var/home/wad".into() };
         let spec = app_spec(&ws, &session, Some(&wad));

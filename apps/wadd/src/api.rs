@@ -226,8 +226,7 @@ async fn workspace_icon(
     let path = std::path::PathBuf::from(ws.icon.ok_or_else(none)?);
     let own = app.store.dir.join("icons");
     let themed = q.theme.as_deref().filter(|t| matches!(*t, "dark" | "light")).and_then(|t| themed_icon(&path, t));
-    let (mime, bytes) =
-        themed.and_then(|p| icon_file(&p, &own)).or_else(|| icon_file(&path, &own)).ok_or_else(none)?;
+    let (mime, bytes) = themed.and_then(|p| icon_file(&p, &own)).or_else(|| icon_file(&path, &own)).ok_or_else(none)?;
     Ok(([(axum::http::header::CONTENT_TYPE, mime), (axum::http::header::CACHE_CONTROL, "max-age=3600")], bytes)
         .into_response())
 }

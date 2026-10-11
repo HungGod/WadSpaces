@@ -175,7 +175,8 @@ fn show(view: &WebView, uri: &str, title: &str, body: &str, buttons: &[(&str, &s
         .iter()
         .map(|(label, act)| format!(r#"<a class=btn href="{ACTION_SCHEME}:{act}">{}</a>"#, esc(label)))
         .collect();
-    let html = crate::theme::html(PAGE).replace("{title}", &esc(title)).replace("{body}", body).replace("{buttons}", &buttons);
+    let html =
+        crate::theme::html(PAGE).replace("{title}", &esc(title)).replace("{body}", body).replace("{buttons}", &buttons);
     view.load_alternate_html(&html, uri, None);
 }
 
