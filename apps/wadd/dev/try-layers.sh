@@ -106,6 +106,13 @@ printf '{"wadspace":%s,"template":%s,"customization":%s,"tz":"Pacific/Fiji"}' "$
   send PUT /v1/wadspaces/tryl-space | python3 -I -c 'import json,sys; d=json.load(sys.stdin); w=d.get("workspace") or sys.exit(str(d)); print("  ", w["image"], [e for e in w["env"] if e[0].startswith("WALL")])'
 printf '{"ext":"png","data":"%s"}' "$png" | send PUT /v1/workspaces/tryl-space/wallpaper >/dev/null
 [ -f "$dir/state/extra/tryl-space/wallpaper.png" ] || fail "no wallpaper in the extra folder"
+# Its desktop draws on the headless sway, not your session's display (as
+# the other trials' workspaces do): WADSPACES_WAYLAND names that socket.
+api GET /v1/workspaces/tryl-space | python3 -I -c '
+import json, sys
+w = json.load(sys.stdin)
+w["env"] = [e for e in w["env"] if e[0] != "WADSPACES_WAYLAND"] + [["WADSPACES_WAYLAND", sys.argv[1] + "/wayland-1"]]
+print(json.dumps(w))' "$rt_name" | send PUT /v1/workspaces/tryl-space >/dev/null
 
 echo "== open it"
 printf '{"kind":"workspace","workspace":"tryl-space","projects":[]}' | send POST /v1/launches >/dev/null
@@ -127,7 +134,7 @@ run=$(printf '{"kind":"run","from":"tryl-space","overrides":{"projects":[]}}' | 
 echo "  $run"
 for _ in $(seq 240); do api GET "/v1/workspaces/$run/state" | grep -q '"phase":"ready"' && break; sleep 0.5; done
 api POST "/v1/workspaces/$run/stop" >/dev/null
-for _ in $(seq 120); do api GET /v1/workspaces | grep -q "\"$run\"" || break; sleep 0.5; done
+for _ in $(seq 120); do grep -q "$run, run once, stopped: removed" "$dir/wadd.log" && break; sleep 0.5; done
 api GET /v1/workspaces | grep -q "\"$run\"" && fail "the run is still listed"
 [ -e "$dir/state/extra/$run" ] && fail "the run's extra folder is still there"
 echo "  gone"

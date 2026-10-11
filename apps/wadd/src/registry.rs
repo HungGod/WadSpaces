@@ -462,13 +462,15 @@ impl Registry {
         if list.len() == before {
             return;
         }
-        if let Err(e) = self.set_workspaces(list).await {
-            tracing::warn!("removing the run {id}: {e}");
-            return;
-        }
+        // Its files first: removing the workspace reloads systemd, and a
+        // wadd stopped meanwhile would leave them behind for good.
         let _ = std::fs::remove_dir_all(self.settings.state_dir.join("extra").join(id));
         for f in [format!("{id}.json"), format!("{id}.signins.json")] {
             let _ = std::fs::remove_file(self.settings.signins_dir.join(SETUPS_DIR).join(f));
+        }
+        if let Err(e) = self.set_workspaces(list).await {
+            tracing::warn!("removing the run {id}: {e}");
+            return;
         }
         tracing::info!("{id}, run once, stopped: removed");
     }

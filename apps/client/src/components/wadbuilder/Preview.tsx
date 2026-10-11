@@ -1,7 +1,7 @@
 // The right-hand pane in Steps 2 and 3: the wadspace's desktop as the image
 // will show it, live, or its image layers: base, template, customization, and
 // what's mounted at start.
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { FileCode2, LayoutDashboard } from "lucide-react";
 import { customizationDockerfile, desktopFor, imageRef, resolve, runSummary, sameSetup, slotsFor, startMenuFor, templateDockerfile, type Customization, type LayerKey } from "@core/layers";
 import { DEFAULT_BASE_IMAGE } from "@core/spec";
@@ -22,11 +22,13 @@ export function Preview() {
   const customizations = useApp((s) => s.customizations);
   const projects = useApp((s) => s.projects);
   const screen = useScreen();
-  const pane = useRef<HTMLDivElement>(null);
+  // The pane, once it's there (the first render can come before the layers
+  // load): the desktop is fitted to it.
+  const [pane, setPane] = useState<HTMLDivElement | null>(null);
   const [fit, setFit] = useState({ w: 0, h: 0 });
 
   useLayoutEffect(() => {
-    const el = pane.current;
+    const el = pane;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => {
       const pw = e.contentRect.width - 48;
@@ -37,7 +39,7 @@ export function Preview() {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [screen.w, screen.h, view]);
+  }, [pane, screen.w, screen.h]);
 
   const r = base && resolve({ templates, customizations }, base);
   if (!r || !setup) return null;
@@ -59,7 +61,7 @@ export function Preview() {
         <span>{view === "desktop" ? "Live: double-click icons, try the Start button" : "The layers it's built from"}</span>
         {view === "desktop" && <span className="ml-auto font-mono text-faint">{screen.w}×{screen.h}</span>}
       </div>
-      <div ref={pane} className="relative min-h-0 flex-1 overflow-auto">
+      <div ref={setPane} className="relative min-h-0 flex-1 overflow-auto">
         {view === "desktop" ? (
           fit.w > 0 && (
             <div className="grid h-full place-items-center">
