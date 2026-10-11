@@ -3,17 +3,20 @@
 //! for each app what the Builder shows (summary, screenshots, its Start menu
 //! category) and how it gets into an image. The starter templates every
 //! library begins with are in data/starters.json.
-//!
-//! Templates migrated from older wadspaces can hold apps from the old catalog
-//! (data/apps.json) that have a real recipe; [`app`] finds those too, with
-//! their old name and icon, so they still draw and build.
 
 use std::sync::OnceLock;
 
 use serde_json::{Value, json};
 
-use crate::icons;
-use crate::recipes::{Recipe, recipe};
+/// How an app gets into a template's image.
+pub enum Recipe {
+    /// A `wadspaces-feature` script; `desktop`: the launchers it writes.
+    Feature { feature: &'static str, desktop: &'static [&'static str] },
+    /// Debian packages (`wadspaces-apt`); `desktop`: the launcher to use.
+    Apt { packages: &'static [&'static str], desktop: Option<&'static str> },
+    /// In the base image already.
+    Builtin { desktop: &'static str },
+}
 
 pub const CATALOG_JSON: &str = include_str!("../data/catalog.json");
 pub const STARTERS_JSON: &str = include_str!("../data/starters.json");
@@ -103,7 +106,7 @@ pub struct App {
     pub opens_folders: bool,
     /// Its sign-in: (kind, id that names a new secret).
     pub secret: Option<(String, String)>,
-    /// How it's installed (never `Soon`: such apps aren't in templates).
+    /// How it's installed.
     pub recipe: Recipe,
 }
 
@@ -111,39 +114,18 @@ fn str_at<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or("")
 }
 
-/// An app of a template: from catalog.json, else from the old catalog when
-/// it has a recipe that installs something (a migrated template's).
+/// An app of a template (catalog.json).
 pub fn app(id: &str) -> Option<App> {
-    if let Some(a) = catalog_app(id) {
-        let secret =
-            a.get("secret").filter(|s| s.is_object()).map(|s| (str_at(s, "kind").into(), str_at(s, "id").into()));
-        return Some(App {
-            id: id.into(),
-            name: str_at(a, "name").into(),
-            icon: str_at(a, "icon").into(),
-            category: str_at(a, "category").into(),
-            opens_folders: a["opensFolders"] == true,
-            secret,
-            recipe: catalog_recipe(id)?,
-        });
-    }
-    let old = icons::apps().iter().find(|a| a["id"] == id)?;
-    let r = recipe(id)?;
-    if !matches!(r, Recipe::Feature { .. } | Recipe::Apt { .. } | Recipe::Builtin { .. }) {
-        return None;
-    }
-    let icon = match str_at(old, "iconUrl") {
-        "" => crate::layers::favicon(str_at(old, "domain")),
-        i => i.into(),
-    };
+    let a = catalog_app(id)?;
+    let secret = a.get("secret").filter(|s| s.is_object()).map(|s| (str_at(s, "kind").into(), str_at(s, "id").into()));
     Some(App {
         id: id.into(),
-        name: str_at(old, "name").into(),
-        icon,
-        category: "Misc".into(),
-        opens_folders: false,
-        secret: None,
-        recipe: r,
+        name: str_at(a, "name").into(),
+        icon: str_at(a, "icon").into(),
+        category: str_at(a, "category").into(),
+        opens_folders: a["opensFolders"] == true,
+        secret,
+        recipe: catalog_recipe(id)?,
     })
 }
 
@@ -214,10 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn old_apps_with_a_recipe_still_draw() {
-        let chrome = app("chrome").unwrap();
-        assert_eq!((chrome.name.as_str(), chrome.icon.as_str()), ("Chrome", "/catalog/chrome.png"));
-        assert!(app("brave").is_none(), "a 'soon' app isn't in templates");
-        assert!(app("github").is_none(), "web apps are a customization's");
+    fn only_catalog_apps_are_in_templates() {
+        assert!(app("chrome").is_none() && app("github").is_none());
     }
 }

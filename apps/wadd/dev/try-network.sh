@@ -20,7 +20,6 @@ cat >"$dir/wadd.toml" <<TOML
 socket = "$sock"
 state_dir = "$dir/state"
 projects_dir = "$dir/projects"
-legacy_config = "$dir/none.yaml"
 [display]
 enabled = false
 [cloud]

@@ -32,7 +32,6 @@ socket = "$sock"
 state_dir = "$dir/state"
 projects_dir = "$dir/projects"
 signins_dir = "$dir/signins"
-legacy_config = "$dir/none.yaml"
 vendor_workspaces = "$dir/none.d"
 ready_timeout_s = 240
 build_min_free_gb = 2

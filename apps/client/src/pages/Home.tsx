@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { ArrowRight, GraduationCap, Play, Radio, Square, Timer, Wand2 } from "lucide-react";
 import clsx from "clsx";
-import { stacks, type WadspaceV2 } from "@core/layers";
+import { stacks, type Wadspace } from "@core/layers";
 import { Page } from "@/components/Page";
 import { Thumb } from "@/components/Thumb";
 import { Badge, Button } from "@/components/ui";
@@ -167,11 +167,11 @@ const duration = (min: number) => (min >= 1 ? `${Math.round(min)} min` : `${Math
 
 /** What the last launch started, as the launcher starts it: wadspaces, then
  *  the machine's own apps (WadBrowsers, saved setups, the terminal). */
-function lastItems(session: LastSession, wadspaces: WadspaceV2[]): { items: RunItem[]; spaces: WadspaceV2[] } {
+function lastItems(session: LastSession, wadspaces: Wadspace[]): { items: RunItem[]; spaces: Wadspace[] } {
   const { browsers } = useApp.getState();
   const apps = Object.fromEntries(Object.entries(DEFAULT_BROWSER_APPS).map(([id, app]) => [app, DEFAULT_BROWSERS.find((b) => b.id === id)!]));
   const items: RunItem[] = [];
-  const spaces: WadspaceV2[] = [];
+  const spaces: Wadspace[] = [];
   for (const id of session.wadspaceIds) {
     const w = wadspaces.find((x) => x.id === id);
     if (w) {
@@ -261,7 +261,7 @@ function JumpBackIn() {
 }
 
 /** One big thumbnail, or tiles for several. */
-function Preview({ list }: { list: WadspaceV2[] }) {
+function Preview({ list }: { list: Wadspace[] }) {
   if (!list.length) return <div className="grid aspect-video shrink-0 place-items-center rounded-2xl bg-surface-2 sm:w-64 xl:w-72"><img src="/brand/wadbrowser-icon-dark.svg" alt="" className="size-14" /></div>;
   if (list.length === 1) return <Thumb w={list[0]} className="shrink-0 rounded-2xl sm:!w-64 xl:!w-72" />;
   const shown = list.slice(0, 4);

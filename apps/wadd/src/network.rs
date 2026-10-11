@@ -72,25 +72,6 @@ impl Network {
         }
     }
 
-    /// Online enough to download: full connectivity (or NetworkManager can't
-    /// tell, which mustn't hold downloads up forever).
-    pub async fn online(&self) -> bool {
-        match &self.nm {
-            Some(nm) => matches!(nm.connectivity().await.as_str(), "full" | "unknown"),
-            None => true,
-        }
-    }
-
-    /// Waits until online, looking less often the longer it takes.
-    pub async fn wait_online(&self) {
-        let mut delay = Duration::from_secs(5);
-        while !self.online().await {
-            tracing::info!("waiting for the network");
-            tokio::time::sleep(delay).await;
-            delay = (delay * 2).min(Duration::from_secs(60));
-        }
-    }
-
     pub async fn wifi(&self, rescan: bool) -> Result<Vec<WifiNetwork>, ApiError> {
         let nets = self.nm()?.scan(rescan).await.map_err(api_error)?;
         Ok(nets

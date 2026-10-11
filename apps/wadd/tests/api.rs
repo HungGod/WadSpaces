@@ -24,7 +24,6 @@ async fn start(allow_self: bool) -> (tempfile::TempDir, std::path::PathBuf, toki
     std::fs::create_dir_all(&cfg.daemon.state_dir).unwrap();
     let list = vec![workspace("writing")];
     std::fs::write(cfg.daemon.state_dir.join("workspaces.json"), serde_json::to_string(&list).unwrap()).unwrap();
-    cfg.daemon.legacy_config = dir.path().join("none.yaml");
     let offline = Arc::new(wadd::backend::Offline("no machine in tests".into()));
     let mut server =
         Server::new(&cfg, Profile::User, Listen::Path(sock.clone()), LogBuffer::new(100), offline).unwrap();

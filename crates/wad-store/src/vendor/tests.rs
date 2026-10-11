@@ -129,9 +129,9 @@ fn a_line_break_in_a_value_is_refused() {
         serde_json::json!({"id": "w", "name": "W", "image": "i", "display": "host", "env": {"A": "1\nB=2"}}),
         serde_json::json!({"id": "w", "name": "W", "image": "i", "display": "host", "volumes": ["a:/b\r"]}),
     ] {
-        let e = crate::legacy::check_workspaces(vec![raw]).unwrap_err().to_string();
+        let e = crate::workspaces::check_workspaces(vec![raw]).unwrap_err().to_string();
         assert!(e.contains("control character"), "{e}");
     }
     let ok = serde_json::json!({"id": "w", "name": "Wad Creator – dev", "image": "i", "display": "host"});
-    assert!(crate::legacy::check_workspaces(vec![ok]).is_ok());
+    assert!(crate::workspaces::check_workspaces(vec![ok]).is_ok());
 }

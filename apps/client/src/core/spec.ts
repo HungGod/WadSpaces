@@ -1,10 +1,6 @@
-// A workspace as the generator sees it: what goes into the image (build) and
-// how the machine runs it (run). The run half maps 1:1 onto wadd's
-// workspace entries; the build half onto a build folder (generator/).
-// The Builder's model (model.ts) becomes one of these through build.ts. The
-// functions are wad-core's (crates/wad-core/src/spec.rs), run as WebAssembly.
-
-import { call } from "./wasm";
+// Workspaces' common terms, as wad-core has them (crates/wad-core/src/spec.rs):
+// the base image's features in install order, wadd's workspace entry (the
+// quadlet's input), ids and the base image.
 
 export type FeatureId =
   | "git"
@@ -68,96 +64,7 @@ export const FEATURES: Feature[] = [
   { id: "dolphin", label: "Dolphin", description: "GameCube and Wii emulator" },
 ];
 
-/** A default project (core/projects.ts): wadd mounts its folder at
- *  ~/Desktop/<mount> when the wadspace launches; nothing of it is in the image. */
-export interface SpecProject {
-  id: string;
-  name: string;
-  mount: string;
-}
-
-/** A website in a WadBrowser window of its own (wadspaces-webapp). */
-export interface WebApp {
-  name: string;
-  url: string;
-  /** Catalog id: fixes the launcher name (wadspaces-webapp-<id>.desktop). */
-  id?: string;
-  /** A site WadBrowser can't run (DRM, video calls): a Chrome --app window. */
-  chrome?: boolean;
-  /** The user's own picture for its icon (an upload's data: URL, or an
-   *  address); otherwise wadd makes one from the site's icon. */
-  iconUrl?: string;
-}
-
-/** Debian packages for one desktop app (wadspaces-apt). */
-export interface AptApp {
-  id: string;
-  packages: string[];
-  desktop?: string;
-}
-
-/** One desktop icon, in order, for /etc/wadspaces/layout.json. */
-export interface LayoutEntry {
-  /** Catalog id; wadspaces-layout finds its launcher in /etc/wadspaces/apps.d/<app>.list
-   *  when `desktop` is absent or missing from the image. */
-  app: string;
-  /** The launcher to put on the desktop, e.g. code.desktop. */
-  desktop?: string;
-  label: string;
-  autostart?: boolean;
-}
-
-/** A Kale Browser app, from designs made before WadBrowser: built as a web app now. */
-export interface KaleResource {
-  app_name: string;
-  app_url: string;
-}
-
-export interface Wallpaper {
-  fileName: string; // wallpaper.png | wallpaper.jpg
-  dataUrl?: string; // local-only mode
-  mode: "center" | "fill" | "fit" | "stretch" | "tile";
-  color: string;
-}
-
-// How a workspace is shown on the machine (wadd's `display`):
-//   host    a lean image (images/base) whose desktop is a window on the
-//           machine's own screen: local input, no stream.
-//   stream  an all-in-one Selkies image (containers/_selkies) streamed into
-//           the kiosk.
 export type Display = "host" | "stream";
-
-export interface CreatorSpec {
-  id: string;
-  name: string;
-  // build
-  baseImage: string;
-  features: FeatureId[];
-  aptApps?: AptApp[];
-  webapps: WebApp[];
-  /** What links open in: the WadBrowser on its desktop ("full": with an
-   *  address bar; "focus": without). Absent: the base's default (focus). */
-  defaultBrowser?: "full" | "focus";
-  wallpaper?: Wallpaper;
-  /** Desktop icons in order; absent for hand-written specs (the presets). */
-  layout?: LayoutEntry[];
-  /** Projects it opens with by default; mounted at launch, listed in the README. */
-  projects?: SpecProject[];
-  /** The saved sign-ins its apps use; mounted when it starts (no rebuild). */
-  signins?: WaddSignIn[];
-  // run
-  display?: Display; // absent on specs saved before it existed: "stream"
-  image: string;
-  port: number; // stream only
-  hotkey?: number | null;
-  env: Record<string, string>;
-  secrets: string[];
-  persistConfig: boolean;
-  devices: string[];
-  shmSize: string;
-  autostart: boolean;
-  updatedAt?: number;
-}
 
 // What wadd stores for a workspace (wad-proto's Workspace, workspaces.yaml's shape).
 export interface WaddSpec {
@@ -198,7 +105,3 @@ export interface WaddSignIn {
 
 export const DEFAULT_BASE_IMAGE = "localhost/wadspaces-base:trixie";
 export const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
-
-export function newSpec(partial: Partial<CreatorSpec> = {}): CreatorSpec {
-  return call("newSpec", partial);
-}

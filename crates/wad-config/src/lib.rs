@@ -26,18 +26,6 @@ pub enum Profile {
     User,
 }
 
-/// What wadd downloads on its own once podman is up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Prefetch {
-    /// Nothing: images download from the launcher or on first use.
-    None,
-    /// The workspaces that start at boot (which it then starts).
-    Autostart,
-    /// Those, then every other workspace's image while disk allows.
-    All,
-}
-
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -49,8 +37,8 @@ pub struct Config {
     pub cloud: Cloud,
 }
 
-/// The account link (the cloud relay). An empty project_id takes the image's
-/// cloud.yaml (the Python wadd's) until the cutover moves it here.
+/// The account link (the cloud relay). An empty project_id: no account to
+/// link to.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Cloud {
@@ -172,10 +160,6 @@ pub struct Daemon {
     pub allow_users: Vec<String>,
     /// ...and members of these groups.
     pub allow_groups: Vec<String>,
-    /// The Python wadd's workspace list, read until the cutover moves it into state.
-    pub legacy_config: PathBuf,
-    /// The image's cloud settings (its keys win over the legacy file's).
-    pub vendor_cloud: PathBuf,
     /// The image's workspaces, one `<id>.toml` each: applied to the
     /// machine's list when they're new or the image changes them.
     pub vendor_workspaces: PathBuf,
@@ -190,14 +174,8 @@ pub struct Daemon {
     pub signins_dir: PathBuf,
     /// How long a workspace may take to come up.
     pub ready_timeout_s: u64,
-    /// Images downloaded at once.
-    pub max_parallel_pulls: usize,
     /// How often wadd checks the workspaces against podman.
     pub reconcile_s: u64,
-    pub prefetch: Prefetch,
-    /// With prefetch, skip an image (not an autostart one) when less than
-    /// this is free, so small disks don't fill up.
-    pub prefetch_min_free_gb: u64,
     /// Who owns project folders: the user inside the images (abc). git runs
     /// as them when wadd is root.
     pub projects_uid: u32,
@@ -252,18 +230,13 @@ impl Daemon {
                 // The kiosk user, and anyone an admin adds to group wad.
                 allow_users: vec!["wad".into()],
                 allow_groups: vec!["wad".into(), "wheel".into()],
-                legacy_config: "/etc/wadspaces/workspaces.yaml".into(),
-                vendor_cloud: "/usr/lib/wadspaces/cloud.yaml".into(),
                 vendor_workspaces: "/usr/lib/wadspaces/workspaces.d".into(),
                 podman_socket: "/run/podman/podman.sock".into(),
                 units_dir: "/run/containers/systemd".into(),
                 projects_dir: "/var/lib/wadspaces-projects".into(),
                 signins_dir: "/var/lib/wadspaces-signins".into(),
                 ready_timeout_s: 900,
-                max_parallel_pulls: 3,
                 reconcile_s: 5,
-                prefetch: Prefetch::None,
-                prefetch_min_free_gb: 15,
                 projects_uid: 1000,
                 folder_roots: FOLDER_ROOTS.iter().map(PathBuf::from).collect(),
                 build_min_free_gb: 8,
@@ -273,18 +246,13 @@ impl Daemon {
                 state_dir: home().join(".local/state/wadspaces"),
                 allow_users: vec![],
                 allow_groups: vec![],
-                legacy_config: config_home().join("wadspaces/workspaces.yaml"),
-                vendor_cloud: "/usr/lib/wadspaces/cloud.yaml".into(),
                 vendor_workspaces: "/usr/lib/wadspaces/workspaces.d".into(),
                 podman_socket: runtime_dir().join("podman/podman.sock"),
                 units_dir: runtime_dir().join("containers/systemd"),
                 projects_dir: home().join(".local/share/wadspaces-projects"),
                 signins_dir: home().join(".local/share/wadspaces-signins"),
                 ready_timeout_s: 900,
-                max_parallel_pulls: 3,
                 reconcile_s: 5,
-                prefetch: Prefetch::None,
-                prefetch_min_free_gb: 15,
                 projects_uid: 1000,
                 folder_roots: FOLDER_ROOTS.iter().map(PathBuf::from).collect(),
                 build_min_free_gb: 8,
@@ -375,17 +343,12 @@ struct RawDaemon {
     state_dir: PathBuf,
     allow_users: Vec<String>,
     allow_groups: Vec<String>,
-    legacy_config: PathBuf,
-    vendor_cloud: PathBuf,
     podman_socket: PathBuf,
     units_dir: PathBuf,
     projects_dir: PathBuf,
     signins_dir: PathBuf,
     ready_timeout_s: u64,
-    max_parallel_pulls: usize,
     reconcile_s: u64,
-    prefetch: Prefetch,
-    prefetch_min_free_gb: u64,
     projects_uid: u32,
     folder_roots: Vec<PathBuf>,
     build_min_free_gb: u64,
@@ -405,17 +368,12 @@ impl From<&Config> for Raw {
                 state_dir: c.daemon.state_dir.clone(),
                 allow_users: c.daemon.allow_users.clone(),
                 allow_groups: c.daemon.allow_groups.clone(),
-                legacy_config: c.daemon.legacy_config.clone(),
-                vendor_cloud: c.daemon.vendor_cloud.clone(),
                 podman_socket: c.daemon.podman_socket.clone(),
                 units_dir: c.daemon.units_dir.clone(),
                 projects_dir: c.daemon.projects_dir.clone(),
                 signins_dir: c.daemon.signins_dir.clone(),
                 ready_timeout_s: c.daemon.ready_timeout_s,
-                max_parallel_pulls: c.daemon.max_parallel_pulls,
                 reconcile_s: c.daemon.reconcile_s,
-                prefetch: c.daemon.prefetch,
-                prefetch_min_free_gb: c.daemon.prefetch_min_free_gb,
                 projects_uid: c.daemon.projects_uid,
                 folder_roots: c.daemon.folder_roots.clone(),
                 build_min_free_gb: c.daemon.build_min_free_gb,
@@ -473,7 +431,6 @@ mod tests {
         let f = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../host/usr/lib/wadspaces/wadd.toml");
         let c = Config::load(Profile::System, &[f]).unwrap();
         assert_eq!(c.machine.name, "wadspaces");
-        assert_eq!((c.daemon.prefetch, c.daemon.prefetch_min_free_gb), (Prefetch::None, 5));
         assert_eq!(c.daemon.socket, Path::new("/run/wadd/wadd.sock"));
         assert_eq!(c.daemon.vendor_workspaces, Path::new("/usr/lib/wadspaces/workspaces.d"));
         assert_eq!(
@@ -514,16 +471,13 @@ mod tests {
         assert_eq!(c.log.level, "warn");
         assert_eq!(c.log.buffer_lines, 10);
         assert_eq!(c.daemon.state_dir, PathBuf::from("/var/lib/wadspaces"));
-        assert_eq!(c.daemon.prefetch, Prefetch::None);
         assert!(c.keys.enabled && c.keys.home == ["KEY_0", "KEY_SPACE"]);
         assert!(!Config::load(Profile::User, &[]).unwrap().keys.enabled);
         let old = write(d.path(), "old.toml", "[keys]\nlauncher = [\"KEY_HOME\"]\n[display]\nsocket = \"/tmp/s\"\n");
         let c = Config::load(Profile::System, &[old]).unwrap();
         assert_eq!((c.keys.home, c.keys.grab), (vec!["KEY_HOME".to_string()], true));
         assert_eq!(c.display.socket, Some(PathBuf::from("/tmp/s")));
-        let all = write(d.path(), "all.toml", "[daemon]\nprefetch = \"all\"\n");
-        assert_eq!(Config::load(Profile::System, &[all]).unwrap().daemon.prefetch, Prefetch::All);
-        let bad = write(d.path(), "some.toml", "[daemon]\nprefetch = \"some\"\n");
+        let bad = write(d.path(), "soon.toml", "[daemon]\nready_timeout_s = \"soon\"\n");
         assert!(Config::load(Profile::System, &[bad]).is_err());
     }
 

@@ -311,7 +311,6 @@ mod tests {
         let sock = d.path().join("wadd.sock");
         let mut cfg = Config::defaults(Profile::User);
         cfg.daemon.state_dir = d.path().join("state");
-        cfg.daemon.legacy_config = d.path().join("none.yaml");
         cfg.daemon.vendor_workspaces = d.path().join("vendor");
         cfg.daemon.projects_dir = d.path().join("projects");
         cfg.display.enabled = false;

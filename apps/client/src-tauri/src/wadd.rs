@@ -1,13 +1,10 @@
-//! The app's link to wadd: the Python one on 127.0.0.1:8080, or the Rust one
-//! on its Unix socket (rswadd.rs puts it behind the same calls). Requests come
-//! from here rather than from the page, so they carry no Origin header and
-//! there's no CORS between the two.
-//!
-//! Which one: WADD_DAEMON=rs|py, else the Rust wadd if its socket is there.
+//! The app's link to wadd, on its Unix socket (rswadd.rs). Requests come from
+//! here rather than from the page, so they carry no Origin header and there's
+//! no CORS between the two.
 //!
 //! The UI calls [`wadd_request`] (`src/lib/wadd.ts`): its older calls in the
-//! Python wadd's shapes, which rswadd.rs answers from `/v1`, and the newer
-//! ones as `/v1` itself; wadd's event stream arrives as
+//! `/api` shapes, which rswadd.rs answers from `/v1`, and the newer ones as
+//! `/v1` itself; wadd's event stream arrives as
 //! [`WaddEvent`]s. Secrets are left out: the app sets those itself (the GitHub
 //! token never passes through the page).
 
@@ -20,7 +17,6 @@ use specta::Type;
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
-const DEFAULT_URL: &str = "http://127.0.0.1:8080";
 const RECONNECT: Duration = Duration::from_secs(3);
 
 /// A failed call: wadd's status (0 when it couldn't be reached) and its
@@ -62,61 +58,21 @@ pub struct WaddEvent {
 }
 
 pub struct Wadd {
-    http: reqwest::Client,
-    base: String,
-    /// The Rust wadd, when that's the one.
-    rs: Option<crate::rswadd::RsWadd>,
+    rs: crate::rswadd::RsWadd,
     /// The last `state` event, for a page that starts listening late.
     last_state: Mutex<Option<Json>>,
 }
 
 impl Wadd {
     pub fn new() -> Self {
-        let base = std::env::var("WADD_URL").unwrap_or_else(|_| DEFAULT_URL.into());
         let sock = crate::rswadd::socket();
-        let rs = match std::env::var("WADD_DAEMON").as_deref() {
-            Ok("rs") => true,
-            Ok("py") => false,
-            _ => sock.exists(),
-        };
-        tracing::info!(
-            "wadd: {}",
-            if rs { format!("the Rust one at {}", sock.display()) } else { format!("the Python one at {base}") }
-        );
-        Self {
-            http: reqwest::Client::new(),
-            base: base.trim_end_matches('/').into(),
-            rs: rs.then(|| crate::rswadd::RsWadd::new(sock)),
-            last_state: Mutex::default(),
-        }
+        tracing::info!("wadd: at {}", sock.display());
+        Self { rs: crate::rswadd::RsWadd::new(sock), last_state: Mutex::default() }
     }
 
-    /// Sets a podman secret on this machine (PUT /api/secrets/{name}).
+    /// Sets a podman secret on this machine.
     pub async fn put_secret(&self, name: &str, value: &str) -> Result<(), WaddFailure> {
-        if let Some(rs) = &self.rs {
-            return rs.put_secret(name, value).await;
-        }
-        let url = format!("{}/api/secrets/{name}", self.base);
-        let res = self.http.put(url).json(&serde_json::json!({ "value": value })).send().await;
-        self.finish(res).await.map(drop)
-    }
-
-    fn unreachable(&self) -> WaddFailure {
-        WaddFailure::new(0, format!("Cannot reach wadd at {}. Is this a WadSpaces machine?", self.base))
-    }
-
-    async fn finish(&self, res: Result<reqwest::Response, reqwest::Error>) -> Result<Json, WaddFailure> {
-        let res = res.map_err(|_| self.unreachable())?;
-        let status = res.status();
-        let body: Value = res.json().await.unwrap_or_else(|_| Value::Object(Default::default()));
-        if status.is_success() {
-            return Ok(Json(body));
-        }
-        let message = match body.get("detail") {
-            Some(Value::String(s)) => s.clone(),
-            _ => status.canonical_reason().unwrap_or("error").to_string(),
-        };
-        Err(WaddFailure::new(status.as_u16(), message))
+        self.rs.put_secret(name, value).await
     }
 }
 
@@ -143,7 +99,7 @@ fn allowed(method: Method, path: &str) -> Result<(), WaddFailure> {
     Ok(())
 }
 
-/// Calls wadd's HTTP API: `path` is like `/api/projects?x=1`.
+/// Calls wadd's API: `path` is like `/api/projects?x=1` or `/v1/images`.
 #[tauri::command]
 #[specta::specta]
 pub async fn wadd_request(
@@ -153,21 +109,7 @@ pub async fn wadd_request(
     body: Option<Json>,
 ) -> Result<Json, WaddFailure> {
     allowed(method, &path)?;
-    if let Some(rs) = &wadd.rs {
-        return rs.request(method, &path, body.map(|Json(b)| b)).await.map(Json);
-    }
-    let url = format!("{}{path}", wadd.base);
-    let req = match method {
-        Method::Get => wadd.http.get(url),
-        Method::Post => wadd.http.post(url),
-        Method::Put => wadd.http.put(url),
-        Method::Delete => wadd.http.delete(url),
-    };
-    let req = match body {
-        Some(Json(b)) => req.json(&b),
-        None => req,
-    };
-    wadd.finish(req.send().await).await
+    wadd.rs.request(method, &path, body.map(|Json(b)| b)).await.map(Json)
 }
 
 /// The last `state` event (wadd's snapshot), if one has arrived.
@@ -193,38 +135,15 @@ pub fn follow_events(app: AppHandle) {
 async fn stream_once(app: &AppHandle) -> Result<(), String> {
     use tauri::Manager;
     let wadd = app.state::<Wadd>();
-    if let Some(rs) = &wadd.rs {
-        return rs
-            .stream_once(|event, data| {
-                let data = Json(data);
-                if event == "state" {
-                    *wadd.last_state.lock().unwrap() = Some(data.clone());
-                }
-                let _ = WaddEvent { event, data }.emit(app);
-            })
-            .await;
-    }
-    let mut res = wadd
-        .http
-        .get(format!("{}/api/events", wadd.base))
-        .header("accept", "text/event-stream")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !res.status().is_success() {
-        return Err(format!("status {}", res.status()));
-    }
-    let mut parser = SseParser::default();
-    while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
-        for (event, data) in parser.push(&chunk) {
-            let data = Json(serde_json::from_str(&data).unwrap_or(Value::String(data)));
+    wadd.rs
+        .stream_once(|event, data| {
+            let data = Json(data);
             if event == "state" {
                 *wadd.last_state.lock().unwrap() = Some(data.clone());
             }
             let _ = WaddEvent { event, data }.emit(app);
-        }
-    }
-    Ok(())
+        })
+        .await
 }
 
 /// Server-sent events, as wadd writes them: `event:` and `data:` lines, a

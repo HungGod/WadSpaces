@@ -2,12 +2,11 @@
 # Tries the Rust wadd's workspace lifecycle on this laptop, as you: rootless
 # podman, your systemd, a socket and state of its own under .build/wadd-try.
 #
-#   apps/wadd/dev/try.sh            start, wait, stop, restart, download
+#   apps/wadd/dev/try.sh            start, wait, stop, restart, a missing image
 #   KEEP=1 apps/wadd/dev/try.sh     leave wadd running afterwards
 #
 # Needs podman.socket (systemctl --user enable --now podman.socket). Builds
-# localhost/wadspaces-test (busybox serving a page on 3000) if it's missing.
-# Downloads docker.io/library/alpine (a few MB) to show pull progress.
+# the test image (busybox serving a page on 3000) if it's missing.
 set -euo pipefail
 ulimit -c 0
 root=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -16,9 +15,8 @@ sock=$dir/wadd.sock
 port=3199
 mkdir -p "$dir/state" "$dir/projects"
 
-podman image exists localhost/wadspaces-test:latest ||
-  podman build -q -t localhost/wadspaces-test:latest "$root/apps/wadd/dev/test-image" >/dev/null
-podman rmi -i docker.io/library/alpine:latest >/dev/null
+podman image exists localhost/wadspaces-template-trytest:latest ||
+  podman build -q -t localhost/wadspaces-template-trytest:latest "$root/apps/wadd/dev/test-image" >/dev/null
 
 cat >"$dir/wadd.toml" <<TOML
 [machine]
@@ -27,14 +25,13 @@ name = "wadd-try"
 socket = "$sock"
 state_dir = "$dir/state"
 projects_dir = "$dir/projects"
-legacy_config = "$dir/none.yaml"
 ready_timeout_s = 60
 TOML
 ws() { # id name image display port
   printf '{"id":"%s","name":"%s","image":"%s","display":"%s",%s"enabled":true,"autostart":false,"containerName":"wad-%s","containerPort":3000,"env":[],"secrets":[],"volumes":[],"devices":[],"projects":[]}' \
     "$1" "$2" "$3" "$4" "${5:+\"port\":$5,}" "$1"
 }
-echo "[$(ws trystream 'Try stream' localhost/wadspaces-test:latest stream $port),$(ws trypull 'Try pull' docker.io/library/alpine:latest host)]" >"$dir/state/workspaces.json"
+echo "[$(ws trystream 'Try stream' localhost/wadspaces-template-trytest:latest stream $port),$(ws trymissing 'Try missing' localhost/wadspaces-template-trymissing:latest host)]" >"$dir/state/workspaces.json"
 
 (cd "$root" && cargo build -q -p wadd)
 "$root/target/debug/wadd" serve --user --config "$dir/wadd.toml" >"$dir/wadd.log" 2>&1 &
@@ -84,19 +81,9 @@ until_phase trystream ready error; echo "$(phase trystream) after $(elapsed)"
 echo "== podman stops it behind wadd's back; reconcile notices"
 podman stop -t 1 wad-trystream >/dev/null
 until_phase trystream idle; api GET /v1/workspaces/trystream/state
-echo "== download with progress"
-curl -sSN --unix-socket "$sock" http://wadd/v1/events >"$dir/events.txt" &
-watch=$!
-t0=$(date +%s%N); api POST /v1/workspaces/trypull/download >/dev/null
-sleep 0.3
-for _ in $(seq 600); do
-  api GET /v1/workspaces/trypull/state | grep -q '"imagePresent":true' && break
-  sleep 0.1
-done
-echo "downloaded after $(elapsed)"
-kill $watch
-grep -c '"id":"trypull"' "$dir/events.txt" | sed 's/^/trypull events: /'
-grep '"id":"trypull"' "$dir/events.txt" | grep -o '"phase":"[a-z]*"\|"progress":[0-9.]*\|"message":"[^"]*"' | uniq | head -12
+echo "== an image that isn't here: never downloaded, it says to build it"
+api POST /v1/workspaces/trymissing/start >/dev/null
+until_phase trymissing error; api GET /v1/workspaces/trymissing/state
 echo "== runs"
 api GET '/v1/runs?workspace=trystream'
 echo "== wadd's log"

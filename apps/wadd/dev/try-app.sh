@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The machine app against the Rust wadd (M9): `wadd serve --user` on a socket
-# of its own, and the app's spike (src-tauri/spike/run.sh: the real UI in a
-# virtual KWin, nothing on your desktop) talking to it with WADD_DAEMON=rs.
+# The machine app against wadd with a workspace on it: `wadd serve --user` on
+# a socket of its own, and the app's spike (src-tauri/spike/run.sh: the real
+# UI in a virtual KWin, nothing on your desktop) talking to it.
 # Prints the spike's SPIKE lines and wadd's log; screenshots land in
 # .build/wadd-try-app/spike.
 #
@@ -24,11 +24,10 @@ name = "wadd-try-app"
 socket = "$sock"
 state_dir = "$dir/state"
 projects_dir = "$dir/projects"
-legacy_config = "$dir/none.yaml"
 [keys]
 enabled = false
 TOML
-echo '[{"id":"writing","name":"Writing","image":"localhost/wadspaces-test:latest","display":"host","enabled":true,"autostart":false,"containerName":"wad-writing","containerPort":3000,"env":[],"secrets":[],"volumes":[],"devices":[],"projects":[]}]' \
+echo '[{"id":"writing","name":"Writing","image":"localhost/wadspaces-template-trytest:latest","display":"host","enabled":true,"autostart":false,"containerName":"wad-writing","containerPort":3000,"env":[],"secrets":[],"volumes":[],"devices":[],"projects":[]}]' \
   >"$dir/state/workspaces.json"
 
 (cd "$root/apps/client" && npm run -s build:machine >/dev/null)
@@ -45,9 +44,7 @@ finish() {
 trap finish EXIT
 for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
 
-# WADD_URL points nowhere: every call must go to the Rust wadd.
-WADD_DAEMON=rs WADD_SOCKET=$sock WADD_URL=http://127.0.0.1:9 \
-  "$root/apps/client/src-tauri/spike/run.sh" "$dir/spike"
+WADD_SOCKET=$sock "$root/apps/client/src-tauri/spike/run.sh" "$dir/spike"
 echo "== the app's log"
 grep -i 'wadd' "$dir/spike/app.log" | grep -v '^SPIKE' | tail -5
 echo "== wadd's warnings"

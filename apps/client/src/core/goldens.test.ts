@@ -6,9 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { cases } from "./goldens";
-import { defaultAdvanced, dropFileIcons } from "./model";
 import * as projects from "./projects";
-import { presetProjects, presetWadspace } from "./presets";
 import { call } from "./wasm";
 import * as layers from "./layers";
 
@@ -39,10 +37,6 @@ type Fn = (...args: never[]) => unknown;
 // The TypeScript wrappers where there are any; anything else is called in
 // the core by name (Rust-only functions the corpus still checks).
 const IMPL: Record<string, Fn> = {
-  defaultAdvanced,
-  dropFileIcons,
-  presetWadspace,
-  presetProjects,
   validateProject: projects.validateProject,
   cleanDraft: projects.cleanDraft,
   cleanSource: projects.cleanSource,
@@ -98,7 +92,6 @@ const IMPL: Record<string, Fn> = {
   nameTaken: layers.nameTaken,
   importable: layers.importable,
   importInto: layers.importInto,
-  migrateWadspaceV1: layers.migrateWadspaceV1,
 };
 
 export function run(fn: string, args: unknown[]): unknown {

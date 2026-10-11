@@ -134,7 +134,6 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/workspaces/{id}/start", post(start))
         .route("/v1/workspaces/{id}/stop", post(stop))
         .route("/v1/workspaces/{id}/restart", post(restart))
-        .route("/v1/workspaces/{id}/download", post(download))
         .route("/v1/workspaces/{id}/switch", post(switch))
         .route("/v1/states", get(states))
         .route("/v1/view", get(view))
@@ -347,21 +346,6 @@ async fn restart(
 ) -> Result<(StatusCode, Json<WorkspaceState>), Failure> {
     app.view.restart(&id).await?;
     Ok((StatusCode::ACCEPTED, state_of(&app, &id)?))
-}
-
-/// Downloads a workspace's image in the background (progress as events).
-async fn download(
-    State(app): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<(StatusCode, Json<WorkspaceState>), Failure> {
-    let state = state_of(&app, &id)?;
-    let registry = app.registry.clone();
-    tokio::spawn(async move {
-        if let Err(e) = registry.download(&id).await {
-            tracing::warn!("download {id}: {}", e.message);
-        }
-    });
-    Ok((StatusCode::ACCEPTED, state))
 }
 
 #[derive(Deserialize)]

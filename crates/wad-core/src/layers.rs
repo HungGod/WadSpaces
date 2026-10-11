@@ -21,12 +21,11 @@ use std::cmp::Ordering;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::catalog::{self, App};
+use crate::catalog::{self, App, Recipe};
 use crate::generator::q;
 use crate::js::{self, Obj};
-use crate::recipes::{Recipe, recipe_for};
 use crate::spec::{DEFAULT_BASE_IMAGE, FEATURES, is_id};
-use crate::{icons, model, signins, url};
+use crate::{signins, url};
 
 /// Where wadd puts a wadspace's wallpaper inside it (its extra folder).
 pub const WALLPAPER_DIR: &str = "/run/wadspaces-extra";
@@ -75,9 +74,9 @@ pub fn host_of(u: &str) -> String {
     }
 }
 
-/// A web app's icon: the bundled one for a site the catalog knows, else the favicon.
+/// A web app's icon: its site's favicon.
 pub fn webapp_icon(u: &str) -> String {
-    icons::local_icon(&favicon(&host_of(u)))
+    favicon(&host_of(u))
 }
 
 // ------------------------------------------------------------------ setups
@@ -381,7 +380,6 @@ fn launcher(app: &App, setup: &Value) -> Option<String> {
         Recipe::Feature { desktop, .. } => desktop.first().map(|d| d.to_string()),
         Recipe::Apt { desktop, .. } => desktop.map(String::from),
         Recipe::Builtin { desktop } => Some(desktop.to_string()),
-        _ => None,
     }
 }
 
@@ -607,16 +605,14 @@ pub fn run_summary(w: &Value, projects: &[Value], slots: &[Value]) -> Vec<String
 
 // ------------------------------------------------------- installing one
 
-/// The wadd workspace a wadspace installs as on a machine: its layers' image
-/// (or the image it had before the layers, until those are built), its name
-/// and wallpaper at run time, a /config of its own, and its secrets. No
+/// The wadd workspace a wadspace installs as on a machine: its layers' image,
+/// its name and wallpaper at run time, a /config of its own, and its secrets. No
 /// Super+number (that follows what's running) and no start with the machine.
 /// `opts`: `{tz, secrets?: [podman secret names]}`.
 pub fn workspace_for(w: &Value, template: &Value, setup: &Value, opts: &Value) -> Value {
     let id = s(w, "id");
-    let legacy = w.get("legacyImage").and_then(Value::as_str).filter(|i| !i.is_empty());
     let base = w.get("base").cloned().unwrap_or(Value::Null);
-    let image = legacy.map(String::from).unwrap_or_else(|| image_ref(&image_key(&base)));
+    let image = image_ref(&image_key(&base));
     let tz = match s(opts, "tz") {
         "" => "Etc/UTC",
         tz => tz,
@@ -626,13 +622,10 @@ pub fn workspace_for(w: &Value, template: &Value, setup: &Value, opts: &Value) -
         env.insert(k.into(), v.into());
     }
     env.insert("TITLE".into(), one_line(s(w, "name")).into());
-    // An image from before the layers has its wallpaper baked in.
-    if legacy.is_none() {
-        let wp = w.get("wallpaper").unwrap_or(&Value::Null);
-        env.insert("WALLPAPER".into(), format!("{WALLPAPER_DIR}/wallpaper.{}", wallpaper_ext(wp)).into());
-        // Filling the screen, as the Builder's preview shows it (the base centres).
-        env.insert("WALLPAPER_MODE".into(), "fill".into());
-    }
+    let wp = w.get("wallpaper").unwrap_or(&Value::Null);
+    env.insert("WALLPAPER".into(), format!("{WALLPAPER_DIR}/wallpaper.{}", wallpaper_ext(wp)).into());
+    // Filling the screen, as the Builder's preview shows it (the base centres).
+    env.insert("WALLPAPER_MODE".into(), "fill".into());
     let mut signins = Vec::new();
     for sl in slots_for(template, setup) {
         let key = s(&sl, "key");
@@ -830,242 +823,6 @@ pub fn import_into(into: &Value, from: &Value, template: &Value, parts: &[&str])
         next["autostart"] = Value::Array(l);
     }
     next
-}
-
-// ------------------------------------------------- wadspaces from before
-
-/// A lowercase id from a name, unique among `taken`.
-fn free_id(name: &str, taken: &[&str]) -> String {
-    let lower = name.to_lowercase();
-    let slug = js::replace_runs(&lower, |c| !(c.is_ascii_lowercase() || c.is_ascii_digit()), "-");
-    let slug = js::trim_dashes(js::ascii_prefix(js::trim_dashes(&slug), 40)).to_string();
-    let base = if slug.is_empty() { "item".to_string() } else { slug };
-    let mut id = base.clone();
-    let mut n = 2;
-    while taken.contains(&id.as_str()) {
-        id = format!("{base}-{n}");
-        n += 1;
-    }
-    id
-}
-
-/// A name not yet in use among templates and customizations.
-fn free_name(name: &str, lib: &Value) -> String {
-    let mut out = name.to_string();
-    let mut n = 2;
-    while name_taken(&out, lib, None) {
-        out = format!("{name} {n}");
-        n += 1;
-    }
-    out
-}
-
-/// "<first app> + <n> apps", for a template made from an old wadspace's desktop.
-fn template_name(apps: &[String]) -> String {
-    let first = apps.first().and_then(|id| catalog::app(id)).map(|a| a.name).unwrap_or_else(|| "Desktop".into());
-    match apps.len() {
-        0 | 1 => first,
-        2 => format!("{first} + 1 app"),
-        n => format!("{first} + {} apps", n - 1),
-    }
-}
-
-/// A wadspace from before the layers (a v1 design: its layout and advanced
-/// settings) as a template, a customization and a v2 wadspace.
-///
-/// - `lib`: `{templates, customizations}` so far (templates are reused when
-///   one has the same apps; names and ids are kept unique).
-/// - `opts`: `{owner, now, signins: [{id, name, app}] (the machine's),
-///   legacyImage: the image it's installed with, or null; projects?: the ids
-///   that exist (others are dropped)}`.
-///
-/// Returns `{template, newTemplate, customization, wadspace, leftOut,
-/// chromeApps, notice}`: `customization` is null when nothing differs from
-/// the template, and `notice` (or null) says what couldn't come across.
-pub fn migrate_wadspace_v1(v1: &Value, lib: &Value, opts: &Value) -> Value {
-    let now = s(opts, "now");
-    let owner = s(opts, "owner");
-    let name = js::trim(s(v1, "name")).to_string();
-    let layout = v1.get("layout").cloned().unwrap_or(json!({ "icons": [] }));
-    let adv = v1.get("advanced").cloned().unwrap_or(Value::Null);
-    let machine_signins = js::arr(opts, "signins");
-    let signin_ref = |id: &str, kind: &str| {
-        let known = machine_signins.iter().find(|x| s(x, "id") == id);
-        json!({ "id": id, "name": known.map(|k| s(k, "name")).filter(|n| !n.is_empty()).unwrap_or(id), "kind": kind })
-    };
-
-    let mut apps: Vec<String> = Vec::new();
-    let mut webapps: Vec<Value> = Vec::new();
-    let mut autostart: Vec<String> = Vec::new();
-    let mut secrets = Obj::new();
-    let (mut full, mut focus) = (false, false);
-    let (mut left_out, mut chrome_apps, mut lost_signins) = (Vec::new(), Vec::new(), Vec::new());
-    let add_app = |apps: &mut Vec<String>, id: &str| {
-        if !apps.iter().any(|a| a == id) {
-            apps.push(id.into());
-        }
-    };
-    for icon in model::ordered_icons(&model::drop_file_icons(&layout)) {
-        let app_id = s(&icon, "appId");
-        let label = match js::trim(s(&icon, "label")) {
-            "" => app_id.to_string(),
-            l => l.to_string(),
-        };
-        let boot = icon.get("autostart").is_some_and(js::truthy);
-        let sign_in = icon.get("signIn").and_then(Value::as_str).filter(|x| !x.is_empty());
-        match recipe_for(app_id, crate::build::site_of(&icon).as_deref()) {
-            Recipe::Webapp { url, chrome } => {
-                add_app(&mut apps, "wadbrowser");
-                if let Some(same) = webapps.iter().find(|w| same_url(s(w, "url"), &url)) {
-                    if boot {
-                        autostart.push(format!("web:{}", s(same, "id")));
-                    }
-                    continue;
-                }
-                let base = webapp_id(&label);
-                let mut id = base.clone();
-                let mut n = 2;
-                while webapps.iter().any(|w| s(w, "id") == id) {
-                    id = format!("{base}-{n}");
-                    n += 1;
-                }
-                if chrome {
-                    chrome_apps.push(label.clone());
-                }
-                if boot {
-                    autostart.push(format!("web:{id}"));
-                }
-                if let Some(si) = sign_in {
-                    secrets.insert(format!("web:{id}"), signin_ref(si, signins::WEB));
-                }
-                webapps.push(json!({ "id": id, "name": label, "url": url }));
-            }
-            Recipe::Soon { .. } => left_out.push(label),
-            _ if app_id == "wadbrowser" || app_id == "wadbrowser-focus" => {
-                if app_id == "wadbrowser" {
-                    full = true
-                } else {
-                    focus = true
-                }
-                add_app(&mut apps, "wadbrowser");
-                if boot {
-                    autostart.push("app:wadbrowser".into());
-                }
-            }
-            _ => match catalog::app(app_id) {
-                Some(app) => {
-                    add_app(&mut apps, &app.id);
-                    if boot {
-                        autostart.push(format!("app:{}", app.id));
-                    }
-                    if let Some(si) = sign_in {
-                        match &app.secret {
-                            Some((kind, _)) => {
-                                secrets.insert(format!("app:{}", app.id), signin_ref(si, kind));
-                            }
-                            None => lost_signins.push(label),
-                        }
-                    }
-                }
-                None => left_out.push(label),
-            },
-        }
-    }
-    let mut seen_boot = Vec::new();
-    autostart.retain(|k| {
-        let first = !seen_boot.contains(k);
-        seen_boot.push(k.clone());
-        first
-    });
-    let browser_mode = if focus && !full { "focus" } else { "browser" };
-    let tools: Vec<&str> = in_order(strs(&adv, "tools")).into_iter().filter(|t| *t != "git").collect();
-
-    // The template: one with the same apps, else a new one.
-    let mut set = apps.clone();
-    set.sort();
-    let existing = js::arr(lib, "templates").iter().find(|t| {
-        let mut a: Vec<String> = strs(t, "apps").into_iter().map(String::from).collect();
-        a.sort();
-        !deleted(t) && a == set
-    });
-    let (template, new_template) = match existing {
-        Some(t) => (t.clone(), false),
-        None => {
-            let tname = free_name(&template_name(&apps), lib);
-            let taken: Vec<&str> = js::arr(lib, "templates").iter().map(|t| s(t, "id")).collect();
-            let t = json!({
-                "id": free_id(&tname, &taken), "owner": owner, "name": tname, "description": "",
-                "apps": apps, "createdAt": now, "updatedAt": now,
-            });
-            (t, true)
-        }
-    };
-    let tid = s(&template, "id").to_string();
-
-    // A customization when anything differs from the template.
-    let differs = !webapps.is_empty() || !tools.is_empty() || !autostart.is_empty() || browser_mode == "focus";
-    let customization = if differs {
-        let lib_now = {
-            let mut l = lib.clone();
-            if new_template && let Some(ts) = l.get_mut("templates").and_then(Value::as_array_mut) {
-                ts.push(template.clone());
-            }
-            l
-        };
-        let cname = free_name(&format!("{} setup", if name.is_empty() { "Wadspace" } else { &name }), &lib_now);
-        let taken: Vec<&str> = js::arr(lib, "customizations").iter().map(|c| s(c, "id")).collect();
-        json!({
-            "id": free_id(&cname, &taken), "owner": owner, "name": cname, "description": "",
-            "templateId": tid, "browserMode": browser_mode, "webapps": webapps, "extensions": [],
-            "tools": tools, "autostart": autostart, "createdAt": now, "updatedAt": now,
-        })
-    } else {
-        Value::Null
-    };
-    let base = match customization.get("id").and_then(Value::as_str) {
-        Some(cid) => json!({ "kind": "customization", "id": cid }),
-        None => json!({ "kind": "template", "id": tid }),
-    };
-
-    let known_projects = opts.get("projects").and_then(Value::as_array);
-    let projects: Vec<Value> =
-        js::arr(&adv, "projects").iter().filter(|p| known_projects.is_none_or(|k| k.contains(p))).cloned().collect();
-    let wallpaper = layout
-        .get("wallpaper")
-        .filter(|w| w.is_object())
-        .cloned()
-        .unwrap_or(json!({ "type": "color", "value": "#0b0b14" }));
-    let mut wadspace = json!({
-        "version": 2, "id": s(v1, "id"), "owner": owner, "name": name, "description": s(v1, "description"),
-        "base": base, "wallpaper": wallpaper, "projects": projects, "secrets": secrets,
-        "createdAt": now, "updatedAt": v1.get("updatedAt").and_then(Value::as_str).unwrap_or(now),
-    });
-    if let Some(img) = opts.get("legacyImage").and_then(Value::as_str).filter(|i| !i.is_empty()) {
-        wadspace["legacyImage"] = img.into();
-    }
-
-    let mut notes = Vec::new();
-    let mut gone = left_out.clone();
-    gone.extend(lost_signins.iter().map(|l| format!("{l}'s saved sign-in")));
-    if !gone.is_empty() {
-        notes.push(format!("Left out of {name}: {}.", gone.join(", ")));
-    }
-    if !chrome_apps.is_empty() {
-        let verb = if chrome_apps.len() == 1 { "opens" } else { "open" };
-        notes.push(format!(
-            "{} {verb} in WadBrowser now, which can't do video calls or play DRM video.",
-            chrome_apps.join(", ")
-        ));
-    }
-    json!({
-        "template": template,
-        "newTemplate": new_template,
-        "customization": customization,
-        "wadspace": wadspace,
-        "leftOut": left_out,
-        "chromeApps": chrome_apps,
-        "notice": if notes.is_empty() { Value::Null } else { notes.join(" ").into() },
-    })
 }
 
 #[cfg(test)]

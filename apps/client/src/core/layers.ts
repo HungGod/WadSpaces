@@ -11,8 +11,13 @@
 //   Wadspace       a template or customization made into a space: name,
 //                  wallpaper, project folders and secrets (saved sign-ins).
 //                  No image of its own: wadd mounts those when it starts.
-import type { Wallpaper } from "./model";
 import { call } from "./wasm";
+
+/** A wadspace's background: a gradient or colour (CSS), or a picture (a URL). */
+export interface Wallpaper {
+  type: "gradient" | "image" | "color";
+  value: string;
+}
 
 /** A saved sign-in's kind: a secret only fits a slot of its kind. */
 export type SecretKind = "web" | "obsidian" | "steam" | "vscode-claude-code" | "vscode-codex";
@@ -78,7 +83,7 @@ export interface BaseRef {
 }
 
 /** A wadspace: no image of its own; its wallpaper, projects and secrets are mounted at start. */
-export interface WadspaceV2 {
+export interface Wadspace {
   version: 2;
   id: string;
   owner: string;
@@ -90,8 +95,6 @@ export interface WadspaceV2 {
   projects: string[];
   /** The sign-in per slot ("web:<id>", "ext:<id>", "app:<id>"); a slot left out keeps nothing ("Don't save"). */
   secrets: Record<string, SignInRef>;
-  /** Migrated from before the layers: it runs this old image until its layers are built. */
-  legacyImage?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -154,9 +157,9 @@ export interface Library {
 export interface Stack {
   template: Template;
   /** Its customizations, oldest first, each with the wadspaces built on it. */
-  customizations: { customization: Customization; wadspaces: WadspaceV2[] }[];
+  customizations: { customization: Customization; wadspaces: Wadspace[] }[];
   /** Wadspaces built on the template itself. */
-  wadspaces: WadspaceV2[];
+  wadspaces: Wadspace[];
 }
 
 /** A layer's build folder, as wadd builds it. `sha` labels the built image. */
@@ -185,18 +188,6 @@ export interface SecretUser {
   id: string;
   name: string;
   slot: string;
-}
-
-/** A wadspace from before the layers, as the layers. */
-export interface Migrated {
-  template: Template;
-  newTemplate: boolean;
-  customization: Customization | null;
-  wadspace: WadspaceV2;
-  leftOut: string[];
-  chromeApps: string[];
-  /** What couldn't come across, to tell the user once (or null). */
-  notice: string | null;
 }
 
 /** The kinds a slot can keep. */
@@ -229,7 +220,7 @@ export const defaultBrowserSecretName = (setupName: string, slot: Slot): string 
 export const fits = (secret: { kind: string }, slot: { kind: string }): boolean => call("fits", secret, slot);
 export const kindOfSlotKey = (key: string): SecretKind | null => call("kindOfSlotKey", key);
 /** Who uses each saved sign-in, by its id. */
-export const secretUse = (wadspaces: WadspaceV2[], browsers: BrowserSetup[]): Record<string, SecretUser[]> => call("secretUse", wadspaces, browsers);
+export const secretUse = (wadspaces: Wadspace[], browsers: BrowserSetup[]): Record<string, SecretUser[]> => call("secretUse", wadspaces, browsers);
 
 /** Whether anything in the template opens folders in a window (else projects get no desktop icon). */
 export const opensFolders = (template: Template): boolean => call("opensFolders", template);
@@ -255,12 +246,12 @@ export const customizationLayer = (c: Customization, t: Template): Layer => call
 export const wallpaperExt = (w: Wallpaper): "png" | "jpg" => call("wallpaperExt", w);
 /** What wadd mounts when the wadspace starts, for the Image tab. */
 export const runSummary = (
-  w: Pick<WadspaceV2, "wallpaper" | "projects" | "secrets">,
+  w: Pick<Wadspace, "wallpaper" | "projects" | "secrets">,
   projects: { id: string; name: string; mountName: string }[],
   slots: Slot[],
 ): string[] => call("runSummary", w, projects, slots);
 /** The wadd workspace a wadspace installs as (its image, env, /config, sign-ins). */
-export const workspaceFor = (w: WadspaceV2, template: Template, setup: Setup, opts: { tz?: string; secrets?: string[] }): Record<string, unknown> =>
+export const workspaceFor = (w: Wadspace, template: Template, setup: Setup, opts: { tz?: string; secrets?: string[] }): Record<string, unknown> =>
   call("workspaceFor", w, template, setup, opts);
 
 /** Web apps used anywhere already, to add in a click. */
@@ -269,7 +260,7 @@ export const knownWebapps = (customizations: Setup[], browsers: { webapps: WebAp
 export const named = (name: string, taken: { name: string; id?: string }[], except?: string): boolean =>
   call("named", name, taken, ...(except ? [except] : []));
 /** Each template with what's built on it (deleted ones left out). */
-export const stacks = (lib: Library & { wadspaces: WadspaceV2[] }): Stack[] => call("stacks", lib);
+export const stacks = (lib: Library & { wadspaces: Wadspace[] }): Stack[] => call("stacks", lib);
 /** A template or customization name already in use (but `except`). */
 export const nameTaken = (name: string, lib: Library, except?: string): boolean => call("nameTaken", name, lib, ...(except ? [except] : []));
 
@@ -278,10 +269,3 @@ export const importable = (from: Setup, template: Template): Record<ImportPart, 
   call("importable", from, template);
 /** `into` with the chosen parts of `from` merged in. */
 export const importInto = (into: Setup, from: Setup, template: Template, parts: ImportPart[]): Setup => call("importInto", into, from, template, parts);
-
-/** A wadspace from before the layers (a v1 design) as a template, a customization and a v2 wadspace. */
-export const migrateWadspaceV1 = (
-  v1: { id: string; name: string; description: string; layout: unknown; advanced?: unknown; updatedAt?: string },
-  lib: Library,
-  opts: { owner: string; now: string; signins: { id: string; name: string; app: string }[]; legacyImage: string | null; projects?: string[] },
-): Migrated => call("migrateWadspaceV1", v1, lib, opts);

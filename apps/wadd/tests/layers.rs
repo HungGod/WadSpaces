@@ -56,7 +56,6 @@ async fn env_with(icons: Option<Arc<Icons>>) -> Env {
         bus.clone(),
         Settings {
             ready_timeout: Duration::from_secs(10),
-            max_parallel_pulls: 3,
             projects_dir: "/p".into(),
             signins_dir: d.path().join("signins"),
             state_dir: state.clone(),
@@ -264,17 +263,38 @@ async fn a_wadspace_installs_on_its_layer_with_its_wallpaper_and_sign_ins() {
 }
 
 #[tokio::test]
-async fn from_before_the_layers_it_runs_its_old_image() {
+async fn a_wadspace_on_layers_it_doesnt_have_is_refused() {
     let e = env().await;
-    let mut old = wadspace("academy");
-    old["legacyImage"] = "localhost/wadspaces-academy:latest".into();
-    let req = Install { wadspace: old, template: dev(), customization: Some(plus()), tz: None };
-    let ws = images::install(&e.reg, &e.fake, "academy", &req).await.unwrap().workspace;
-    assert_eq!(ws.image, "localhost/wadspaces-academy:latest");
-    assert!(!ws.env.iter().any(|(k, _)| k == "WALLPAPER"), "its wallpaper is in the image");
     // A wadspace that isn't on what's sent is refused.
     let wrong = Install { wadspace: wadspace("academy"), template: dev(), customization: None, tz: None };
     assert_eq!(images::install(&e.reg, &e.fake, "academy", &wrong).await.unwrap_err().code, ErrorCode::BadRequest);
+}
+
+#[tokio::test]
+async fn wadspaces_from_before_the_layers_go_with_their_images() {
+    let e = env().await;
+    let req = Install { wadspace: wadspace("academy"), template: dev(), customization: Some(plus()), tz: None };
+    images::install(&e.reg, &e.fake, "academy", &req).await.unwrap();
+    let mut old = common::ws(
+        "writing",
+        "ghcr.io/hunggod/wadspaces-cosmic-bodybuilding:latest",
+        wad_proto::v1::Display::Host,
+        None,
+    );
+    old.volumes = vec!["wad-writing-obsidian:/config/.config/obsidian:z".into()];
+    let mut list = e.reg.workspaces();
+    list.push(old);
+    e.reg.set_workspaces(list).await.unwrap();
+    e.fake.with(|m| {
+        m.images.insert("ghcr.io/hunggod/wadspaces-cosmic-bodybuilding:latest".into());
+    });
+    e.reg.sweep_old().await;
+    let ids: Vec<String> = e.reg.workspaces().into_iter().map(|w| w.id).collect();
+    assert_eq!(ids, ["academy"]);
+    assert!(!e.fake.0.lock().unwrap().images.contains("ghcr.io/hunggod/wadspaces-cosmic-bodybuilding:latest"));
+    // Nothing left to do the next time.
+    e.reg.sweep_old().await;
+    assert_eq!(e.reg.workspaces().len(), 1);
 }
 
 #[tokio::test]

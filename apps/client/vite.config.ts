@@ -28,8 +28,7 @@ export default defineConfig({
       "@": src,
     },
   },
-  // Matches where wadd serves the built app (wadcreator.port), so Firebase
-  // auth and CORS behave the same in dev and on the machine.
+  // A fixed port: the Tauri app's devUrl (src-tauri/tauri.conf.json) points here.
   build: { rollupOptions: { input: pages } },
   server: { host: "localhost", port: 8081, strictPort: true },
   preview: { host: "localhost", port: 8081, strictPort: true },

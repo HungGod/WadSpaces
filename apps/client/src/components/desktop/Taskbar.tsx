@@ -3,7 +3,6 @@
 // the machine's HUD shows those, outside the wadspace.
 import { useState } from "react";
 import clsx from "clsx";
-import { localIcon } from "@core/catalog/icons";
 import type { MenuApp, MenuCategory } from "@core/layers";
 import { MENU_APP_W, MENU_CAT_W, MENU_ROW_H, PANEL_H, SMALL_ICON, START_W, TASK_GAP, appListOffset, taskButtonWidth } from "./geometry";
 import { LOGO } from "./look";
@@ -48,7 +47,7 @@ export function Taskbar({ screenW, wins, activeId, menu, menuOpen, onToggleMenu,
             )}
             style={{ left: START_W + TASK_GAP + i * (btnW + TASK_GAP), width: btnW, height: PANEL_H - 6 }}
           >
-            <img src={localIcon(w.iconUrl)} alt="" className="shrink-0 object-contain" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
+            <img src={w.iconUrl} alt="" className="shrink-0 object-contain" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
             <span className="overflow-hidden pr-[5px]">{w.title}</span>
           </button>
         ))}
@@ -84,7 +83,7 @@ function StartMenu({ menu, onLaunch }: { menu: MenuCategory[]; onLaunch: (app: M
         >
           {cat.apps.map((a) => (
             <button key={a.key} type="button" onClick={() => onLaunch(a)} className={clsx(row, "gap-[10px] pl-[10px]")} style={{ height: MENU_ROW_H }}>
-              <img src={localIcon(a.iconUrl)} alt="" className="shrink-0 object-contain" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
+              <img src={a.iconUrl} alt="" className="shrink-0 object-contain" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
               <span className="truncate">{a.name}</span>
             </button>
           ))}

@@ -9,7 +9,7 @@ import { useState } from "react";
 import { ChevronDown, Copy, Hammer, Layers, Monitor, Pencil, Play, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { appById, extensionById, toolById } from "@core/catalog/catalog";
-import { desktopFor, emptySetup, imageKey, imageRef, stacks, type Customization, type DesktopItem, type LayerKey, type Setup, type Stack, type Template, type WadspaceV2 } from "@core/layers";
+import { desktopFor, emptySetup, imageKey, imageRef, stacks, type Customization, type DesktopItem, type LayerKey, type Setup, type Stack, type Template, type Wadspace } from "@core/layers";
 import { timeAgo } from "@/lib/format";
 import { openWadspace } from "@/lib/launch";
 import { useApp, type LayerKind } from "@/lib/store";
@@ -246,7 +246,7 @@ function StartPicker({ stack, onClose }: { stack?: Stack; onClose: () => void })
       </Modal>
     );
   const t = stack.template;
-  const wadspaceRow = (w: WadspaceV2, depth: number, setup: Setup) => (
+  const wadspaceRow = (w: Wadspace, depth: number, setup: Setup) => (
     <WadspaceRow key={w.id} w={w} depth={depth} setup={setup} template={t} onEdit={() => go(() => draft.edit(w, lib))} onCopy={() => go(() => draft.copy(w, lib))} onDone={onClose} />
   );
   return (
@@ -302,7 +302,7 @@ function Row({ depth, kind, name, detail, items, wallpaper, image, onDetails, ch
   );
 }
 
-function WadspaceRow({ w, depth, setup, template, onEdit, onCopy, onDone }: { w: WadspaceV2; depth: number; setup: Setup; template: Template; onEdit: () => void; onCopy: () => void; onDone: () => void }) {
+function WadspaceRow({ w, depth, setup, template, onEdit, onCopy, onDone }: { w: Wadspace; depth: number; setup: Setup; template: Template; onEdit: () => void; onCopy: () => void; onDone: () => void }) {
   const projects = useApp((s) => s.projects);
   const openDetails = useUi((s) => s.openDetails);
   const mounted = w.projects.flatMap((id) => projects.find((p) => p.id === id) ?? []);

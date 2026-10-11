@@ -1,28 +1,25 @@
-//! wadd's state on disk. The Rust wadd keeps the Python wadd's file formats
-//! wherever they work (so `bootc rollback` to the Python wadd still reads
-//! them):
+//! wadd's state on disk:
 //!
 //! ```text
-//! <state_dir>/enrollment.json          the account link (cloud.py)
-//! <state_dir>/projects/<id>.json       project documents (projects.py)
-//! <state_dir>/extra/<ws>/projects.json what a launch mounted (projects.py write_manifest)
-//! <state_dir>/runs.jsonl               when each workspace ran (runs.py)
-//! <state_dir>/session.json             the session in progress (manager.py)
-//! <state_dir>/library/<coll>/<id>.json WadSpaces Client's library (library.py)
-//! <state_dir>/seeded-secrets.json      secrets seeded from the image (manager.py)
+//! <state_dir>/enrollment.json          the account link
+//! <state_dir>/projects/<id>.json       project documents
+//! <state_dir>/extra/<ws>/projects.json what a launch mounted
+//! <state_dir>/runs.jsonl               when each workspace ran
+//! <state_dir>/session.json             the session in progress
+//! <state_dir>/library/<coll>/<id>.json WadSpaces Client's library
+//! <state_dir>/seeded-secrets.json      secrets seeded from the image
 //! ```
 //!
-//! The workspace list is state, `<state_dir>/workspaces.json` (it was
-//! /etc/wadspaces/workspaces.yaml, which legacy.rs still reads when there's
-//! no state yet), and the image's own workspaces come in as updates to it
-//! (vendor.rs).
+//! The workspace list is state, `<state_dir>/workspaces.json`, checked
+//! (workspaces.rs) before it's taken on, and the image's own workspaces come
+//! in as updates to it (vendor.rs).
 
 pub mod folders;
-pub mod legacy;
 pub mod projects;
 pub mod runs;
 pub mod state;
 pub mod vendor;
+pub mod workspaces;
 
 pub use state::State;
 
@@ -32,7 +29,7 @@ pub enum Error {
     Io(String, #[source] std::io::Error),
     #[error("{0}: {1}")]
     Yaml(String, String),
-    /// The file is readable but not a valid configuration (Python's ConfigError).
+    /// The file is readable but not a valid configuration.
     #[error("{0}")]
     Config(String),
 }

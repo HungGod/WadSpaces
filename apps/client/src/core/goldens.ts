@@ -6,39 +6,14 @@
 //
 // A case is a function name and its arguments as JSON. Bytes (tar archives,
 // wallpapers) are {"$bytes": base64}. A function that throws gives {"err"}.
-import { presets, presetWadspace } from "./presets";
-import { defaultAdvanced, type Layout, type LayoutIcon, type WadspaceSpec } from "./model";
-import { newSpec, type CreatorSpec, type WaddSpec } from "./spec";
+import type { WaddSpec } from "./spec";
 import type { Project, ProjectDraft } from "./projects";
-import type { BrowserSetup, Customization, Setup, Template, WadspaceV2 } from "./layers";
+import type { BrowserSetup, Customization, Setup, Template, Wadspace } from "./layers";
 
 export interface Case {
   fn: string;
   args: unknown[];
 }
-
-const icon = (appId: string, row: number, extra: Partial<LayoutIcon> = {}): LayoutIcon => ({
-  id: `${appId}-${row}`,
-  appId,
-  label: appId,
-  iconUrl: "",
-  color: "#000",
-  x: 0,
-  y: 0,
-  cell: { col: 0, row },
-  ...extra,
-});
-
-const layout = (icons: LayoutIcon[], grid = true): Layout => ({ wallpaper: { type: "color", value: "#000" }, icons, grid });
-
-const ws = (id: string, icons: LayoutIcon[], adv: Partial<WadspaceSpec["advanced"]> = {}, extra: Partial<WadspaceSpec> = {}): WadspaceSpec => ({
-  id,
-  name: extra.name ?? id,
-  description: "",
-  layout: layout(icons),
-  advanced: { ...defaultAdvanced("Pacific/Fiji"), ...adv },
-  ...extra,
-});
 
 const project = (id: string, p: Partial<Project> = {}): Project => ({
   id,
@@ -59,74 +34,6 @@ const PROJECTS: Project[] = [
   project("photos", { name: "Photos", mountName: "Photos", source: { kind: "drive", uuid: "1234-ABCD", label: "Photos", fstype: "exfat", subpath: "2026" } }),
   project("here", { name: "Here", mountName: "Here", source: { kind: "folder", machineId: "m1", machineName: "Surface", path: "/var/home/wad/Here" } }),
   project("old", { legacy: true, source: { kind: "folder", machineId: "", machineName: "", path: "" } }),
-];
-
-// Builder wadspaces: the presets' desktops are added by the test (presetWadspace).
-const WADSPACES: WadspaceSpec[] = [
-  ws("empty-abc123", []),
-  ws("mixed-abc123", [
-    icon("vscode", 0),
-    icon("terminal", 1, { autostart: true }),
-    icon("gimp", 2),
-    icon("claude", 3),
-    icon("github", 4, { launcher: "kale", label: "Git Hub" }), // from before WadBrowser: a web app
-    icon("brave", 5),
-    icon("vscode", 6), // twice: one install
-    icon("custom-thing", 7, { label: "My Site", url: "https://example.com/app?x=1" }),
-    icon("custom-fav", 8, { label: "Fav", iconUrl: "https://www.google.com/s2/favicons?domain=docs.rs&sz=128" }),
-    icon("nowhere", 9, { label: "Nowhere" }),
-    icon("chrome", 10),
-    icon("wadbrowser", 11),
-    icon("spotify", 12), // a Chrome web app (DRM)
-    icon("custom-up", 13, { label: "Uploaded", url: "https://up.example", iconUrl: "data:image/png;base64,iVBORw0KGgo=" }),
-    icon("custom-pic", 14, { label: "Picture", url: "https://pic.example", iconUrl: "https://pic.example/me.png" }),
-  ]),
-  ws("browse-abc123", [icon("wadbrowser-focus", 0), icon("discord", 1), icon("gmail", 2)]),
-  ws(
-    "free-abc123",
-    [icon("obsidian", 0, { x: 0.5, y: 0.2, cell: undefined }), icon("firefox", 0, { x: 0.1, y: 0.9, cell: undefined }), icon("krita", 0, { x: 0.1, y: 0.1, cell: undefined })],
-    { display: "stream", port: 3170, hotkey: 7, image: "ghcr.io/me/free:1", persistConfig: false, devices: [], secrets: [], shmSize: "", autostart: true },
-    { name: "Free “Layout” — ünïcødé $HOME `x` \\ \"q\"" },
-  ),
-  ws("tools-abc123", [icon("piskel", 0, { launcher: "kale" }), icon("spritesheet-packer", 1, { launcher: "kale" })], {
-    tools: ["python", "cpp", "git", "hplip"],
-    projects: ["notes", "gone", "missing", "photos"],
-    kaleResources: [{ app_name: "Claude", app_url: "https://claude.ai" }, { app_name: "Piskel", app_url: "https://www.piskelapp.com/" }],
-    env: { TZ: "Europe/Paris", ZED: "last", A: "first", QUOTE: 'say "hi"', EMPTY: "" },
-    secrets: ["github_token", "openrouter_key"],
-  }),
-  { ...ws("files-abc123", [icon("vscode", 0)]), layout: { ...layout([icon("vscode", 0), { ...icon("x", 1), kind: "file" } as LayoutIcon]) } },
-];
-
-const CREATOR: CreatorSpec[] = [
-  newSpec(),
-  newSpec({ id: "x", name: "X" }),
-  newSpec({ id: "stream-1", name: "Stream 1", display: "stream", port: 3200, hotkey: 3, autostart: true }),
-  newSpec({
-    id: "odd",
-    name: 'Odd "name" with $vars and `ticks` \\ ünï',
-    features: ["obsidian", "git", "chrome"],
-    webapps: [
-      { name: "Mail", url: "https://mail.google.com" },
-      { id: "slack", name: "Slack \"work\"", url: "https://app.slack.com/client", chrome: true },
-      { id: "mine", name: "Mine", url: "https://mine.example", iconUrl: "data:image/png;base64,iVBORw0KGgo=" },
-    ],
-    defaultBrowser: "full",
-    aptApps: [{ id: "gimp", packages: ["gimp"], desktop: "gimp.desktop" }, { id: "ardour", packages: ["ardour", "ardour-data"] }],
-    wallpaper: { fileName: "wallpaper.jpg", mode: "tile", color: "#123456" },
-    layout: [{ app: "vscode", desktop: "code.desktop", label: "Code", autostart: true }, { app: "gimp", label: "GIMP" }],
-    projects: [{ id: "p1", name: "Notes", mount: "Notes" }, { id: "p2", name: "Web app", mount: "Web" }],
-    env: { TZ: "Pacific/Fiji", PUID: "1000", PGID: "1000", "WEIRD-KEY": "yes", NUM: "1234", BOOL: "true" },
-    secrets: [],
-    devices: ["/dev/dri", "/dev/kvm"],
-    shmSize: "2g",
-    persistConfig: false,
-  }),
-  newSpec({ id: "plain", name: "Plain", env: {}, secrets: [], devices: [], shmSize: "", persistConfig: false, features: [] }),
-  newSpec({ id: "wall", name: "Wall", wallpaper: { fileName: "wallpaper.png", mode: "center", color: "#0b0b14" } }),
-  newSpec({ id: "Bad ID", name: " ", image: " ", display: "stream", port: 8080, hotkey: 12, webapps: [{ name: "x", url: "not a url" }, { name: "y", url: "" }] }),
-  newSpec({ id: "lowport", name: "Low", display: "stream", port: 80, hotkey: 0 }),
-  ...presets(),
 ];
 
 const WADD: WaddSpec[] = [
@@ -214,8 +121,8 @@ const C = (id: string, setup: Setup, extra: Partial<Customization> = {}): Custom
   ...extra,
 });
 const CUSTOMIZATIONS: Customization[] = [C("dev-plus", SETUPS[1], { name: "Dev plus" }), C("notes-plus", SETUPS[2], { createdAt: "2026-02-01" }), C("old-c", SETUPS[1], { deletedAt: "2026-04-01" })];
-const ref = (id: string, kind = "web") => ({ id, name: `${id}-name`, kind }) as WadspaceV2["secrets"][string];
-const W2 = (id: string, base: WadspaceV2["base"], extra: Partial<WadspaceV2> = {}): WadspaceV2 => ({
+const ref = (id: string, kind = "web") => ({ id, name: `${id}-name`, kind }) as Wadspace["secrets"][string];
+const W2 = (id: string, base: Wadspace["base"], extra: Partial<Wadspace> = {}): Wadspace => ({
   version: 2,
   id,
   owner: "me",
@@ -229,13 +136,13 @@ const W2 = (id: string, base: WadspaceV2["base"], extra: Partial<WadspaceV2> = {
   updatedAt: "2026-05-01",
   ...extra,
 });
-const V2: WadspaceV2[] = [
+const WADSPACES: Wadspace[] = [
   W2("novel", { kind: "template", id: "writing" }, { secrets: { "app:obsidian": ref("s-obs", "obsidian") }, wallpaper: { type: "image", value: "data:image/jpeg;base64,/9j/" } }),
   W2("work", { kind: "customization", id: "dev-plus" }, {
     secrets: { "web:github": ref("s-gh"), "web:google-cloud": ref("s-g"), "ext:anthropic.claude-code": ref("s-cc", "vscode-claude-code") },
     createdAt: "2026-04-01",
   }),
-  W2("legacy", { kind: "template", id: "old" }, { legacyImage: "localhost/wadspaces-legacy:latest", name: "Line\nbreak" }),
+  W2("odd-name", { kind: "template", id: "old" }, { name: "Line\nbreak" }),
   W2("trashed", { kind: "template", id: "dev" }, { deletedAt: "2026-06-01" }),
 ];
 const BROWSERS: BrowserSetup[] = [
@@ -247,41 +154,11 @@ export function cases(): Case[] {
   const c: Case[] = [];
   const add = (fn: string, ...args: unknown[]) => c.push({ fn, args });
 
-  // model
-  for (const tz of [undefined, "Pacific/Fiji"]) add("defaultAdvanced", ...(tz ? [tz] : []));
-  for (const w of WADSPACES) {
-    add("dropFileIcons", w.layout);
-    add("orderedIcons", w.layout);
-    add("orderedIcons", { ...w.layout, grid: false });
-  }
-
   // spec
   for (const s of STRINGS) add("slugify", s);
-  for (const p of [{}, { id: "x", display: "stream" as const }, { id: "y", name: "Y", features: [] as never[], env: {} }]) add("newSpec", p);
-  for (const s of CREATOR) add("wadbrowserConf", s);
   for (const w of WADD) {
     add("quadlet", w);
     add("quadlet", w, "/srv/p", "/srv/s");
-  }
-
-  // recipes and icons
-  for (const [id, d] of [["vscode"], ["brave"], ["unknown-app"], ["unknown-app", "example.com"], ["unknown-app", "http://x.org/a"], ["claude", "ignored.com"], ["wadbrowser"], ["wadbrowser-focus"], ["spotify"], ["zoom"]] as [string, string?][]) {
-    add("recipeFor", id, ...(d ? [d] : []));
-  }
-  for (const u of [
-    "https://www.google.com/s2/favicons?domain=code.visualstudio.com&sz=128",
-    "https://www.google.com/s2/favicons?sz=64&domain=firefox.com",
-    "https://www.google.com/s2/favicons?domain=unknown.example",
-    "https://www.google.com/s2/favicons",
-    "/catalog/chrome.png",
-    "https://example.com/icon.png",
-  ])
-    add("localIcon", u);
-
-  // presets
-  for (const id of ["writing", "iq-dev", "wad-c", "kale-b", "vanua-academy", "kale-p", "nope"]) {
-    add("presetWadspace", id);
-    add("presetProjects", id);
   }
 
   // projects
@@ -371,8 +248,8 @@ export function cases(): Case[] {
   }
   for (const [a, b] of [["web", "web"], ["wadbrowser", "web"], ["obsidian", "web"], ["steam", "steam"]]) add("fits", { kind: a }, { kind: b });
   for (const k of ["web:x", "ext:openai.chatgpt", "ext:github.copilot-chat", "ext:unknown.ext", "app:steam", "app:obsidian", "app:vscode", "nokind", "zzz:x"]) add("kindOfSlotKey", k);
-  add("secretUse", V2, BROWSERS);
-  for (const w of V2) {
+  add("secretUse", WADSPACES, BROWSERS);
+  for (const w of WADSPACES) {
     const r = TEMPLATES.find((t) => t.id === (w.base.kind === "template" ? w.base.id : CUSTOMIZATIONS.find((c) => c.id === w.base.id)?.templateId))!;
     const st = w.base.kind === "customization" ? CUSTOMIZATIONS.find((c) => c.id === w.base.id)! : SETUPS[0];
     add("runSummary", w, PROJECTS, [...slots, { key: "app:obsidian", kind: "obsidian", label: "Obsidian", appId: "Obsidian", iconUrl: "" }]);
@@ -382,17 +259,9 @@ export function cases(): Case[] {
   }
   for (const id of ["anthropic.claude-code", "a.b.c", "nodot", "a.$(x)", ""]) add("isExtensionId", id);
   add("knownWebapps", [...SETUPS, ...CUSTOMIZATIONS], BROWSERS);
-  for (const [n, e] of [["work", undefined], [" WORK ", undefined], ["work", "work"], ["new", undefined]] as [string, string?][]) add("named", n, V2, ...(e ? [e] : []));
-  add("stacks", { ...LIB, wadspaces: V2 });
+  for (const [n, e] of [["work", undefined], [" WORK ", undefined], ["work", "work"], ["new", undefined]] as [string, string?][]) add("named", n, WADSPACES, ...(e ? [e] : []));
+  add("stacks", { ...LIB, wadspaces: WADSPACES });
   for (const [n, e] of [["dev", undefined], ["Dev plus", "dev-plus"], [" dev PLUS ", undefined], ["Gone", undefined], ["Fresh", undefined]] as [string, string?][]) add("nameTaken", n, LIB, ...(e ? [e] : []));
-  const signins = [{ id: "s-obs", name: "Notes", app: "obsidian" }, { id: "s-web", name: "Google", app: "web" }];
-  const opts = { owner: "me", now: "2026-10-11T00:00:00.000Z", signins, legacyImage: null };
-  for (const w of WADSPACES) {
-    add("migrateWadspaceV1", w, LIB, opts);
-    add("migrateWadspaceV1", w, { templates: [], customizations: [] }, { ...opts, legacyImage: `localhost/wadspaces-${w.id}:latest`, projects: ["notes"] });
-  }
-  for (const p of presets()) add("migrateWadspaceV1", presetWadspace(p.id), LIB, opts);
-  add("migrateWadspaceV1", { id: "x", name: "", description: "" }, LIB, opts);
 
   // tar
   add("tar", [

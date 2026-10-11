@@ -32,7 +32,7 @@ import { Page } from "@/components/Page";
 import { RunHistory } from "@/components/RunHistory";
 import { TailnetBadge, TailnetCard } from "@/components/Tailnet";
 import { Thumb } from "@/components/Thumb";
-import { Badge, Button, EmptyState, Input, Meter, PageHeader, Progress, Segmented } from "@/components/ui";
+import { Badge, Button, EmptyState, Input, Meter, PageHeader, Segmented } from "@/components/ui";
 import { timeAgo } from "@/lib/format";
 import { THIS_MACHINE, useApp } from "@/lib/store";
 import type { Machine } from "@/lib/types";
@@ -269,12 +269,6 @@ function Containers({ m }: { m: Machine }) {
                   <ContainerStatus c={c} />
                   <Badge>{!ws ? "On this machine" : c.mode === "stream" ? "Streamed display" : "On screen"}</Badge>
                 </div>
-                {c.download && (
-                  <div className="mt-2 max-w-md">
-                    <Progress value={c.download.progress ?? 0} />
-                    <div className="mt-1 text-xs text-muted">{c.download.label}</div>
-                  </div>
-                )}
                 {c.phase === "error" && c.error && <div className="mt-1 break-words text-xs text-danger">{c.error}</div>}
               </div>
               <div className="flex items-center gap-0.5">

@@ -3,7 +3,6 @@
 // Builder's Step 3 makes them as it saves a wadspace.
 import { useEffect, useState } from "react";
 import { Globe, Loader2, LogOut, Trash2 } from "lucide-react";
-import catalog from "@core-data/apps.json";
 import { appById, SECRET_KINDS } from "@core/catalog/catalog";
 import { signInKinds, type SecretKind } from "@core/layers";
 import { WEB, signInPaths } from "@core/signins";
@@ -12,21 +11,17 @@ import { useApp } from "@/lib/store";
 import type { WaddSignIn } from "@/lib/wadd";
 import { Button, Input, Label, Modal } from "./ui";
 
-type CatalogApp = { id: string; name: string };
-/** Apps sign-ins from before the kinds were for. */
-const OLD_APPS = catalog as CatalogApp[];
-
 /** Each kind's picture: the app (or extension) it's for. */
 const KIND_ICON: Record<string, string> = {
   obsidian: appById("obsidian")?.icon ?? "",
   steam: appById("steam")?.icon ?? "",
-  "vscode-claude-code": "/catalog/claude.png",
-  "vscode-codex": "/catalog/codex.png",
+  "vscode-claude-code": "/icons/claude.png",
+  "vscode-codex": "/icons/codex.png",
 };
 
 /** What a sign-in is for: its kind ("WadBrowser sign-in"), or the app an older one was made for. */
 export function signInAppName(app: string): string {
-  return SECRET_KINDS[app as SecretKind]?.label ?? OLD_APPS.find((a) => a.id === app)?.name ?? app;
+  return SECRET_KINDS[app as SecretKind]?.label ?? app;
 }
 
 export function SignInAppIcon({ app, className = "size-5" }: { app: string; className?: string }) {

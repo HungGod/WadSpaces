@@ -78,7 +78,6 @@ async fn setup_in(dir: Arc<tempfile::TempDir>, list: Vec<Workspace>, fake: Fake)
         bus.clone(),
         Settings {
             ready_timeout: Duration::from_secs(30),
-            max_parallel_pulls: 3,
             projects_dir: "/p".into(),
             signins_dir: "/s".into(),
             state_dir: dir.path().into(),
@@ -526,15 +525,12 @@ async fn an_app_runs_in_a_transient_unit_and_shows_like_a_workspace() {
     assert_eq!((st.phase, st.container.as_str(), st.image_present), (Phase::Ready, "running", Some(true)));
     assert_eq!(s.view.current(), wsv("t"));
     assert_eq!(s.screen.last().as_deref(), Some("native:t"));
-    // No image, no pull, no quadlet: just the program.
+    // No image, no quadlet: just the program.
     assert_eq!(s.fake.calls(), ["app wad-t.service /usr/bin/foot"]);
     assert!(s.fake.0.lock().unwrap().units.iter().all(|(n, _)| n != "wad-t.container"));
     // On Super+Tab while it runs; never on Super+number (no hotkey).
     assert!(items(&s).contains(&wsv("t")));
     assert!(!s.view.bindings(&wad_config::Keys::default()).values().any(|a| a == "switch:t"));
-    // Nothing to download.
-    s.reg.download("t").await.unwrap();
-    assert_eq!(s.fake.calls().len(), 1);
 }
 
 #[tokio::test(start_paused = true)]

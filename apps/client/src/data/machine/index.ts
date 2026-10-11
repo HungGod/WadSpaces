@@ -12,7 +12,7 @@
 // machine has (presets on the stick, ones designed before it was linked) are
 // listed too. This machine is THIS_MACHINE, never its heartbeat in the account.
 import { THIS_MACHINE, isThisMachine } from "@/lib/machine";
-import type { ContainerRun, Machine, PublicUser, Wadspace } from "@/lib/types";
+import type { ContainerRun, Machine, PublicUser } from "@/lib/types";
 import type {
   Backend,
   BuildProgress,
@@ -25,7 +25,7 @@ import type {
 import { CloudBackend } from "../cloud";
 import { LocalBackend } from "../local";
 import type { ProjectDraft } from "@core/projects";
-import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
+import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch } from "../backend";
 import type { RunItem } from "../layers";
 
@@ -34,7 +34,6 @@ export class MachineBackend implements Backend {
 
   readonly local = new LocalBackend();
   readonly cloud = new CloudBackend({ thisMachine: () => this.local.cloudMachineId() });
-  private username: string | null = null;
 
   /** This machine's: what its wadd can do. Sharing isn't built yet. */
   get caps(): Caps {
@@ -86,24 +85,17 @@ export class MachineBackend implements Backend {
   listWadspaces() {
     return this.cloud.listWadspaces();
   }
-  async saveWadspace(w: WadspaceV2, lib: LayerLibrary) {
+  async saveWadspace(w: Wadspace, lib: LayerLibrary) {
     const saved = await this.cloud.saveWadspace(w);
     await this.local.machine.install(saved, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== w.id), saved] });
     return saved;
   }
-  async patchWadspace(id: string, patch: LayerPatch, lib: LayerLibrary) {
-    const saved = await this.cloud.patchWadspace(id, patch);
-    if ("legacyImage" in patch) await this.local.machine.install(saved, lib);
-    return saved;
+  patchWadspace(id: string, patch: LayerPatch) {
+    return this.cloud.patchWadspace(id, patch);
   }
   async deleteWadspace(id: string) {
     await this.local.machine.uninstall(id);
     await this.cloud.deleteWadspace(id);
-  }
-  /** The account's drafts and any this machine kept. */
-  async discardDrafts() {
-    const [a, b] = await Promise.all([this.cloud.discardDrafts(), this.local.discardDrafts()]);
-    return a + b;
   }
   listBrowsers() {
     return this.cloud.listBrowsers();
@@ -144,10 +136,8 @@ export class MachineBackend implements Backend {
   }
 
   // ---------------------------------------------------------------- people
-  async me(): Promise<PublicUser | null> {
-    const me = await this.cloud.me();
-    this.username = me?.username ?? null;
-    return me;
+  me(): Promise<PublicUser | null> {
+    return this.cloud.me();
   }
   signOut() {
     return this.cloud.signOut();
@@ -168,30 +158,6 @@ export class MachineBackend implements Backend {
   }
 
   // ------------------------------------------------------------ wadspaces
-  /** The account's design with this machine's state on top. */
-  private merge(design: Wadspace, here: Wadspace | undefined): Wadspace {
-    return {
-      ...design,
-      installed: !!here?.installed,
-      local: !!here?.local,
-      ...(here?.mountedProjects && { mountedProjects: here.mountedProjects }),
-    };
-  }
-
-  /** One only this machine has: yours, as far as the UI is concerned. */
-  private own(here: Wadspace): Wadspace {
-    return { ...here, owner: this.username ?? here.owner };
-  }
-
-  /** The account's designs from before the layers, with this machine's own, for the migration. */
-  async listOldWadspaces() {
-    const [designs, here] = await Promise.all([this.cloud.listOldWadspaces(), this.local.listOldWadspaces()]);
-    const byId = new Map(here.map((w) => [w.id, w]));
-    const fromAccount = designs.map((d) => this.merge(d, byId.get(d.id)));
-    const ids = new Set(designs.map((d) => d.id));
-    return [...fromAccount, ...here.filter((w) => !ids.has(w.id)).map((w) => this.own(w))];
-  }
-
   // ------------------------------------------------------------- machines
   defaultMachineId() {
     return this.cloud.pickedMachine() ?? THIS_MACHINE;

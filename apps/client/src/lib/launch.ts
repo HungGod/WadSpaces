@@ -7,7 +7,7 @@
 // default machine. Launches report their progress in the sidebar.
 import { backend } from "@/data";
 import { RestartNeeded, type LaunchPart } from "@/data/backend";
-import type { WadspaceV2 } from "@core/layers";
+import type { Wadspace } from "@core/layers";
 import { useApp } from "./store";
 
 /** A launch on the machine; the sidebar shows its parts. */
@@ -32,7 +32,7 @@ function fail(title: string, e: unknown) {
 
 /** Opens a wadspace: launched with the folders it was constructed with (or
  *  back on screen when it runs). */
-export async function openWadspace(w: WadspaceV2) {
+export async function openWadspace(w: Wadspace) {
   await useApp.getState().launch([{ kind: "wadspace", wadspaceId: w.id }], null);
 }
 

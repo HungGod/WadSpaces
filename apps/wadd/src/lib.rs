@@ -21,7 +21,6 @@ pub mod logbuf;
 pub mod metrics;
 pub mod network;
 pub mod projects;
-pub mod pull;
 pub mod registry;
 pub mod screen;
 pub mod secrets;
@@ -63,7 +62,6 @@ pub struct Server {
     /// The workspaces to take on when serving starts.
     workspaces: Vec<Workspace>,
     reconcile_every: Duration,
-    prefetch: (wad_config::Prefetch, u64),
     sway: Option<Arc<SwayDisplay>>,
     keys: wad_config::Keys,
 }
@@ -80,25 +78,16 @@ async fn placeholders(app: Arc<AppState>) {
     }
 }
 
-/// The relay's settings: `[cloud]`, else the image's cloud.yaml (the Python
-/// wadd's). None: no account to link to.
+/// The relay's settings (`[cloud]`). None: no account to link to.
 fn cloud_settings(config: &Config) -> Option<(cloud::Settings, cloud::Endpoints)> {
     let c = &config.cloud;
     if !c.enabled {
         return None;
     }
-    let (mut project, mut region, mut api_key) = (c.project_id.clone(), c.functions_region.clone(), c.api_key.clone());
-    if project.is_empty() {
-        let legacy = wad_store::legacy::read(&config.daemon.legacy_config, Some(&config.daemon.vendor_cloud))
-            .ok()
-            .and_then(|l| l.cloud);
-        let get = |k: &str| {
-            legacy.as_ref().and_then(|m| m.get(k)).and_then(|v| v.as_str()).map(String::from).filter(|v| !v.is_empty())
-        };
-        project = get("project_id")?;
-        region = get("functions_region").unwrap_or(region);
-        api_key = get("api_key").unwrap_or(api_key);
+    if c.project_id.is_empty() {
+        return None;
     }
+    let (project, region, api_key) = (c.project_id.clone(), c.functions_region.clone(), c.api_key.clone());
     let http = reqwest::Client::new();
     let ends = match &c.emulator {
         Some(host) => cloud::Endpoints::emulator(http, host, &project, &region),
@@ -123,30 +112,22 @@ pub fn sway_locate(display: &wad_config::Display) -> wad_sway::Locate {
     }
 }
 
-/// The machine's own list: `workspaces.json` in the state directory if there
-/// is one, else the Python wadd's workspaces.yaml (none: no workspaces).
-/// True when it came from the YAML.
-pub fn own_workspaces(daemon: &wad_config::Daemon) -> Result<(Vec<Workspace>, bool), String> {
+/// The machine's own list: `workspaces.json` in the state directory (none:
+/// no workspaces).
+pub fn own_workspaces(daemon: &wad_config::Daemon) -> Result<Vec<Workspace>, String> {
     let own = daemon.state_dir.join("workspaces.json");
     match std::fs::read_to_string(&own) {
-        Ok(text) => serde_json::from_str(&text).map(|l| (l, false)).map_err(|e| format!("{}: {e}", own.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if !daemon.legacy_config.exists() {
-                return Ok((vec![], false));
-            }
-            wad_store::legacy::read(&daemon.legacy_config, Some(&daemon.vendor_cloud))
-                .map(|c| (c.workspaces, true))
-                .map_err(|e| e.to_string())
-        }
+        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", own.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
         Err(e) => Err(format!("{}: {e}", own.display())),
     }
 }
 
 /// The machine's workspaces at start: its own list, with the image's
-/// workspaces that are new or changed applied (wad_store::vendor). Saved
-/// when that changed something, or `save` asks (the cutover's migration).
-pub fn read_workspaces(daemon: &wad_config::Daemon, save: bool) -> Result<Vec<Workspace>, String> {
-    let (mut list, _) = own_workspaces(daemon)?;
+/// workspaces that are new or changed applied (wad_store::vendor), and
+/// saved when that changed something.
+pub fn read_workspaces(daemon: &wad_config::Daemon) -> Result<Vec<Workspace>, String> {
+    let mut list = own_workspaces(daemon)?;
     let vendor = wad_store::vendor::read(&daemon.vendor_workspaces).unwrap_or_else(|e| {
         tracing::warn!("the image's workspaces: {e}");
         vec![]
@@ -159,7 +140,7 @@ pub fn read_workspaces(daemon: &wad_config::Daemon, save: bool) -> Result<Vec<Wo
     if !applied.changed.is_empty() {
         tracing::info!("from the image: {}", applied.changed.join(", "));
     }
-    if save || !applied.changed.is_empty() {
+    if !applied.changed.is_empty() {
         registry::save_list(&daemon.state_dir, &list)?;
         wad_store::vendor::write_book(&daemon.state_dir, &book).map_err(|e| e.to_string())?;
     }
@@ -232,7 +213,6 @@ impl Server {
             bus.clone(),
             Settings {
                 ready_timeout: Duration::from_secs(d.ready_timeout_s),
-                max_parallel_pulls: d.max_parallel_pulls,
                 projects_dir: d.projects_dir.to_string_lossy().into_owned(),
                 signins_dir: d.signins_dir.clone(),
                 state_dir: d.state_dir.clone(),
@@ -241,7 +221,7 @@ impl Server {
                 poll: Duration::from_secs(1),
             },
         );
-        let workspaces = read_workspaces(d, false).unwrap_or_else(|e| {
+        let workspaces = read_workspaces(d).unwrap_or_else(|e| {
             tracing::error!("no workspaces: {e}");
             vec![]
         });
@@ -347,7 +327,6 @@ impl Server {
             state,
             workspaces,
             reconcile_every: Duration::from_secs(d.reconcile_s.max(1)),
-            prefetch: (d.prefetch, d.prefetch_min_free_gb),
             sway,
             keys: config.keys.clone(),
         })
@@ -403,6 +382,7 @@ impl Server {
         tokio::spawn(async move {
             sweep.reconcile().await;
             sweep.sweep_ephemeral().await;
+            sweep.sweep_old().await;
         });
         let watcher = self.sway.clone().map(|d| tokio::spawn(d.run(self.state.view.clone() as Arc<dyn WindowSink>)));
         *self.state.keys.lock().unwrap() = self.start_keys();
@@ -419,19 +399,12 @@ impl Server {
         let relay = self.state.cloud.clone().map(|c| tokio::spawn(c.run()));
         let reconcile = registry.spawn_reconcile(self.reconcile_every);
         let netwatch = tokio::spawn(self.state.network.clone().run());
-        let (mode, min_free_gb) = self.prefetch;
-        let (net, reg) = (self.state.network.clone(), registry.clone());
-        let prefetch = tokio::spawn(async move {
-            if mode != wad_config::Prefetch::None {
-                net.wait_online().await;
-            }
-            reg.prefetch(mode, min_free_gb, Duration::from_secs(300)).await
-        });
+        let autostart = tokio::spawn(registry.clone().autostart(Duration::from_secs(300)));
         let app = api::router(self.state.clone()).into_make_service_with_connect_info::<Peer>();
         let res = axum::serve(self.listener, app).with_graceful_shutdown(shutdown).await;
         reconcile.abort();
         netwatch.abort();
-        prefetch.abort();
+        autostart.abort();
         if let Some(r) = relay {
             r.abort();
         }

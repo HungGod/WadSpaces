@@ -12,7 +12,7 @@ The software that runs a WadSpaces machine, and the WadSpaces Client, the app us
 | `crates/` | Shared Rust crates:<br>• `wad-proto`: types shared by wadd, the app and the UI<br>• `wad-core`: the Builder's layers (`layers.rs`), its catalog and starter templates (`data/`), sign-in kinds, and the generators; also compiled to wasm for the UI<br>• `wad-config`<br>• `wad-store`: wadd's state files<br>• `wad-podman`, `wad-systemd`, `wad-sway`<br>• `wad-input`: the keyboard proxy<br>• `wad-git`: project clones and fast-forwards<br>• `wad-net`: Wi-Fi through NetworkManager<br>• `wad-github`: GitHub's REST calls (whose token, repos, new repos)<br>• `wad-firebase`: Firestore from Rust<br>• `wad-clip`: one clipboard for the machine (each wadspace's `wadspaces-clipboard` bridge, and the HUD's history)<br>• `wad-notes`: WadNotes' files: markdown notes and tasks per wadspace, the calendar's events, reminders and each wadspace's colour |
 | `host/` | The machine's OS image (Fedora bootc, sway, WadSpaces Client as the shell), and `host/build.sh` to build it and write it to a drive. Two apps run on the machine itself (`usr/lib/wadspaces/workspaces.d/{terminal,browser}.toml`: workspaces of kind `app`): WadTerminal (foot) and WadBrowser. wadd opens and closes them like wadspaces, each in a transient unit `wad-<id>.service` as the kiosk user, full screen and on Super+Tab, but with no Super+number. |
 | `images/` | The base image every template is built on (`base`: the lean desktop, WadBrowser, and a feature script per catalog app). `images/build.sh` builds it; templates and customizations are built from it by wadd. `examples/` has two real wadspaces' layers (Cosmic Bodybuilding, VanuaAcademy). |
-| `fixtures/` | What every renderer must reproduce:<br>• unit files (`quadlet/`)<br>• the core's goldens (`core/`), shared by wad-core and the client<br>• the old workspaces.yaml cases (`python-state/`), which wadd still reads when a machine has no state yet |
+| `fixtures/` | What every renderer must reproduce:<br>• unit files (`quadlet/`)<br>• the core's goldens (`core/`), shared by wad-core and the client |
 
 ## Tests
 
@@ -51,7 +51,7 @@ The Rust toolchain is pinned in `rust-toolchain.toml`. On Fedora the app also ne
 The trial scripts use their own state under `.build/`, and need `systemctl --user start podman.socket`.
 
 ```bash
-apps/wadd/dev/try.sh           # workspaces: cold and warm start, stop, restart, download progress
+apps/wadd/dev/try.sh           # workspaces: cold and warm start, stop, restart, a missing image
 apps/wadd/dev/try-view.sh      # the screen: a headless sway with the machine's rules and a real lean
                                # workspace's window: switching, Super+Tab, focus sessions
 apps/wadd/dev/try-apps.sh      # the machine's own apps (foot, WadBrowser) in the headless sway:

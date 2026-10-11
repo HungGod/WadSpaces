@@ -105,7 +105,6 @@ function Details({ id, onClose }: { id: string; onClose: () => void }) {
               <div className="truncate text-sm font-medium">{r ? (r.customization ? `${r.customization.name} (${r.template.name})` : `${r.template.name} template`) : "Its template is gone"}</div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <ImageBadge image={imageKey(w.base)} />
-                {w.legacyImage && <Badge tone="accent-2">Runs its image from before layers</Badge>}
               </div>
             </div>
             {r && <BuildButton image={imageKey(w.base)} />}

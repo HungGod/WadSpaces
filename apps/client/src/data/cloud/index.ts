@@ -3,43 +3,34 @@
 // Stored model (firestore.rules has the access rules):
 //   profiles/{uid}                  username, displayName, color, onboarded, lastSession
 //   usernames/{name}                {uid}
-//   wadspaces/{id}                  owner (uid), ownerName, sharedWith [uid], sharedNames {uid: name},
-//                                   name, description, visibility, layout, advanced, agent,
-//                                   createdAt, updatedAt
 //   users/{uid}/projects/{id}       name, mountName, source {kind: "git", url, ref?}, setup,
 //                                   deleted (a tombstone), createdAt, updatedAt: what each project
 //                                   is; the clones are on the machines, whose relay syncs this
 //   users/{uid}/github/repos        {login, repos, updatedAt}: your GitHub repositories, shared
 //                                   by your machines (the token stays on them)
 //   users/{uid}/machines/{mid}      the relay heartbeat (wadd's cloud.rs) and its commands
-//   the Builder's layers            see layers.ts (templates, customizations, browsers,
-//                                   wadspaces/{id} with version 2)
-//
-// The UI keys people by username, so docs are translated on the way in and out.
+//   the Builder's documents         see layers.ts (users/{uid}/templates, customizations,
+//                                   browsers, and wadspaces/{id})
 import {
   collection,
   deleteDoc,
   deleteField,
   doc,
   getDoc,
-  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
-  writeBatch,
   type DocumentData,
   type Query,
   type Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
-import { defaultAdvanced, dropFileIcons } from "@core/model";
 import { cleanDraft, toProjectDoc, validateProject, type GithubRepo, type Project, type ProjectDraft } from "@core/projects";
-import { presetProjects, presetWadspace } from "@core/presets";
 import { imageDataUrl } from "@/lib/images";
-import type { Container, LastSession, Machine, PublicUser, Wadspace } from "@/lib/types";
+import type { Container, LastSession, Machine, PublicUser } from "@/lib/types";
 import {
   Unsupported,
   type Backend,
@@ -48,16 +39,14 @@ import {
   type GithubRepoList,
   type Topic,
 } from "../backend";
-import { hasRepos, knownProjectIds, migrateRepos, withProjects } from "../projects";
 import { currentAuthUser, onAuthUser, signOut } from "./auth";
 import { auth, db } from "./firebase";
 import { ONLINE_WITHIN_MS, createEnrollCode, sendCommand, type CommandType, type RelayWorkspace } from "./relay";
-import { FirestoreLayerDocs, RelayMachine, toWadspaceV2 } from "./layers";
-import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
+import { FirestoreLayerDocs, RelayMachine, toWadspace } from "./layers";
+import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch } from "../backend";
 import type { RunItem } from "../layers";
 
-const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
 const iso = (t: unknown) => (t && typeof (t as Timestamp).toDate === "function" ? (t as Timestamp).toDate().toISOString() : new Date().toISOString());
 // Firestore rejects undefined; drop it.
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -83,7 +72,6 @@ export class CloudBackend implements Backend {
   private listeners = new Set<(t: Topic) => void>();
   private profiles = new Map<string, PublicUser & { uid: string }>();
   private owned = new Map<string, DocumentData>();
-  private shared = new Map<string, DocumentData>();
   private machines = new Map<string, DocumentData>();
   private projects = new Map<string, DocumentData>();
   /** users/{uid}/github/repos: undefined until the first snapshot, null when there's none. */
@@ -110,15 +98,6 @@ export class CloudBackend implements Backend {
   private others(): [string, DocumentData][] {
     const skip = this.opts.thisMachine?.() ?? null;
     return [...this.machines].filter(([id]) => id !== skip);
-  }
-
-  /** In the account: yours, or shared with you. */
-  knows(id: string): boolean {
-    return this.owned.has(id) || this.shared.has(id);
-  }
-
-  owns(id: string): boolean {
-    return this.owned.has(id);
   }
 
   /** The machine picked for "Open", if one was and it's still linked. */
@@ -151,7 +130,6 @@ export class CloudBackend implements Backend {
     this.unsubs.forEach((u) => u());
     this.unsubs = [];
     this.owned.clear();
-    this.shared.clear();
     this.machines.clear();
     this.projects.clear();
     this.github = undefined;
@@ -179,7 +157,6 @@ export class CloudBackend implements Backend {
           async (snap) => {
             into.clear();
             for (const d of snap.docs) into.set(d.id, d.data());
-            if (topic === "wadspaces") await this.loadProfiles([...into.values()].flatMap((d) => [d.owner, ...(d.sharedWith ?? [])]));
             settle();
             this.emit(topic);
             // The heartbeats carry the Builder's images.
@@ -193,11 +170,8 @@ export class CloudBackend implements Backend {
       );
     };
     watch(query(collection(db, "wadspaces"), where("owner", "==", uid)), this.owned, "wadspaces");
-    watch(query(collection(db, "wadspaces"), where("sharedWith", "array-contains", uid)), this.shared, "wadspaces");
     watch(collection(db, "users", uid, "machines"), this.machines, "machines");
     watch(collection(db, "users", uid, "projects"), this.projects, "projects");
-    // Wadspaces saved before projects: their repos become projects.
-    this.loaded.then(() => (this.uid === uid ? this.migrateRepos() : undefined)).catch(() => {});
     this.unsubs.push(onSnapshot(doc(db, "profiles", uid), () => this.emit("session")));
     // The repo list your machines share; not part of `loaded` (only the Projects page needs it).
     let seen!: () => void;
@@ -225,17 +199,6 @@ export class CloudBackend implements Backend {
     const u = await currentAuthUser();
     if (!u) throw new Error("Sign in first.");
     return u.uid;
-  }
-
-  // ---------------------------------------------------------------- people
-  private async loadProfiles(uids: string[]) {
-    const missing = [...new Set(uids)].filter((u) => u && !this.profiles.has(u));
-    await Promise.all(
-      missing.map(async (u) => {
-        const d = await getDoc(doc(db, "profiles", u)).catch(() => null);
-        if (d?.exists()) this.profiles.set(u, this.toUser(u, d.data()));
-      }),
-    );
   }
 
   private toUser(uid: string, d: DocumentData): PublicUser & { uid: string } {
@@ -273,82 +236,6 @@ export class CloudBackend implements Backend {
     return [...this.profiles.values()];
   }
 
-  private nameOf(uid: string) {
-    return this.profiles.get(uid)?.username ?? uid;
-  }
-
-
-  // ------------------------------------------------------------ wadspaces
-  private targetMachine() {
-    const id = this.defaultMachineId();
-    return id ? this.machines.get(id) : undefined;
-  }
-
-  private toWadspace(id: string, d: DocumentData): Wadspace {
-    const onTarget = ((this.targetMachine()?.workspaces ?? []) as RelayWorkspace[]).find((w) => w.id === id);
-    return {
-      id,
-      name: d.name,
-      description: d.description ?? "",
-      layout: dropFileIcons(d.layout),
-      advanced: withProjects(d.advanced ?? defaultAdvanced(tz())),
-      ...(d.agent && { agent: d.agent }),
-      ...(d.dockerfile && { dockerfile: d.dockerfile }),
-      owner: d.ownerName ?? this.nameOf(d.owner),
-      visibility: d.visibility ?? "private",
-      sharedWith: ((d.sharedWith ?? []) as string[]).map((u) => d.sharedNames?.[u] ?? this.nameOf(u)),
-      installed: !!onTarget,
-      local: !!onTarget && onTarget.phase !== "error",
-      sizeMB: 0,
-      updatedAt: iso(d.updatedAt),
-      ...(d.templateId && { templateId: d.templateId }),
-      ...(d.deletedAt && { deletedAt: d.deletedAt }),
-    };
-  }
-
-  /** Wadspaces built on a machine (offline) that aren't in the account: from the heartbeats. */
-  private machineOnly(): Map<string, Wadspace> {
-    const out = new Map<string, Wadspace>();
-    const me = this.uid ? this.nameOf(this.uid) : "";
-    for (const [mid, m] of this.others()) {
-      for (const w of (m.workspaces ?? []) as RelayWorkspace[]) {
-        if (this.owned.has(w.id) || this.shared.has(w.id) || out.has(w.id)) continue;
-        const preset = presetWadspace(w.id);
-        // The machine made the preset's projects and syncs them up; until then it has none.
-        if (preset) preset.advanced.projects = knownProjectIds(this.liveProjects(), presetProjects(w.id));
-        const label = (m.name ?? m.hostname ?? mid) as string;
-        out.set(w.id, {
-          ...(preset ?? {
-            id: w.id,
-            name: w.name,
-            description: "",
-            layout: { wallpaper: { type: "gradient", value: "radial-gradient(90% 70% at 80% 10%, #ff3d8155 0%, transparent 60%), #0a0614" }, icons: [], grid: true },
-            advanced: defaultAdvanced(tz()),
-          }),
-          name: w.name,
-          description: preset?.description || `On ${label}`,
-          owner: me,
-          visibility: "private",
-          sharedWith: [],
-          installed: mid === this.defaultMachineId(),
-          local: mid === this.defaultMachineId() && w.phase !== "error",
-          sizeMB: 0,
-          updatedAt: iso(m.lastSeen),
-          machineOnly: label,
-        });
-      }
-    }
-    return out;
-  }
-
-  /** The account's wadspaces from before the layers, and the ones only a
-   *  machine has, for the migration (data/migrate.ts). */
-  async listOldWadspaces() {
-    await this.loaded;
-    // Version 2 documents are listWadspaces'.
-    const all = new Map([...this.shared, ...this.owned].filter(([, d]) => d.version !== 2));
-    return [...[...all].map(([id, d]) => this.toWadspace(id, d)), ...this.machineOnly().values()];
-  }
 
   // ------------------------------------------------------------- projects
   private toProject(id: string, d: DocumentData): Project {
@@ -450,16 +337,16 @@ export class CloudBackend implements Backend {
   }
   async listWadspaces() {
     await this.loaded;
-    return [...this.owned].filter(([, d]) => d.version === 2).map(([id, d]) => toWadspaceV2(id, d));
+    return [...this.owned].filter(([, d]) => d.version === 2).map(([id, d]) => toWadspace(id, d));
   }
   /** In the account; it reaches a machine when it's launched there. */
-  saveWadspace(w: WadspaceV2) {
+  saveWadspace(w: Wadspace) {
     return this.docs.putWadspace(w);
   }
   async patchWadspace(id: string, patch: LayerPatch) {
     const cur = this.owned.get(id);
     if (!cur) throw new Error("It's gone.");
-    return this.docs.patchWadspace(id, toWadspaceV2(id, cur), patch);
+    return this.docs.patchWadspace(id, toWadspace(id, cur), patch);
   }
   async deleteWadspace(id: string) {
     await this.docs.removeWadspace(id);
@@ -559,27 +446,6 @@ export class CloudBackend implements Backend {
     return this.syncMachines(uid);
   }
 
-  /** Owned wadspaces that still have advanced.repos: projects instead, saved back. */
-  private async migrateRepos() {
-    for (const [id, d] of [...this.owned]) {
-      if (!hasRepos(d.advanced)) continue;
-      const advanced = await migrateRepos(this, d.advanced);
-      await updateDoc(doc(db, "wadspaces", id), { advanced: clean(advanced), updatedAt: serverTimestamp() });
-    }
-  }
-
-  /** Drafts are gone from the Builder: users/{uid}/drafts emptied, in batches. */
-  async discardDrafts() {
-    const uid = await this.requireUid();
-    const snap = await getDocs(collection(db, "users", uid, "drafts"));
-    for (let i = 0; i < snap.docs.length; i += 400) {
-      const batch = writeBatch(db);
-      for (const d of snap.docs.slice(i, i + 400)) batch.delete(d.ref);
-      await batch.commit();
-    }
-    return snap.docs.length;
-  }
-
   async cancelLaunch(): Promise<never> {
     throw new Unsupported("Launching", TRUSTED_SOON);
   }
@@ -614,7 +480,6 @@ export class CloudBackend implements Backend {
       startedAt: iso(d.lastSeen),
       phase: w.phase as Container["phase"],
       error: w.error,
-      download: w.phase === "pulling" ? { progress: null, label: "downloading" } : null,
       onScreen: view === `workspace:${w.id}`,
       hotkey: w.hotkey,
       native: w.display === "host",
@@ -652,7 +517,7 @@ export class CloudBackend implements Backend {
   }
 
   async container(machineId: string, containerId: string, action: ContainerAction) {
-    if (action === "download" || action === "remove") throw new Unsupported("Doing that remotely");
+    if (action === "remove") throw new Unsupported("Doing that remotely");
     await this.command(machineId, action, containerId);
   }
 

@@ -1,12 +1,11 @@
 //! The workspaces on this machine and their lives: bringing one up (its
 //! image, its unit, until its desktop answers), stopping and restarting it,
-//! downloading images with progress, and checking every few seconds that
-//! what wadd thinks matches what podman says (reconcile).
+//! and checking every few seconds that what wadd thinks matches what podman
+//! says (reconcile).
 //!
-//! The rules are the Python wadd's (manager.py), kept on purpose: one thing
-//! at a time per workspace (its lock), images never pulled for localhost/
-//! names, a limit on downloads at once, progress capped at 99% until podman
-//! says done, run history opened and closed with the container.
+//! One thing at a time per workspace (its lock); images are never
+//! downloaded (a workspace's image is a layer built here); run history is
+//! opened and closed with the container.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,28 +13,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use wad_config::Prefetch;
 use wad_proto::v1::{Display, Event, Kind, Phase, Workspace, WorkspaceState};
 use wad_proto::{ApiError, ErrorCode};
 use wad_store::runs::RunLog;
 
 use crate::backend::Backend;
 use crate::events::Bus;
-use crate::pull::Progress;
 
-/// Pull progress reaches watchers at most this often (a pull's lines come
-/// hundreds a second); phase changes always do.
-const PUBLISH_EVERY: Duration = Duration::from_millis(700);
 const RUNNING: &str = "running";
 /// Under the sign-ins folder (the screen user's): WadBrowser setups' files.
 pub const SETUPS_DIR: &str = ".wadbrowser";
 
 pub struct Settings {
     pub ready_timeout: Duration,
-    pub max_parallel_pulls: usize,
     pub projects_dir: String,
     /// Saved sign-ins' folders (`<signins_dir>/<id>`).
     pub signins_dir: PathBuf,
@@ -52,14 +44,9 @@ pub struct Registry {
     settings: Settings,
     workspaces: Mutex<Vec<Workspace>>,
     states: Mutex<HashMap<String, WorkspaceState>>,
-    published: Mutex<HashMap<String, Instant>>,
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     tasks: Mutex<HashMap<String, JoinHandle<()>>>,
-    pull_slots: Arc<Semaphore>,
-    pulls: Mutex<HashMap<String, Progress>>,
-    tracking: Mutex<bool>,
     runs: Mutex<RunLog>,
-    epoch: Instant,
     /// Native workspaces' windows (the display keeps this up to date).
     windows: Arc<Windows>,
     /// Told when a bring-up finishes (the view shows a pending switch).
@@ -160,17 +147,12 @@ impl Registry {
             me: me.clone(),
             backend,
             bus,
-            pull_slots: Arc::new(Semaphore::new(settings.max_parallel_pulls.max(1))),
             settings,
             workspaces: Mutex::default(),
             states: Mutex::default(),
-            published: Mutex::default(),
             locks: Mutex::default(),
             tasks: Mutex::default(),
-            pulls: Mutex::default(),
-            tracking: Mutex::new(false),
             runs: Mutex::new(runs),
-            epoch: Instant::now(),
             windows: Arc::default(),
             on_ready: Mutex::new(None),
             on_list: Mutex::new(None),
@@ -221,12 +203,10 @@ impl Registry {
                     id: w.id.clone(),
                     container: "unknown".into(),
                     phase: Phase::Idle,
-                    progress: None,
                     message: None,
                     error: None,
-                    // An app has nothing to download.
+                    // An app has no image.
                     image_present: (w.kind == Kind::App).then_some(true),
-                    download: None,
                     since: wall(),
                 });
             }
@@ -278,8 +258,9 @@ impl Registry {
             Some(i) => list[i] = ws.clone(),
             None => list.push(ws.clone()),
         }
-        let checked = wad_store::legacy::check_workspaces(list.iter().map(wad_store::legacy::to_yaml).collect())
-            .map_err(|e| bad(e.to_string()))?;
+        let checked =
+            wad_store::workspaces::check_workspaces(list.iter().map(wad_store::workspaces::to_yaml).collect())
+                .map_err(|e| bad(e.to_string()))?;
         let running = self.state(&ws.id).is_some_and(|s| s.container == RUNNING);
         self.set_workspaces(checked).await.map_err(|e| ApiError::new(ErrorCode::Internal, e))?;
         Ok(old.is_some() && changed && running)
@@ -314,8 +295,7 @@ impl Registry {
         }
     }
 
-    /// The workspace list, as the Rust wadd's own (it wins over the Python
-    /// wadd's workspaces.yaml from then on).
+    /// The workspace list (workspaces.json).
     fn save(&self, list: &[Workspace]) -> Result<(), String> {
         save_list(&self.settings.state_dir, list)
     }
@@ -352,12 +332,11 @@ impl Registry {
         self.locks.lock().unwrap().entry(id.into()).or_default().clone()
     }
 
-    /// Changes a workspace's state (manager.py _set): a new phase clears the
-    /// error, and leaving the busy phases clears progress; a container that
-    /// starts or stops opens or closes a run. Progress-only changes are
-    /// published at most every PUBLISH_EVERY.
+    /// Changes a workspace's state: a new phase clears the error, and leaving
+    /// the busy phases clears the message; a container that starts or stops
+    /// opens or closes a run.
     fn update(&self, ws: &Workspace, f: impl FnOnce(&mut WorkspaceState)) {
-        let (state, publish) = {
+        let state = {
             let mut states = self.states.lock().unwrap();
             let Some(st) = states.get_mut(&ws.id) else { return };
             let before = st.clone();
@@ -368,9 +347,7 @@ impl Registry {
                     st.error = None;
                 }
                 if !st.phase.busy() {
-                    st.progress = None;
                     st.message = None;
-                    st.download = None;
                 }
             }
             if st.container != before.container {
@@ -378,25 +355,12 @@ impl Registry {
                 self.note_ephemeral(ws, &st.container);
                 self.note_order(ws, &st.container);
             }
-            let only_progress = st.phase == before.phase
-                && st.container == before.container
-                && st.error == before.error
-                && st.image_present == before.image_present;
             if *st == before {
                 return;
             }
-            let now = Instant::now();
-            let mut published = self.published.lock().unwrap();
-            let due = published.get(&ws.id).is_none_or(|t| now - *t >= PUBLISH_EVERY);
-            let publish = !only_progress || due;
-            if publish {
-                published.insert(ws.id.clone(), now);
-            }
-            (st.clone(), publish)
+            st.clone()
         };
-        if publish {
-            self.bus.publish(Event::WorkspaceState(state));
-        }
+        self.bus.publish(Event::WorkspaceState(state));
     }
 
     /// Run history: a run opens when a container starts and closes when it
@@ -490,6 +454,48 @@ impl Registry {
         }
     }
 
+    /// The wadspaces from before the Builder's layers (a container whose
+    /// image isn't a layer's: the old presets and designs), and then their
+    /// images, removed. The wadspaces that replace them install on their
+    /// layers when they're first launched; their volumes stay, so one with
+    /// the same id keeps its home. Not one that's running, and nothing
+    /// while podman doesn't answer.
+    pub async fn sweep_old(&self) {
+        let list = self.workspaces();
+        let candidates: Vec<&Workspace> =
+            list.iter().filter(|w| w.kind == Kind::Container && !is_layer_image(&w.image)).collect();
+        if candidates.is_empty() || !self.backend.available().await {
+            return; // podman not answering: tried again at the next start
+        }
+        let mut old = vec![];
+        for w in candidates {
+            // Podman's word, not the state's (that's "unknown" until reconcile).
+            if matches!(self.backend.container(&w.container_name).await, Ok(s) if s != RUNNING) {
+                old.push(w);
+            }
+        }
+        if old.is_empty() {
+            return;
+        }
+        let ids: Vec<String> = old.iter().map(|w| w.id.clone()).collect();
+        let keep: Vec<Workspace> = list.iter().filter(|w| !ids.contains(&w.id)).cloned().collect();
+        if let Err(e) = self.set_workspaces(keep.clone()).await {
+            tracing::warn!("removing the wadspaces from before the layers: {e}");
+            return;
+        }
+        tracing::info!("removed the wadspaces from before the layers: {}", ids.join(", "));
+        let mut images: Vec<&str> = old.iter().map(|w| w.image.as_str()).filter(|i| !i.is_empty()).collect();
+        images.sort_unstable();
+        images.dedup();
+        for image in images.into_iter().filter(|i| !keep.iter().any(|w| w.image == *i)) {
+            match self.backend.remove_image(image).await {
+                Ok(true) => tracing::info!("removed its image {image}"),
+                Ok(false) => {}
+                Err(e) => tracing::warn!("removing {image}: {e}"),
+            }
+        }
+    }
+
     // ----------------------------------------------------------- bring up
     /// Brings a workspace up in the background (a no-op while it's already coming up).
     pub fn start(self: &Arc<Self>, id: &str) -> Result<(), ApiError> {
@@ -573,7 +579,7 @@ impl Registry {
         if ws.kind == Kind::App {
             return self.bring_up_app(ws).await;
         }
-        self.pull(ws).await?;
+        self.check_image(ws).await?;
         if self.backend.container(&ws.container_name).await.unwrap_or_default() != RUNNING {
             // Its unit mounts the extra folder (projects, sign-ins, wallpaper).
             crate::images::ensure_extra(&self.settings.state_dir, &ws.id)
@@ -636,117 +642,20 @@ impl Registry {
         }
     }
 
-    /// Makes sure the image is here. Callers hold the workspace's lock.
-    async fn pull(&self, ws: &Workspace) -> Result<(), String> {
+    /// Makes sure the image is here: it's never downloaded. Callers hold
+    /// the workspace's lock.
+    async fn check_image(&self, ws: &Workspace) -> Result<(), String> {
         self.update(ws, |st| {
-            st.phase = Phase::Pulling;
+            st.phase = Phase::Starting;
             st.message = Some("checking image".into());
         });
-        if self.backend.image_exists(&ws.image).await? {
-            self.update(ws, |st| st.image_present = Some(true));
-            return Ok(());
-        }
-        if ws.image.starts_with("localhost/") {
-            return Err(format!("image {} is local-only and not here; build it first", ws.image));
-        }
-        if self.pull_slots.available_permits() == 0 {
-            self.update(ws, |st| st.message = Some("waiting for another download to finish".into()));
-        }
-        let _slot = self.pull_slots.clone().acquire_owned().await.map_err(|e| e.to_string())?;
-        let sized = self.backend.download_size(&ws.image).await;
-        if let Some((total, layers)) = sized {
-            tracing::info!("pulling {}: {} to download", ws.image, crate::pull::human_bytes(total as f64));
-            self.pulls
-                .lock()
-                .unwrap()
-                .insert(ws.id.clone(), Progress::new(Some(total), layers, self.backend.rx_bytes()));
-            self.track_pulls();
-        }
-        let id = ws.id.clone();
-        let image = ws.image.clone();
-        let result = if sized.is_some() {
-            self.backend.pull(&image, Box::new(|_| {})).await
+        let present = self.backend.image_exists(&ws.image).await?;
+        self.update(ws, |st| st.image_present = Some(present));
+        if present {
+            Ok(())
         } else {
-            // No sizes: podman's own lines are all there is to show.
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-            let me = ws.clone();
-            let lines = async {
-                while let Some(l) = rx.recv().await {
-                    self.update(&me, |st| st.message = Some(l.chars().take(80).collect()));
-                }
-            };
-            let pull = self.backend.pull(
-                &image,
-                Box::new(move |l| {
-                    let _ = tx.send(l.to_string());
-                }),
-            );
-            let (r, ()) = tokio::join!(pull, lines);
-            r
-        };
-        let progress = self.pulls.lock().unwrap().remove(&id);
-        result?;
-        let download = progress.map(|mut p| {
-            p.finish();
-            p.download()
-        });
-        self.update(ws, |st| {
-            st.image_present = Some(true);
-            if let Some(d) = download {
-                st.progress = Some(100);
-                st.download = Some(d);
-                st.message = Some("unpacking".into());
-            }
-        });
-        Ok(())
-    }
-
-    /// Every second while there are downloads: the bytes that arrived since,
-    /// split between them by how much each still has to fetch.
-    fn track_pulls(&self) {
-        let mut tracking = self.tracking.lock().unwrap();
-        if *tracking {
-            return;
+            Err(format!("its image {} isn't on this machine: build it in WadSpaces first", ws.image))
         }
-        *tracking = true;
-        let Some(me) = self.me.upgrade() else { return };
-        tokio::spawn(async move {
-            let mut last = me.backend.rx_bytes();
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                let rx = me.backend.rx_bytes();
-                let delta = rx.saturating_sub(last);
-                last = rx;
-                let now = (Instant::now() - me.epoch).as_secs_f64();
-                let updates: Vec<(String, Progress)> = {
-                    let mut pulls = me.pulls.lock().unwrap();
-                    if pulls.is_empty() {
-                        *me.tracking.lock().unwrap() = false;
-                        return;
-                    }
-                    let left: HashMap<String, u64> = pulls
-                        .iter()
-                        .map(|(id, p)| (id.clone(), p.total_bytes.unwrap_or(0).saturating_sub(p.done_bytes).max(1)))
-                        .collect();
-                    let weight: u64 = left.values().sum();
-                    for (id, p) in pulls.iter_mut() {
-                        p.received += (delta as u128 * left[id] as u128 / weight.max(1) as u128) as u64;
-                        let at = p.rx_start + p.received;
-                        p.sample(at, now);
-                    }
-                    pulls.iter().map(|(id, p)| (id.clone(), p.clone())).collect()
-                };
-                for (id, p) in updates {
-                    if let Ok(ws) = me.workspace(&id) {
-                        me.update(&ws, |st| {
-                            st.progress = p.percent();
-                            st.download = Some(p.download());
-                            st.message = Some(p.describe());
-                        });
-                    }
-                }
-            }
-        });
     }
 
     // ------------------------------------------------------- stop, restart
@@ -829,36 +738,6 @@ impl Registry {
         self.start(id)
     }
 
-    /// Downloads a workspace's image without starting it.
-    pub async fn download(self: &Arc<Self>, id: &str) -> Result<(), ApiError> {
-        let ws = self.workspace(id)?;
-        if ws.kind == Kind::App {
-            return Ok(()); // nothing to download
-        }
-        self.settled(id).await;
-        if self.state(id).is_some_and(|s| s.container == RUNNING) {
-            return Ok(());
-        }
-        let lock = self.lock_for(id);
-        let _held = lock.lock().await;
-        let before = self.state(id).map(|s| s.phase).unwrap_or(Phase::Idle);
-        match self.pull(&ws).await {
-            Ok(()) => {
-                self.update(&ws, |st| {
-                    st.phase = if before.busy() || before == Phase::Error { Phase::Idle } else { before }
-                });
-                Ok(())
-            }
-            Err(e) => {
-                self.update(&ws, |st| {
-                    st.phase = Phase::Error;
-                    st.error = Some(format!("download failed: {e}"));
-                });
-                Err(ApiError::new(ErrorCode::Upstream, e))
-            }
-        }
-    }
-
     // ----------------------------------------------------------- reconcile
     /// What podman says now, against what wadd thinks (manager.py refresh):
     /// containers started or stopped elsewhere, images that came or went.
@@ -906,45 +785,29 @@ impl Registry {
         }
     }
 
-    // ------------------------------------------------------------ prefetch
-    /// Once podman answers (manager.py prefetch_loop): starts the autostart
-    /// workspaces and, with Prefetch::All, downloads the other images while
-    /// at least `min_free_gb` stays free. Failures are retried every `retry`.
-    /// (The server waits for the network before it starts this.)
-    pub async fn prefetch(self: Arc<Self>, mode: Prefetch, min_free_gb: u64, retry: Duration) {
-        if mode == Prefetch::None {
+    // ----------------------------------------------------------- autostart
+    /// Once podman answers: starts the autostart workspaces, retrying the
+    /// ones that fail every `retry`.
+    pub async fn autostart(self: Arc<Self>, retry: Duration) {
+        let mut pending: Vec<Workspace> = self.workspaces().into_iter().filter(|w| w.enabled && w.autostart).collect();
+        if pending.is_empty() {
             return;
         }
         let mut delay = Duration::from_secs(2);
         while !self.backend.available().await {
-            tracing::info!("prefetch: waiting for podman");
+            tracing::info!("autostart: waiting for podman");
             tokio::time::sleep(delay).await;
             delay = (delay * 2).min(Duration::from_secs(60));
         }
-        let everything = mode == Prefetch::All;
-        let mut pending: Vec<Workspace> =
-            self.workspaces().into_iter().filter(|w| w.enabled && (w.autostart || everything)).collect();
-        pending.sort_by_key(|w| !w.autostart);
         while !pending.is_empty() {
             let mut failed = vec![];
             for ws in pending {
                 if self.workspace(&ws.id).is_err() {
                     continue; // removed or disabled meanwhile
                 }
-                if !ws.autostart && self.backend.free_gb().await.is_some_and(|gb| gb < min_free_gb as f64) {
-                    tracing::info!(
-                        "prefetch: skipping {}, under {min_free_gb} GB free; it downloads on first use",
-                        ws.id
-                    );
-                    continue;
-                }
-                let ok = if ws.autostart {
-                    self.start(&ws.id).is_ok() && {
-                        self.settled(&ws.id).await;
-                        self.state(&ws.id).is_some_and(|s| s.phase != Phase::Error)
-                    }
-                } else {
-                    self.download(&ws.id).await.is_ok()
+                let ok = self.start(&ws.id).is_ok() && {
+                    self.settled(&ws.id).await;
+                    self.state(&ws.id).is_some_and(|s| s.phase != Phase::Error)
                 };
                 if !ok {
                     failed.push(ws);
@@ -953,11 +816,11 @@ impl Registry {
             pending = failed;
             if !pending.is_empty() {
                 let ids: Vec<&str> = pending.iter().map(|w| w.id.as_str()).collect();
-                tracing::info!("prefetch: retrying {ids:?} in {} s", retry.as_secs());
+                tracing::info!("autostart: retrying {ids:?} in {} s", retry.as_secs());
                 tokio::time::sleep(retry).await;
             }
         }
-        tracing::info!("prefetch: done");
+        tracing::info!("autostart: done");
     }
 
     /// Reconciles every `every`, for as long as wadd runs.
@@ -981,4 +844,10 @@ pub fn save_list(state_dir: &std::path::Path, list: &[Workspace]) -> Result<(), 
         .and_then(|_| std::fs::write(&tmp, text))
         .and_then(|_| std::fs::rename(&tmp, &path))
         .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// A Builder layer's image (localhost/wadspaces-template-<id>, -custom-<id>):
+/// what every wadspace runs on.
+pub fn is_layer_image(image: &str) -> bool {
+    image.starts_with("localhost/wadspaces-template-") || image.starts_with("localhost/wadspaces-custom-")
 }

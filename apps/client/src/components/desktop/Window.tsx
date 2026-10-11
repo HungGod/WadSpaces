@@ -1,6 +1,5 @@
 // A maximized window with no title bar (labwc-rc.xml): the app's picture
 // and name standing in for the app itself in the preview.
-import { localIcon } from "@core/catalog/icons";
 import { PANEL_H } from "./geometry";
 import type { Win } from "./useWindows";
 
@@ -16,7 +15,7 @@ export function Window({ win, z, onQuit }: { win: Win; z: number; onQuit: () => 
       style={{ bottom: PANEL_H, zIndex: z, fontFamily: "sans-serif" }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <img src={localIcon(win.iconUrl)} alt="" className="size-16 object-contain" draggable={false} />
+      <img src={win.iconUrl} alt="" className="size-16 object-contain" draggable={false} />
       <div className="text-[18px]">{win.title}</div>
       <div className="max-w-[420px] text-center text-[13px] text-[#9a9a9a]">Running here, maximized: labwc gives every window the whole desktop above the panel and no title bar.</div>
       <button type="button" onClick={onQuit} className="mt-2 rounded border border-[#666] bg-[#333] px-4 py-1.5 text-[13px] hover:bg-[#444]">

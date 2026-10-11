@@ -15,12 +15,14 @@ use wadd::signins::SignIns;
 
 struct Setup {
     reg: Arc<Registry>,
+    fake: Fake,
     signins: Arc<SignIns>,
     dir: tempfile::TempDir,
 }
 
 async fn setup(list: Vec<Workspace>) -> Setup {
     let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::default();
     let bus = Bus::new(wad_proto::v1::MachineInfo {
         name: "t".into(),
         version: "0".into(),
@@ -29,11 +31,10 @@ async fn setup(list: Vec<Workspace>) -> Setup {
         screen: None,
     });
     let reg = Registry::new(
-        Arc::new(Fake::default()),
+        Arc::new(fake.clone()),
         bus.clone(),
         Settings {
             ready_timeout: Duration::from_secs(30),
-            max_parallel_pulls: 1,
             projects_dir: "/p".into(),
             signins_dir: dir.path().join("signins"),
             state_dir: dir.path().join("state"),
@@ -51,7 +52,7 @@ async fn setup(list: Vec<Workspace>) -> Setup {
     let weak = Arc::downgrade(&signins);
     reg.on_prepare(move |w| weak.upgrade().map_or(Ok(()), |s| s.prepare(w)));
     reg.load(list).await.unwrap();
-    Setup { reg, signins, dir }
+    Setup { reg, fake, signins, dir }
 }
 
 fn web(name: &str) -> SignInRequest {
@@ -117,6 +118,9 @@ async fn mounted_where_used_and_kept_while_in_use() {
     );
     assert!(unit.contains("/run/wadspaces-extra:ro,z"), "{unit}");
 
+    s.fake.with(|m| {
+        m.images.insert(a.image.clone());
+    });
     s.reg.start("a").unwrap();
     s.reg.settled("a").await;
     // The one it didn't have yet was made, named after its app.
@@ -214,8 +218,8 @@ async fn the_builders_kinds_unique_names_and_setups_that_use_one() {
     let two = serde_json::json!([{"id": "w", "name": "W", "image": "i", "display": "host", "signins": [
         {"id": "a1", "app": "vscode", "kind": "vscode-codex", "slot": "ext:openai.chatgpt"},
         {"id": "a2", "app": "vscode", "kind": "vscode-claude-code", "slot": "ext:anthropic.claude-code"}]}]);
-    assert_eq!(wad_store::legacy::check_workspaces(two.as_array().unwrap().clone()).unwrap()[0].signins.len(), 2);
+    assert_eq!(wad_store::workspaces::check_workspaces(two.as_array().unwrap().clone()).unwrap()[0].signins.len(), 2);
     let same = serde_json::json!([{"id": "w", "name": "W", "image": "i", "display": "host", "signins": [
         {"id": "a1", "app": "vscode", "slot": "ext:openai.chatgpt"}, {"id": "a2", "app": "vscode", "slot": "ext:openai.chatgpt"}]}]);
-    assert!(wad_store::legacy::check_workspaces(same.as_array().unwrap().clone()).is_err());
+    assert!(wad_store::workspaces::check_workspaces(same.as_array().unwrap().clone()).is_err());
 }

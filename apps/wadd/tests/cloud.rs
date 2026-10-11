@@ -13,7 +13,7 @@ use common::{Fake, ws};
 use serde_json::{Value, json};
 use wad_firebase::values::time;
 use wad_firebase::{Functions, Identity};
-use wad_proto::v1::{Display, MountedProject, View as V};
+use wad_proto::v1::{Display, MountedProject};
 use wadd::cloud::{CloudRelay, Endpoints, Parts, Settings};
 use wadd::display::NullDisplay;
 use wadd::drives::Drives;
@@ -66,7 +66,6 @@ async fn env() -> Env {
         bus.clone(),
         RegSettings {
             ready_timeout: Duration::from_secs(10),
-            max_parallel_pulls: 3,
             projects_dir: "/p".into(),
             signins_dir: "/s".into(),
             state_dir: state.clone(),
@@ -231,11 +230,11 @@ async fn commands_run_and_report_back() {
     let cmds = "users/u1/machines/m1/commands";
     e.fb.put(
         &format!("{cmds}/c2"),
-        json!({"type": "switch", "wsId": "a", "status": "pending", "createdAt": time(2000)}),
+        json!({"type": "start", "wsId": "a", "status": "pending", "createdAt": time(2000)}),
     );
     e.fb.put(&format!("{cmds}/c1"), json!({"type": "teleport", "status": "pending", "createdAt": time(1000)}));
     e.fb.put(&format!("{cmds}/c3"), json!({"type": "stop", "status": "pending", "createdAt": time(3000)})); // no wsId
-    e.fb.put(&format!("{cmds}/c0"), json!({"type": "switch", "wsId": "a", "status": "done"}));
+    e.fb.put(&format!("{cmds}/c0"), json!({"type": "start", "wsId": "a", "status": "done"}));
     e.relay.poll_once().await.unwrap();
     let c = |id: &str| e.fb.doc(&format!("{cmds}/{id}")).unwrap();
     assert_eq!((c("c2")["status"].as_str(), &c("c2")["result"]), (Some("done"), &json!({"ok": true})));
@@ -247,8 +246,7 @@ async fn commands_run_and_report_back() {
     assert_eq!(c("c3")["result"]["error"], "stop needs wsId");
     assert!(c("c0").get("finishedAt").is_none()); // not pending: left alone
     e.reg.settled("a").await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(e.view.current(), V::Workspace("a".into()));
+    assert_eq!(e.reg.state("a").unwrap().container, "running");
 }
 
 #[tokio::test]

@@ -17,7 +17,7 @@ export function uptime(iso: string) {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-/** Image size; 0 means not known yet (nothing built or pulled). */
+/** Image size; 0 means not known yet (nothing built). */
 export function size(mb: number) {
   if (!mb) return "—";
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;

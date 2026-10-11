@@ -1,18 +1,13 @@
-//! The Python wadd's configuration, /etc/wadspaces/workspaces.yaml, read the
-//! way its config.py does (parse_config): the same defaults, the same old
-//! names and dropped keys, and the same checks, so a file Python accepted is
-//! accepted here and the workspaces come out the same.
-
-use std::path::Path;
+//! A workspace list checked before wadd takes it on (a build's, a launch's,
+//! the image's): every workspace valid, ids, ports and container names
+//! unique. The workspaces are given in their YAML shape (to_yaml), the one
+//! the machine's workspaces.yaml had, which keeps env values, hotkeys and
+//! the like as loose as that file was.
 
 use serde_json::{Map, Value};
 use wad_proto::v1::{Display, Kind, MountedProject, Workspace, WorkspaceSignIn};
 
 use crate::Error;
-
-/// Keys older wadds wrote that are gone: dropped on load.
-const DEPRECATED_DAEMON: &[&str] = &["base_registry"];
-const DEPRECATED_CLOUD: &[&str] = &["storage_bucket", "storage_base", "files_every_s"];
 
 const WORKSPACE_KEYS: &[&str] = &[
     "id",
@@ -37,85 +32,8 @@ const WORKSPACE_KEYS: &[&str] = &[
     "signins",
     "ephemeral",
 ];
-const DAEMON_KEYS: &[&str] = &[
-    "bind",
-    "port",
-    "backend",
-    "systemd_scope",
-    "podman_socket",
-    "cdp_url",
-    "keys",
-    "ready_timeout_s",
-    "quadlet_dir",
-    "secrets_dir",
-    "state_dir",
-    "prefetch",
-    "prefetch_min_free_gb",
-    "max_parallel_pulls",
-    "build_min_free_gb",
-    "projects_dir",
-    "projects_uid",
-    "tailscale_socket",
-    "tailscale_bin",
-    "tailnet_streams",
-    "folder_roots",
-];
-const KEYS_KEYS: &[&str] = &["enabled", "launcher", "block", "pass_super", "grab"];
-
-/// What the Rust wadd takes from the old file.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LegacyConfig {
-    pub machine_name: String,
-    /// The daemon section as written (minus dropped keys); defaults are the caller's.
-    pub daemon: Map<String, Value>,
-    /// The cloud section, with /usr/lib/wadspaces/cloud.yaml's keys over it.
-    pub cloud: Option<Map<String, Value>>,
-    pub workspaces: Vec<Workspace>,
-}
-
-impl LegacyConfig {
-    fn daemon_str(&self, key: &str, default: &str) -> String {
-        self.daemon.get(key).and_then(Value::as_str).unwrap_or(default).to_string()
-    }
-    pub fn state_dir(&self) -> String {
-        self.daemon_str("state_dir", "/var/lib/wadspaces")
-    }
-    pub fn quadlet_dir(&self) -> String {
-        self.daemon_str("quadlet_dir", "/etc/containers/systemd")
-    }
-    pub fn projects_dir(&self) -> String {
-        self.daemon_str("projects_dir", "/var/lib/wadspaces-projects")
-    }
-}
-
 fn err(msg: impl Into<String>) -> Error {
     Error::Config(msg.into())
-}
-
-fn yaml(path: &Path) -> Result<Option<Value>, Error> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(Error::Io(path.display().to_string(), e)),
-    };
-    let v: Value = serde_norway::from_str(&text).map_err(|e| Error::Yaml(path.display().to_string(), e.to_string()))?;
-    Ok(Some(if v.is_null() { Value::Object(Map::new()) } else { v }))
-}
-
-/// Reads the file (and the image's cloud.yaml, whose keys win).
-pub fn read(path: &Path, vendor_cloud: Option<&Path>) -> Result<LegacyConfig, Error> {
-    let mut data = yaml(path)?.ok_or_else(|| err(format!("config not found: {}", path.display())))?;
-    if let Some(vc) = vendor_cloud
-        && let Some(Value::Object(vendor)) = yaml(vc)?
-        && !vendor.is_empty()
-    {
-        let mut cloud = data.get("cloud").and_then(Value::as_object).cloned().unwrap_or_default();
-        cloud.extend(vendor);
-        if let Value::Object(d) = &mut data {
-            d.insert("cloud".into(), Value::Object(cloud));
-        }
-    }
-    parse(&data)
 }
 
 /// Where a value (or a key) holds a control character, if anywhere: the
@@ -136,8 +54,9 @@ fn control_chars(v: &Value) -> Option<String> {
     }
 }
 
-/// Python's `str(v)`, for env values written as YAML numbers or booleans.
-fn py_str(v: &Value) -> String {
+/// A value as text: env values written as numbers or booleans (True and
+/// False, as they always were).
+fn as_text(v: &Value) -> String {
     match v {
         Value::Null => "None".into(),
         Value::Bool(true) => "True".into(),
@@ -146,10 +65,6 @@ fn py_str(v: &Value) -> String {
         Value::Number(n) => n.to_string(),
         other => other.to_string(),
     }
-}
-
-fn section(data: &Value, name: &str) -> Map<String, Value> {
-    data.get(name).and_then(Value::as_object).cloned().unwrap_or_default()
 }
 
 fn check_known(map: &Map<String, Value>, known: &[&str], name: &str) -> Result<(), Error> {
@@ -163,7 +78,7 @@ fn int(v: Option<&Value>) -> Option<i64> {
 }
 
 fn strings(v: Option<&Value>) -> Vec<String> {
-    v.and_then(Value::as_array).map(|a| a.iter().map(py_str).collect()).unwrap_or_default()
+    v.and_then(Value::as_array).map(|a| a.iter().map(as_text).collect()).unwrap_or_default()
 }
 
 /// `/[:%\\"'\x00-\x1f\x7f]/`: what a host path may not contain.
@@ -171,70 +86,12 @@ pub fn host_path_ok(p: &str) -> bool {
     !p.chars().any(|c| matches!(c, ':' | '%' | '\\' | '"' | '\'') || (c as u32) < 0x20 || c as u32 == 0x7f)
 }
 
-pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
-    if !data.is_object() {
-        return Err(err("config must be a mapping"));
-    }
-    let version = data.get("version").cloned().unwrap_or(1.into());
-    if version.as_i64() != Some(1) {
-        return Err(err(format!("unsupported config version {version}")));
-    }
-    let machine_name = data
-        .get("machine")
-        .and_then(|m| m.get("name"))
-        .filter(|n| !n.is_null() && n.as_str() != Some(""))
-        .map(py_str)
-        .unwrap_or_else(|| "wadspaces".into());
-
-    let mut daemon = section(data, "daemon");
-    for k in DEPRECATED_DAEMON {
-        daemon.remove(*k);
-    }
-    // `hotkeys` is the old name for `keys`.
-    let mut keys = daemon.remove("hotkeys").and_then(|v| v.as_object().cloned()).unwrap_or_default();
-    keys.extend(daemon.remove("keys").and_then(|v| v.as_object().cloned()).unwrap_or_default());
-    check_known(&keys, KEYS_KEYS, "daemon.keys")?;
-    check_known(&daemon, DAEMON_KEYS, "daemon")?;
-    let pick = |k: &str, allowed: &[&str], default: &str| -> Result<(), Error> {
-        let v = daemon.get(k).and_then(Value::as_str).unwrap_or(default);
-        if allowed.contains(&v) {
-            Ok(())
-        } else {
-            // As Python prints its tuple.
-            let tuple = allowed.iter().map(|a| format!("'{a}'")).collect::<Vec<_>>().join(", ");
-            Err(err(format!("daemon.{k} must be one of ({tuple})")))
-        }
-    };
-    pick("backend", &["systemd", "podman"], "systemd")?;
-    pick("systemd_scope", &["system", "user"], "system")?;
-    pick("prefetch", &["autostart", "all", "none"], "none")?;
-    if int(daemon.get("max_parallel_pulls")).unwrap_or(3) < 1 {
-        return Err(err("daemon.max_parallel_pulls must be at least 1"));
-    }
-    daemon.insert("keys".into(), Value::Object(keys));
-    let daemon_port = int(daemon.get("port")).unwrap_or(8080);
-
-    let wadcreator = section(data, "wadcreator");
-    let wc_enabled = wadcreator.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-    let wc_port = int(wadcreator.get("port")).unwrap_or(8081);
-
-    let cloud = match data.get("cloud").filter(|c| crate::state::truthy(c)) {
-        Some(_) => {
-            let mut c = section(data, "cloud");
-            for k in DEPRECATED_CLOUD {
-                c.remove(*k);
-            }
-            if !c.get("project_id").is_some_and(crate::state::truthy) {
-                return Err(err("cloud.project_id is required when cloud is set"));
-            }
-            Some(c)
-        }
-        None => None,
-    };
-
+/// Workspaces (in to_yaml's shape) checked together: ids, ports and names
+/// unique, and each one valid.
+pub fn check_workspaces(list: Vec<Value>) -> Result<Vec<Workspace>, Error> {
     let mut workspaces = Vec::new();
     let (mut ids, mut ports, mut names) = (Vec::new(), Vec::new(), Vec::new());
-    for (i, raw) in data.get("workspaces").and_then(Value::as_array).cloned().unwrap_or_default().iter().enumerate() {
+    for (i, raw) in list.iter().enumerate() {
         let where_ = format!("workspaces[{i}]");
         let raw = raw.as_object().cloned().ok_or_else(|| err(format!("{where_}: not a mapping")))?;
         check_known(&raw, WORKSPACE_KEYS, &where_)?;
@@ -243,7 +100,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
         if let Some(key) = control_chars(&Value::Object(raw.clone())) {
             return Err(err(format!("{where_}: {key} has a line break or another control character")));
         }
-        let kind = match raw.get("kind").map(py_str).as_deref() {
+        let kind = match raw.get("kind").map(as_text).as_deref() {
             None | Some("container") => Kind::Container,
             Some("app") => Kind::App,
             Some(_) => return Err(err(format!("{where_}: kind must be one of ('container', 'app')"))),
@@ -261,7 +118,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
             if exec.first().is_none_or(|p| p.is_empty()) {
                 return Err(err(format!("{where_}: exec must name a program")));
             }
-            if raw.get("display").is_some_and(|d| py_str(d) != "host") {
+            if raw.get("display").is_some_and(|d| as_text(d) != "host") {
                 return Err(err(format!("{where_}: an app is shown on this screen (display must be 'host')")));
             }
             for key in ["image", "port", "secrets", "volumes", "devices", "projects"] {
@@ -278,7 +135,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
             return Err(err(format!("{where_}: only an app has exec")));
         }
         let default_display = if kind == Kind::App { "host" } else { "stream" };
-        let display = raw.get("display").map(py_str).unwrap_or_else(|| default_display.into());
+        let display = raw.get("display").map(as_text).unwrap_or_else(|| default_display.into());
         let display = match display.as_str() {
             "host" => Display::Host,
             "stream" => Display::Stream,
@@ -288,7 +145,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
         if display == Display::Stream && port.is_none() {
             return Err(err(format!("{where_}: missing port (a streamed workspace needs one)")));
         }
-        let id = py_str(&raw["id"]);
+        let id = as_text(&raw["id"]);
         let where_ = format!("workspace '{id}'");
         if !wad_core::spec::is_id(&id) {
             return Err(err(format!("{where_}: id must match ^[a-z0-9][a-z0-9-]{{0,62}}$")));
@@ -300,13 +157,13 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
             if !(1..=65535).contains(&p) {
                 return Err(err(format!("{where_}: port out of range")));
             }
-            if ports.contains(&p) || p == daemon_port || (wc_enabled && p == wc_port) {
+            if ports.contains(&p) {
                 return Err(err(format!("{where_}: port {p} already used")));
             }
             ports.push(p);
         }
         let container_name =
-            raw.get("container_name").map(py_str).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("wad-{id}"));
+            raw.get("container_name").map(as_text).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("wad-{id}"));
         if names.contains(&container_name) {
             return Err(err(format!("{where_}: duplicate container_name")));
         }
@@ -314,7 +171,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
         let signins = check_signins(raw.get("signins"), &where_)?;
         let enabled = raw.get("enabled").and_then(Value::as_bool).unwrap_or(true);
         let hotkey = int(raw.get("hotkey").filter(|h| !h.is_null()));
-        // Kept for older files, never bound: Super+N follows what runs.
+        // Never bound: Super+N follows what runs.
         if let Some(h) = hotkey
             && !(1..=9).contains(&h)
         {
@@ -323,25 +180,25 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
         let env = raw
             .get("env")
             .and_then(Value::as_object)
-            .map(|e| e.iter().map(|(k, v)| (k.clone(), py_str(v))).collect())
+            .map(|e| e.iter().map(|(k, v)| (k.clone(), as_text(v))).collect())
             .unwrap_or_default();
         let shm_size = match raw.get("shm_size") {
             None => Some("1g".to_string()),
             Some(Value::Null) => None,
-            Some(v) => Some(py_str(v)),
+            Some(v) => Some(as_text(v)),
         };
         ids.push(id.clone());
         names.push(container_name.clone());
         workspaces.push(Workspace {
             id,
-            name: py_str(&raw["name"]),
+            name: as_text(&raw["name"]),
             kind,
             exec,
-            image: raw.get("image").map(py_str).unwrap_or_default(),
+            image: raw.get("image").map(as_text).unwrap_or_default(),
             display,
             port: port.map(|p| p as u16),
             hotkey: hotkey.map(|h| h as u8),
-            icon: raw.get("icon").filter(|i| !i.is_null()).map(py_str),
+            icon: raw.get("icon").filter(|i| !i.is_null()).map(as_text),
             enabled,
             autostart: raw.get("autostart").and_then(Value::as_bool).unwrap_or(false),
             container_name,
@@ -356,7 +213,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
             ephemeral: raw.get("ephemeral").and_then(Value::as_bool).unwrap_or(false),
         });
     }
-    Ok(LegacyConfig { machine_name, daemon, cloud, workspaces })
+    Ok(workspaces)
 }
 
 fn check_projects(v: Option<&Value>, where_: &str) -> Result<Vec<MountedProject>, Error> {
@@ -374,7 +231,7 @@ fn check_projects(v: Option<&Value>, where_: &str) -> Result<Vec<MountedProject>
             return Err(err(format!("{where_}: each project is {{id, mount, path?}}, not {p}")));
         }
         let o = o.unwrap();
-        let (id, mount) = (py_str(&o["id"]), py_str(&o["mount"]));
+        let (id, mount) = (as_text(&o["id"]), as_text(&o["mount"]));
         let path = match o.get("path") {
             None => None,
             Some(Value::String(s)) if s.starts_with('/') && host_path_ok(s) => Some(s.clone()),
@@ -429,11 +286,11 @@ fn check_signins(v: Option<&Value>, where_: &str) -> Result<Vec<WorkspaceSignIn>
             return Err(err(format!("{where_}: each sign-in is {{id, app, web?, name?, kind?, slot?}}, not {s}")));
         }
         let o = o.unwrap();
-        let (id, app) = (py_str(&o["id"]), py_str(&o["app"]));
-        let name = o.get("name").map(py_str).unwrap_or_default();
+        let (id, app) = (as_text(&o["id"]), as_text(&o["app"]));
+        let name = o.get("name").map(as_text).unwrap_or_default();
         let web = o.get("web").and_then(Value::as_bool).unwrap_or(false);
-        let kind = o.get("kind").map(py_str).unwrap_or_default();
-        let slot = o.get("slot").map(py_str).unwrap_or_default();
+        let kind = o.get("kind").map(as_text).unwrap_or_default();
+        let slot = o.get("slot").map(as_text).unwrap_or_default();
         if !wad_core::spec::is_id(&id) || !wad_core::spec::is_id(&app) {
             return Err(err(format!(
                 "{where_}: sign-in {id:?} for {app:?}: both must match ^[a-z0-9][a-z0-9-]{{0,62}}$"
@@ -455,7 +312,7 @@ fn check_signins(v: Option<&Value>, where_: &str) -> Result<Vec<WorkspaceSignIn>
     Ok(out)
 }
 
-/// A workspace in workspaces.yaml's shape: what parse() reads back.
+/// A workspace in its YAML shape: what check_workspaces() reads back.
 pub fn to_yaml(w: &Workspace) -> Value {
     let mut o = Map::new();
     o.insert("id".into(), w.id.clone().into());
@@ -529,14 +386,6 @@ pub fn to_yaml(w: &Workspace) -> Value {
         o.insert("ephemeral".into(), true.into());
     }
     Value::Object(o)
-}
-
-/// Workspaces (in workspaces.yaml's shape) checked together, as the file
-/// would be: ids, ports and names unique, and each one valid.
-pub fn check_workspaces(list: Vec<Value>) -> Result<Vec<Workspace>, Error> {
-    // The Rust wadd has no TCP port of its own to keep free.
-    let data = serde_json::json!({"daemon": {"port": 0}, "wadcreator": {"enabled": false}, "workspaces": list});
-    parse(&data).map(|c| c.workspaces)
 }
 
 #[cfg(test)]

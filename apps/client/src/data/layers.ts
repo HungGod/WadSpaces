@@ -20,10 +20,11 @@ import {
   type Library,
   type SignInRef,
   type Template,
-  type WadspaceV2,
+  type Wadspace,
+  type Wallpaper,
   type WebApp,
 } from "@core/layers";
-import type { Wallpaper } from "@core/model";
+
 import { renderWallpaper } from "@/lib/wallpaperRender";
 
 /** A layer's image on a machine. */
@@ -62,11 +63,6 @@ export function imageState(key: LayerKey, lib: Library, images: Partial<Record<L
 
 /** The image rows by layer. */
 export const byLayer = (rows: ImageRow[]): Partial<Record<LayerKey, ImageRow>> => Object.fromEntries(rows.map((r) => [r.layer, r]));
-
-/** The image a wadspace runs on now: its old one until its layers are built. */
-export function wadspaceImage(w: Pick<WadspaceV2, "base" | "legacyImage">): { key: LayerKey; legacy: boolean } {
-  return { key: imageKey(w.base), legacy: !!w.legacyImage };
-}
 
 /** What a throwaway run has instead of its wadspace's own. */
 export interface RunOverrides {
@@ -156,7 +152,7 @@ export async function launchItem(item: RunItem, opts: { background: boolean; pro
 }
 
 /** PUT /v1/wadspaces/{id}: the wadspace and the layers it's on. */
-export function installBody(w: WadspaceV2, lib: Library, tz: string) {
+export function installBody(w: Wadspace, lib: Library, tz: string) {
   const r = resolve(lib, w.base);
   if (!r) throw new Error(`${w.name}'s template or customization is gone.`);
   return { wadspace: w, template: r.template, customization: r.customization ?? null, tz };

@@ -1,12 +1,11 @@
 // An in-memory backend for the WadSpaces Client's tests: the Builder's
 // documents, layer images that build when asked (or on `finishBuilds`),
-// launches recorded instead of run, saved sign-ins, and the older wadspaces
-// and drafts a migration moves.
-import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
+// launches recorded instead of run, and saved sign-ins.
+import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
 import { customizationLayer, templateLayer } from "@core/layers";
 import type { Project, ProjectDraft } from "@core/projects";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
-import type { ContainerRun, Draft, FocusLock, LastSession, Machine, PublicUser, Wadspace } from "@/lib/types";
+import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser } from "@/lib/types";
 import type { Backend, BuildProgress, Caps, LayerLibrary, LayerPatch, Topic } from "@/data/backend";
 import type { ImageRow, RunItem } from "@/data/layers";
 import { STARTERS } from "@core/catalog/catalog";
@@ -25,7 +24,7 @@ export class FakeBackend implements Backend {
 
   templates = new Map<string, Template>();
   customizations = new Map<string, Customization>();
-  wadspaces = new Map<string, WadspaceV2>();
+  wadspaces = new Map<string, Wadspace>();
   browsers = new Map<string, BrowserSetup>();
   images = new Map<LayerKey, ImageRow>();
   /** Layer builds asked for, oldest first. */
@@ -33,9 +32,6 @@ export class FakeBackend implements Backend {
   launches: FakeLaunch[] = [];
   signIns: WaddSignIn[] = [];
   projects: Project[] = [];
-  /** Wadspaces from before the layers. */
-  old: Wadspace[] = [];
-  drafts: Draft[] = [];
   startersCreated = false;
   screen = { width: 1920, height: 1080 };
   private listeners = new Set<(t: Topic) => void>();
@@ -91,7 +87,7 @@ export class FakeBackend implements Backend {
   async listWadspaces() {
     return [...this.wadspaces.values()];
   }
-  async saveWadspace(w: WadspaceV2) {
+  async saveWadspace(w: Wadspace) {
     this.wadspaces.set(w.id, w);
     this.emit("wadspaces");
     return w;
@@ -124,7 +120,6 @@ export class FakeBackend implements Backend {
     if (!cur) throw new Error("It's gone.");
     const next = { ...cur, ...patch } as T & LayerPatch;
     if (next.deletedAt === null) delete next.deletedAt;
-    if (next.legacyImage === null) delete next.legacyImage;
     m.set(id, next);
     this.emit(topic);
     return next;
@@ -207,14 +202,6 @@ export class FakeBackend implements Backend {
   async setOnboarded() {}
   async users() {
     return [await this.me()];
-  }
-  async listOldWadspaces() {
-    return this.old;
-  }
-  async discardDrafts() {
-    const n = this.drafts.length;
-    this.drafts = [];
-    return n;
   }
   async listMachines(): Promise<Machine[]> {
     return [];

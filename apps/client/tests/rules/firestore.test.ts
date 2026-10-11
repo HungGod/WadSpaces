@@ -201,23 +201,19 @@ describe("machines and the relay", () => {
     await assertFails(updateDoc(m1(), { view: 3 }));
   });
 
-  it("owners can send the Rust wadd home", async () => {
-    await assertSucceeds(addDoc(collection(alice(), "users/alice/machines/m1/commands"), { type: "home", status: "pending" }));
-  });
-
-  it("owners can ask for a projects sync or a launch", async () => {
+  it("owners can ask for a projects sync", async () => {
     const cmds = "users/alice/machines/m1/commands";
     await assertSucceeds(addDoc(collection(alice(), cmds), { type: "projects-sync", status: "pending" }));
-    await assertSucceeds(addDoc(collection(alice(), cmds), { type: "launch", wsId: "w1", projects: ["p1"], status: "pending" }));
-    await assertFails(addDoc(collection(bob(), cmds), { type: "launch", wsId: "w1", status: "pending" }));
+    await assertFails(addDoc(collection(bob(), cmds), { type: "projects-sync", status: "pending" }));
+    await assertFails(addDoc(collection(alice(), cmds), { type: "switch", wsId: "w1", status: "pending" }));
   });
 
   it("owners queue known commands; the machine updates their status", async () => {
     const cmds = "users/alice/machines/m1/commands";
-    await assertSucceeds(addDoc(collection(alice(), cmds), { type: "switch", wsId: "w1", status: "pending" }));
+    await assertSucceeds(addDoc(collection(alice(), cmds), { type: "start", wsId: "w1", status: "pending" }));
     await assertFails(addDoc(collection(alice(), cmds), { type: "rm -rf", status: "pending" }));
-    await assertFails(addDoc(collection(bob(), cmds), { type: "switch", wsId: "w1", status: "pending" }));
-    await seed(`${cmds}/c1`, { type: "switch", wsId: "w1", status: "pending" });
+    await assertFails(addDoc(collection(bob(), cmds), { type: "start", wsId: "w1", status: "pending" }));
+    await seed(`${cmds}/c1`, { type: "start", wsId: "w1", status: "pending" });
     await assertSucceeds(updateDoc(doc(machine("alice", "m1"), `${cmds}/c1`), { status: "done" }));
     await assertFails(updateDoc(doc(machine("alice", "m1"), `${cmds}/c1`), { type: "stop" }));
   });
@@ -278,13 +274,13 @@ describe("the Builder's layers and WadBrowser setups", () => {
     await assertFails(updateDoc(doc(alice(), "profiles/alice"), { startersCreated: "yes" }));
   });
 
-  it("owners queue builds, launches of anything the launcher starts, and sessions", async () => {
+  it("owners queue builds and launches of anything the launcher starts", async () => {
     await seed("users/alice/machines/m1", { name: "Surface", lastSeen: null, workspaces: [] });
     const cmds = "users/alice/machines/m1/commands";
     await assertSucceeds(addDoc(collection(alice(), cmds), { type: "build", layer: "custom:dev-plus", status: "pending" }));
     await assertSucceeds(addDoc(collection(alice(), cmds), { type: "install", wsId: "academy", wadspace: { version: 2 }, template: {}, status: "pending" }));
     await assertSucceeds(addDoc(collection(alice(), cmds), { type: "launch-run", items: [{ kind: "terminal" }], focusMinutes: 25, status: "pending" }));
-    await assertSucceeds(addDoc(collection(alice(), cmds), { type: "session", workspaces: ["w1"], minutes: null, status: "pending" }));
+    await assertFails(addDoc(collection(alice(), cmds), { type: "session", workspaces: ["w1"], minutes: null, status: "pending" }));
     await assertFails(addDoc(collection(bob(), cmds), { type: "build", layer: "template:x", status: "pending" }));
   });
 

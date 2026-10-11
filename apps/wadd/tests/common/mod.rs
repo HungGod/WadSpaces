@@ -23,9 +23,7 @@ pub struct Machine {
     /// Polls before a URL answers.
     pub answer_after: usize,
     pub polls: usize,
-    pub pull_fails: Option<String>,
     pub start_fails: Option<String>,
-    pub rx: u64,
     pub free_gb: f64,
     /// Container id -> its wadspaces.id label.
     pub labels: HashMap<String, String>,
@@ -73,22 +71,6 @@ impl Backend for Fake {
     }
     async fn image_exists(&self, image: &str) -> Result<bool, String> {
         Ok(self.0.lock().unwrap().images.contains(image))
-    }
-    async fn pull(&self, image: &str, mut on_line: OnLine) -> Result<(), String> {
-        self.with(|m| m.calls.push(format!("pull {image}")));
-        on_line("Copying blob sha256:abc");
-        for _ in 0..3 {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            self.with(|m| m.rx += 300);
-        }
-        let fail = self.0.lock().unwrap().pull_fails.clone();
-        if let Some(e) = fail {
-            return Err(e);
-        }
-        self.with(|m| {
-            m.images.insert(image.into());
-        });
-        Ok(())
     }
     async fn start(&self, unit: &str) -> Result<(), String> {
         let fail = self.0.lock().unwrap().start_fails.clone();
@@ -153,12 +135,6 @@ impl Backend for Fake {
         let mut m = self.0.lock().unwrap();
         m.polls += 1;
         m.answering.contains(url) && m.polls > m.answer_after
-    }
-    async fn download_size(&self, image: &str) -> Option<(u64, u32)> {
-        (!self.0.lock().unwrap().images.contains(image)).then_some((1000, 2))
-    }
-    fn rx_bytes(&self) -> u64 {
-        self.0.lock().unwrap().rx
     }
     async fn image_labels(&self, image: &str) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
         let m = self.0.lock().unwrap();

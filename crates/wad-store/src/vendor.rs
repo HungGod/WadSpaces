@@ -1,6 +1,6 @@
 //! The workspaces that come with the image: one TOML file per workspace in
 //! `/usr/lib/wadspaces/workspaces.d/<id>.toml`, with workspaces.yaml's keys
-//! (and its defaults: legacy.rs checks them the same way).
+//! (and its defaults: workspaces.rs checks them the same way).
 //!
 //! The machine's list is state (`<state_dir>/workspaces.json`): it changes
 //! as you build, edit and delete workspaces, and an image update can't
@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use wad_proto::v1::Workspace;
 
 use crate::Error;
-use crate::legacy;
+use crate::workspaces;
 
 pub const BOOK: &str = "workspaces-vendor.json";
 
@@ -69,7 +69,7 @@ pub fn read(dir: &Path) -> Result<Vec<VendorWorkspace>, Error> {
         raw.push(v);
     }
     // Checked together, as one workspaces.yaml would be.
-    let list = legacy::check_workspaces(raw).map_err(|e| Error::Config(format!("{}: {e}", dir.display())))?;
+    let list = workspaces::check_workspaces(raw).map_err(|e| Error::Config(format!("{}: {e}", dir.display())))?;
     Ok(list.into_iter().map(|w| VendorWorkspace { digest: digest(&w), workspace: w }).collect())
 }
 
@@ -115,7 +115,7 @@ pub fn apply(list: &mut Vec<Workspace>, book: &mut Book, vendor: &[VendorWorkspa
             }
             None => next.push(w),
         }
-        match legacy::check_workspaces(next.iter().map(legacy::to_yaml).collect()) {
+        match workspaces::check_workspaces(next.iter().map(workspaces::to_yaml).collect()) {
             Ok(checked) => {
                 *list = checked;
                 book.insert(id.clone(), v.digest.clone());

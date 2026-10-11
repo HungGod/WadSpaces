@@ -3,7 +3,7 @@
 // and Claude Code, a wadspace on each kind of base, a saved WadBrowser setup,
 // saved sign-ins (some shared) and the layer images built. Sign-in names are
 // made up (images/examples has the real VanuaAcademy's).
-import { customizationLayer, templateLayer, webappId, type BrowserSetup, type Customization, type SignInRef, type Template, type WadspaceV2 } from "@core/layers";
+import { customizationLayer, templateLayer, webappId, type BrowserSetup, type Customization, type SignInRef, type Template, type Wadspace } from "@core/layers";
 import type { Project } from "@core/projects";
 import { FakeBackend } from "./fakeBackend";
 
@@ -51,7 +51,7 @@ export function sampleBackend(target: "offline" | "online" | "machine" = "offlin
     createdAt: at(12),
     updatedAt: at(12),
   };
-  const cosmic: WadspaceV2 = {
+  const cosmic: Wadspace = {
     version: 2,
     id: "cosmic-bodybuilding",
     owner: "me",
@@ -64,7 +64,7 @@ export function sampleBackend(target: "offline" | "online" | "machine" = "offlin
     createdAt: at(9),
     updatedAt: at(9),
   };
-  const vanua: WadspaceV2 = {
+  const vanua: Wadspace = {
     version: 2,
     id: "vanua-academy",
     owner: "me",

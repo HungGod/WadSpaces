@@ -123,7 +123,6 @@ async fn env() -> Env {
         bus.clone(),
         Settings {
             ready_timeout: Duration::from_secs(10),
-            max_parallel_pulls: 3,
             projects_dir: tmp.join("projects").to_string_lossy().into(),
             signins_dir: tmp.join("signins"),
             state_dir: state.clone(),

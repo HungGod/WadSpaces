@@ -6,18 +6,17 @@ import {
   type Diagnostics as DiagnosticsData,
   type LogLine,
   apiFailures,
-  downloadLabel,
   formatBytes,
   formatDuration,
   onApiFailure,
   wadd,
 } from "@/lib/wadd";
 import { useApp } from "@/lib/store";
-import { Button, Progress } from "./ui";
+import { Button } from "./ui";
 import { copyText } from "@/lib/clipboard";
 
-// When a download stalls or a workspace won't start, this shows where it is
-// and what broke, without SSH. Everything wadd returns here is redacted.
+// When a workspace won't start, this shows where it is and what broke,
+// without SSH. Everything wadd returns here is redacted.
 
 type Source = { kind: "daemon" } | { kind: "unit"; unit: string } | { kind: "workspace"; id: string };
 
@@ -137,7 +136,7 @@ export function MachineDiagnostics() {
     }
   };
 
-  const act = async (id: string, a: "download" | "start" | "stop" | "restart") => {
+  const act = async (id: string, a: "start" | "stop" | "restart") => {
     try {
       await wadd.action(id, a);
     } catch (e) {
@@ -152,7 +151,7 @@ export function MachineDiagnostics() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted">Downloads, errors and logs from wadd on this machine. Tokens and passwords are redacted.</p>
+        <p className="text-sm text-muted">Errors and logs from wadd on this machine. Tokens and passwords are redacted.</p>
         <Button onClick={copyReport}>
           {copied ? <Check className="size-4" /> : <ClipboardCopy className="size-4" />} {copied ? "Copied" : "Copy report"}
         </Button>
@@ -177,7 +176,7 @@ export function MachineDiagnostics() {
         </div>
       )}
 
-      <Section title="Workspaces" hint="Phase, download progress and the last error for each workspace.">
+      <Section title="Workspaces" hint="Phase and the last error for each workspace.">
         <div className="divide-y divide-line">
           {(diag?.workspaces ?? []).map((d) => {
             const c = live.get(d.id);
@@ -193,24 +192,13 @@ export function MachineDiagnostics() {
                   </div>
                   <div className="mt-0.5 truncate font-mono text-xs text-faint">{d.image}</div>
                   <div className="mt-1 text-xs text-muted">
-                    container {d.container} · image {d.image_present == null ? "unknown" : d.image_present ? "downloaded" : "not downloaded"}
+                    container {d.container} · image {d.image_present == null ? "unknown" : d.image_present ? "built" : "not built"}
                   </div>
-                  {phase === "pulling" && (
-                    <div className="mt-2 max-w-md">
-                      <Progress value={c?.download?.progress ?? d.progress ?? 0} />
-                      <div className="mt-1 text-xs text-muted">{c?.download?.label || downloadLabel(d.download) || d.message}</div>
-                    </div>
-                  )}
-                  {phase !== "pulling" && d.message && <div className="mt-1 text-xs text-muted">{d.message}</div>}
+                  {d.message && <div className="mt-1 text-xs text-muted">{d.message}</div>}
                   {(c?.error ?? d.error) && <div className="mt-1 break-words text-sm text-danger">{c?.error ?? d.error}</div>}
                 </div>
                 {d.enabled && (
                   <div className="flex flex-wrap gap-1.5">
-                    {d.image_present === false && phase !== "pulling" && (
-                      <Button size="sm" onClick={() => act(d.id, "download")}>
-                        Download
-                      </Button>
-                    )}
                     {running ? (
                       <>
                         <Button size="sm" onClick={() => act(d.id, "restart")}>

@@ -86,7 +86,7 @@ pub fn merged(current: &[Workspace], fresh: &Value) -> Result<(Vec<Workspace>, b
     if let Some(app) = current.iter().find(|w| w.id == id && w.kind == wad_proto::v1::Kind::App) {
         return Err(format!("{id:?} is {}, one of this machine's own apps: give the wadspace another id", app.name));
     }
-    let mut list: Vec<Value> = current.iter().map(wad_store::legacy::to_yaml).collect();
+    let mut list: Vec<Value> = current.iter().map(wad_store::workspaces::to_yaml).collect();
     let updated = match list.iter_mut().find(|w| w["id"] == id) {
         Some(old) => {
             let mut new = old.clone();
@@ -117,7 +117,7 @@ pub fn merged(current: &[Workspace], fresh: &Value) -> Result<(Vec<Workspace>, b
             false
         }
     };
-    wad_store::legacy::check_workspaces(list).map(|l| (l, updated)).map_err(|e| e.to_string())
+    wad_store::workspaces::check_workspaces(list).map(|l| (l, updated)).map_err(|e| e.to_string())
 }
 
 /// The label a layer's image carries: its build folder's sha.
@@ -265,11 +265,6 @@ impl Builds {
             last_publish: Mutex::default(),
             one_at_a_time: tokio::sync::Mutex::new(()),
         })
-    }
-
-    /// Web apps' icons (the API's prefetch and preview use them too).
-    pub fn icons(&self) -> Arc<Icons> {
-        self.icons.clone()
     }
 
     /// Builds a layer's image (a customization's, its template's first when

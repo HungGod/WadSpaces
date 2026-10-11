@@ -7,7 +7,7 @@
 // The offline backend uses all of it; the machine app only the machine half
 // (its documents are the account's).
 import { STARTERS } from "@core/catalog/catalog";
-import { imageKey, type BrowserSetup, type Customization, type LayerKey, type Template, type WadspaceV2 } from "@core/layers";
+import { imageKey, type BrowserSetup, type Customization, type LayerKey, type Template, type Wadspace } from "@core/layers";
 import { wadd, type LibraryCollection } from "@/lib/wadd";
 import type { LayerLibrary, LayerPatch } from "../backend";
 import { byLayer, imageState, installBody, launchItem, layerRequest, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
@@ -47,9 +47,8 @@ class Collection<T extends Doc> {
     await this.list();
     const d = this.items.get(id);
     if (!d) throw new Error("It's gone.");
-    const next = { ...d, ...patch, updatedAt: new Date().toISOString() } as T & { deletedAt?: string | null; legacyImage?: string | null };
+    const next = { ...d, ...patch, updatedAt: new Date().toISOString() } as T & { deletedAt?: string | null };
     if (next.deletedAt === null) delete next.deletedAt;
-    if (next.legacyImage === null) delete next.legacyImage;
     return this.put(next as T);
   }
 
@@ -71,7 +70,7 @@ export class WaddLayerDocs {
   readonly templates = new Collection<Template>("templates");
   readonly customizations = new Collection<Customization>("customizations");
   /** The `wadspaces` collection also holds designs from before the layers: those are left out. */
-  readonly wadspaces = new Collection<WadspaceV2>("wadspaces", isV2);
+  readonly wadspaces = new Collection<Wadspace>("wadspaces", isV2);
   readonly browsers = new Collection<BrowserSetup>("browsers");
 
   constructor(private readonly owner: () => string) {}
@@ -100,7 +99,7 @@ export class WaddMachine {
   readonly building = new Set<string>();
 
   /** Installs or updates a wadspace here, with its wallpaper drawn now. */
-  async install(w: WadspaceV2, lib: LayerLibrary): Promise<void> {
+  async install(w: Wadspace, lib: LayerLibrary): Promise<void> {
     await wadd.installWadspace(w.id, installBody(w, lib, timeZone()));
     await wadd.putWallpaper(w.id, await wallpaperUpload(w.wallpaper));
   }
@@ -135,7 +134,6 @@ export class WaddMachine {
       const w = lib.wadspaces.find((x) => x.id === id);
       if (!w) continue;
       await this.install(w, lib);
-      if (w.legacyImage) continue;
       const key = imageKey(w.base);
       if (imageState(key, lib, images, this.building) !== "built" && !this.building.has(key)) await this.build(key, lib);
     }

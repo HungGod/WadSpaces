@@ -4,7 +4,6 @@
 import { useEffect, useRef } from "react";
 import { Plus, Power } from "lucide-react";
 import clsx from "clsx";
-import { localIcon } from "@core/catalog/icons";
 import { CELL_H, CELL_W, DESKTOP_ICON } from "./geometry";
 
 interface Props {
@@ -47,7 +46,7 @@ export function DesktopIcon({ label, iconUrl, x, y, selected, renaming, startup,
       style={{ left: x, top: y, width: CELL_W, height: CELL_H, fontFamily: "sans-serif" }}
     >
       <img
-        src={localIcon(iconUrl)}
+        src={iconUrl}
         alt=""
         draggable={false}
         className="absolute object-contain"

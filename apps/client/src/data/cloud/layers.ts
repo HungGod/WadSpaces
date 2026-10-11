@@ -13,7 +13,7 @@
 // launch are relay commands (wadd's cloud.rs runs them).
 import { collection, deleteDoc, doc, getDoc, onSnapshot, setDoc, updateDoc, type DocumentData, type Unsubscribe } from "firebase/firestore";
 import { STARTERS } from "@core/catalog/catalog";
-import { imageKey, type BrowserSetup, type Customization, type LayerKey, type Template, type WadspaceV2 } from "@core/layers";
+import { imageKey, type BrowserSetup, type Customization, type LayerKey, type Template, type Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch, Topic } from "../backend";
 import { byLayer, imageState, installBody, launchItem, layerRequest, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
 import { db } from "./firebase";
@@ -102,16 +102,16 @@ export class FirestoreLayerDocs {
   }
 
   /** A v2 wadspace at the top level (its owner's), as the rules want it. */
-  async putWadspace(w: WadspaceV2): Promise<WadspaceV2> {
+  async putWadspace(w: Wadspace): Promise<Wadspace> {
     const { id, ...rest } = w;
     await setDoc(doc(db, "wadspaces", id), clean({ ...rest, owner: this.need(), sharedWith: [] }));
     return w;
   }
 
-  async patchWadspace(id: string, cur: WadspaceV2, patch: LayerPatch): Promise<WadspaceV2> {
+  async patchWadspace(id: string, cur: Wadspace, patch: LayerPatch): Promise<Wadspace> {
     const updatedAt = new Date().toISOString();
     await updateDoc(doc(db, "wadspaces", id), clean({ ...patch, updatedAt }) as DocumentData);
-    const next: WadspaceV2 = { ...cur, ...patch, updatedAt } as WadspaceV2;
+    const next: Wadspace = { ...cur, ...patch, updatedAt } as Wadspace;
     if (next.deletedAt === null) delete next.deletedAt;
     return next;
   }
@@ -138,9 +138,9 @@ export class FirestoreLayerDocs {
 }
 
 /** A v2 wadspace document as the app has it. */
-export function toWadspaceV2(id: string, d: DocumentData): WadspaceV2 {
+export function toWadspace(id: string, d: DocumentData): Wadspace {
   const { sharedWith: _s, sharedNames: _n, ownerName: _o, ...rest } = d;
-  return { ...(rest as Omit<WadspaceV2, "id">), id };
+  return { ...(rest as Omit<Wadspace, "id">), id };
 }
 
 /** The default machine as the Builder sees it, from its heartbeat; what it
@@ -182,7 +182,7 @@ export class RelayMachine {
   }
 
   /** A wadspace on the machine as it is now: the documents and the wallpaper drawn here. */
-  async install(w: WadspaceV2, lib: LayerLibrary): Promise<void> {
+  async install(w: Wadspace, lib: LayerLibrary): Promise<void> {
     const { uid, mid } = this.need();
     const body = installBody(w, lib, timeZone());
     const cmd = await sendCommand(uid, mid, "install", w.id, clean({ ...body, wallpaper: await wallpaperUpload(w.wallpaper) }));
@@ -200,7 +200,7 @@ export class RelayMachine {
       if (!w) continue;
       await this.install(w, lib);
       const key = imageKey(w.base);
-      if (!w.legacyImage && ["never", "changed"].includes(imageState(key, lib, images, this.building()))) await this.build(key, lib);
+      if (["never", "changed"].includes(imageState(key, lib, images, this.building()))) await this.build(key, lib);
     }
     const projectsOf = (id: string) => lib.wadspaces.find((w) => w.id === id)?.projects ?? [];
     const launchItems = await Promise.all(items.map((it, i) => launchItem(it, { background: i > 0, projectsOf })));

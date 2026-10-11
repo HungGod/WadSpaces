@@ -5,13 +5,13 @@
 #   apps/hud/snapshot.sh [OUT_DIR] [ICON]
 #
 # ICON: an image to show as the switcher's Writing icon (default: the
-# Writing workspace's icon).
+# terminal's icon).
 # Build first: cargo build -p wadspaces-hud. Needs kwin_wayland.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "${HERE}/../.." && pwd)"
 OUT="${1:-${XDG_RUNTIME_DIR}/hud-snapshot}"
-ICON="${2:-${ROOT}/host/usr/share/wadspaces/icons/writing.png}"
+ICON="${2:-${ROOT}/host/usr/share/wadspaces/icons/terminal.png}"
 mkdir -p "${OUT}"
 for theme in dark light; do
     mkdir -p "${OUT}/${theme}"

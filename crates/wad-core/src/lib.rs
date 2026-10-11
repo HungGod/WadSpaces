@@ -1,26 +1,20 @@
 //! WadSpaces' core logic, shared by wadd (native) and the UI (WebAssembly, via
 //! wad-wasm): the Builder's layers (templates, customizations, wadspaces) and
-//! their images, the catalog, projects, saved sign-ins, and the designs from
-//! before the layers (a design → the build spec and the build folder's files).
+//! their images, the catalog, projects, saved sign-ins, and the units wadd
+//! writes.
 //!
-//! It replaces the TypeScript core (apps/client/src/core) and returns the
-//! same results, byte for byte: fixtures/core/goldens.json holds what that
-//! returned for a wide corpus, and the tests here check every case. Values are
-//! JSON, as in the TypeScript, so objects keep their keys' order and absent
-//! fields stay absent.
+//! fixtures/core/goldens.json holds what it returns for a wide corpus, which
+//! the tests here and the UI's check alike. Values are JSON, as in the
+//! TypeScript wrappers, so objects keep their keys' order and absent fields
+//! stay absent.
 //!
 //! [`call`] is the one entry point by name (the WebAssembly boundary uses it).
 
-pub mod build;
 pub mod catalog;
 pub mod generator;
-pub mod icons;
 pub mod js;
 pub mod layers;
-pub mod model;
-pub mod presets;
 pub mod projects;
-pub mod recipes;
 pub mod signins;
 pub mod spec;
 pub mod tar;
@@ -47,13 +41,8 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
     let opt_s = |i: usize| args.get(i).and_then(Value::as_str);
     let list = |i: usize| args.get(i).and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
     Ok(match name {
-        // model
-        "defaultAdvanced" => model::default_advanced(opt_s(0).unwrap_or("Etc/UTC")),
-        "dropFileIcons" => model::drop_file_icons(a(0)),
-        "orderedIcons" => Value::Array(model::ordered_icons(a(0))),
         // spec
         "slugify" => spec::slugify(s(0)).into(),
-        "newSpec" => spec::new_spec(a(0)),
         "features" => json!(spec::FEATURES),
         // generator
         "wadbrowserConf" => generator::wadbrowser_conf(a(0)).map(Value::from).unwrap_or(Value::Null),
@@ -65,12 +54,6 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
         )
         .into(),
         // catalog
-        "recipeFor" => recipes::recipe_for(s(0), opt_s(1)).to_json(),
-        "localIcon" => icons::local_icon(s(0)).into(),
-        // presets
-        "presetWadspace" => presets::preset_wadspace(s(0)).unwrap_or(Value::Null),
-        "presetProjects" => presets::preset_projects(s(0)),
-        "presets" => Value::Array(presets::presets().to_vec()),
         // projects
         "validateProject" => json!(projects::validate_project(a(0))),
         "cleanDraft" => projects::clean_draft(a(0)),
@@ -140,7 +123,6 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
             let parts: Vec<&str> = list(3).iter().filter_map(Value::as_str).collect();
             layers::import_into(a(0), a(1), a(2), &parts)
         }
-        "migrateWadspaceV1" => layers::migrate_wadspace_v1(a(0), a(1), a(2)),
         // tar
         "tar" => {
             let owned: Vec<(String, Vec<u8>)> = list(0)

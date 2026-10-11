@@ -11,19 +11,16 @@ export { ONLINE_WITHIN_MS, isOnlineNow, newEnrollCode, type RelayImage, type Rel
 /** What the relay runs (wadd's cloud.rs `execute`; firestore.rules lists them).
  *  The Builder's: build (a layer's image), install (a wadspace on its layer,
  *  with the wallpaper this app drew), launch-run (anything the launcher
- *  starts, maybe as a focus session) and session. */
+ *  starts, maybe as a focus session). */
 export type CommandType =
-  | "switch"
   | "start"
   | "stop"
   | "restart"
   | "projects-sync"
   | "sync-secrets"
-  | "launch"
   | "build"
   | "install"
-  | "launch-run"
-  | "session";
+  | "launch-run";
 
 /** Queue a command; the machine picks it up within a few seconds. Its id. */
 export async function sendCommand(

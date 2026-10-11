@@ -66,17 +66,6 @@ async fn fake() -> (tempfile::TempDir, Podman) {
                     "f".repeat(64)
                 )
             }),
-        )
-        .route(
-            "/v5.0.0/libpod/images/pull",
-            post(|Query(q): Query<std::collections::HashMap<String, String>>| async move {
-                let r = q.get("reference").cloned().unwrap_or_default();
-                if r == "ghcr.io/o/broken:1" {
-                    "{\"stream\":\"Trying to pull ghcr.io/o/broken:1...\\n\"}\n{\"error\":\"manifest unknown\"}\n".to_string()
-                } else {
-                    "{\"stream\":\"Trying to pull\\n\"}\n{\"stream\":\"Copying blob sha256:abc\\n\"}\n{\"images\":[\"x\"],\"id\":\"x\"}\n".to_string()
-                }
-            }),
         );
     let listener = tokio::net::UnixListener::bind(&sock).unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -84,7 +73,7 @@ async fn fake() -> (tempfile::TempDir, Podman) {
 }
 
 #[tokio::test]
-async fn images_containers_and_pulls() {
+async fn images_containers_and_builds() {
     let (_d, p) = fake().await;
     assert!(p.ping().await);
     assert_eq!(p.graph_root().await.unwrap().as_deref(), Some("/var/lib/containers/storage"));
@@ -109,11 +98,6 @@ async fn images_containers_and_pulls() {
     assert_eq!(out, ["STEP 1/2: FROM localhost/wadspaces-base:trixie", "STEP 2/2: COPY root/ /", "--> abc"]);
     let e = p.build(b"tar".to_vec(), "localhost/wadspaces-bad:latest", &args, &labels, |_| {}).await.unwrap_err();
     assert_eq!(e.to_string(), "RUN failed: exit status 1");
-    let mut lines = vec![];
-    p.pull("ghcr.io/o/ok:1", |l| lines.push(l.to_string())).await.unwrap();
-    assert_eq!(lines, ["Trying to pull", "Copying blob sha256:abc"]);
-    let e = p.pull("ghcr.io/o/broken:1", |_| {}).await.unwrap_err();
-    assert_eq!(e.to_string(), "pull ghcr.io/o/broken:1: manifest unknown");
 }
 
 #[tokio::test]
@@ -136,8 +120,7 @@ async fn real_rootless_podman() {
     let p = Podman::new(sock);
     assert!(p.ping().await, "podman.socket isn't running");
     assert!(p.graph_root().await.unwrap().is_some());
-    p.pull("docker.io/library/busybox:latest", |l| eprintln!("pull: {l}")).await.unwrap();
-    assert!(p.image_exists("docker.io/library/busybox:latest").await.unwrap());
+    assert!(!p.image_exists("localhost/wadspaces-does-not-exist:latest").await.unwrap());
     assert_eq!(p.container_status("wad-does-not-exist").await.unwrap(), "missing");
 }
 

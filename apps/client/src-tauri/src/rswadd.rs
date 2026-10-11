@@ -67,15 +67,8 @@ pub fn view_str(view: &Value) -> String {
 }
 
 pub fn state_py(st: &Value) -> Value {
-    let d = s(st, "download");
-    let download = if d.is_null() {
-        Value::Null
-    } else {
-        json!({"total_bytes": s(d, "totalBytes"), "done_bytes": s(d, "doneBytes"), "layers": s(d, "layers"),
-               "rate_bps": s(d, "rateBps"), "eta_s": s(d, "etaS"), "unpacking": s(d, "unpacking")})
-    };
-    json!({"container": s(st, "container"), "phase": s(st, "phase"), "progress": s(st, "progress"), "message": s(st, "message"),
-           "error": s(st, "error"), "image_present": s(st, "imagePresent"), "download": download, "since": s(st, "since")})
+    json!({"container": s(st, "container"), "phase": s(st, "phase"), "message": s(st, "message"),
+           "error": s(st, "error"), "image_present": s(st, "imagePresent"), "since": s(st, "since")})
 }
 
 pub fn session_py(sess: &Value) -> Value {
@@ -94,7 +87,7 @@ fn machine_ws(ws: &Value, state: Option<&Value>) -> Value {
         Some(p) if stream => json!(format!("http://127.0.0.1:{p}/")),
         _ => Value::Null,
     };
-    let idle = json!({"container": "unknown", "phase": "idle", "progress": null, "message": null, "error": null, "image_present": null, "download": null, "since": 0});
+    let idle = json!({"container": "unknown", "phase": "idle", "message": null, "error": null, "image_present": null, "since": 0});
     json!({"id": s(ws, "id"), "name": s(ws, "name"), "port": s(ws, "port"), "url": url, "display": s(ws, "display"), "hotkey": s(ws, "hotkey"),
            "icon": null, "enabled": s(ws, "enabled"), "image": s(ws, "image"), "kind": s(ws, "kind"),
            "state": state.map(state_py).unwrap_or(idle)})
@@ -170,14 +163,6 @@ fn flatten(job: Value, log: &Value) -> Value {
 
 fn log_line_py(l: &Value) -> Value {
     json!({"time": s(l, "time").as_f64().map(|t| t / 1000.0), "level": s(l, "level"), "logger": s(l, "target"), "message": s(l, "message")})
-}
-
-/// A workspace in workspaces.yaml's shape (what the UI calls a WaddSpec).
-fn spec_of(ws: &Value) -> Value {
-    match serde_json::from_value::<wad_proto::v1::Workspace>(ws.clone()) {
-        Ok(w) => wad_store::legacy::to_yaml(&w),
-        Err(_) => Value::Null,
-    }
 }
 
 fn diagnostics_py(d: &Value) -> Value {
@@ -282,15 +267,11 @@ impl RsWadd {
         let b = body.unwrap_or(Value::Null);
         let enc = |x: &str| x.to_string(); // segments arrive already encoded
         Ok(match (method, seg.as_slice()) {
-            (Get, ["api", "specs"]) => {
-                let list = self.v1(Get, "/v1/workspaces", None).await?;
-                Value::Array(list.as_array().into_iter().flatten().map(spec_of).collect())
-            }
             (Delete, ["api", "workspaces", id]) => {
                 self.v1(Delete, &format!("/v1/workspaces/{}", enc(id)), None).await?;
                 ok()
             }
-            (Post, ["api", "workspaces", id, action @ ("switch" | "start" | "stop" | "restart" | "download")]) => {
+            (Post, ["api", "workspaces", id, action @ ("switch" | "start" | "stop" | "restart")]) => {
                 self.v1(Post, &format!("/v1/workspaces/{}/{action}", enc(id)), None).await?;
                 ok()
             }

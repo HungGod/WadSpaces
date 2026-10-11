@@ -13,7 +13,6 @@ import type { Container, Machine } from "@/lib/types";
 
 const PHASE: Record<string, string> = {
   idle: "Stopped",
-  pulling: "Downloading",
   starting: "Starting",
   waiting: "Waiting for its desktop",
   ready: "Running",

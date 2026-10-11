@@ -44,7 +44,6 @@ async fn env() -> Env {
         bus.clone(),
         Settings {
             ready_timeout: Duration::from_secs(5),
-            max_parallel_pulls: 1,
             projects_dir: "/p".into(),
             signins_dir: "/s".into(),
             state_dir: state.clone(),

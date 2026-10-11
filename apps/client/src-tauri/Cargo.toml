@@ -11,7 +11,6 @@ tauri-build.workspace = true
 
 [dependencies]
 wad-proto.workspace = true
-wad-store.workspace = true
 wad-github.workspace = true
 wad-firebase.workspace = true
 reqwest.workspace = true

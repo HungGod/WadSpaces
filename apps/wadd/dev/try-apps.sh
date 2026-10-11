@@ -36,7 +36,6 @@ name = "wadd-try-apps"
 socket = "$sock"
 state_dir = "$dir/state"
 projects_dir = "$dir/projects"
-legacy_config = "$dir/none.yaml"
 vendor_workspaces = "$dir/none.d"
 ready_timeout_s = 60
 [display]

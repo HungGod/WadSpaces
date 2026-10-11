@@ -6,7 +6,7 @@
 // unless a name is typed), one already saved of the same kind (by its id), or
 // none. Saving makes the new ones first and keeps a SignInRef per slot.
 import { create } from "zustand";
-import { newSecretName, resolve, setupOf, type BaseRef, type Library, type SecretKind, type Setup, type SignInRef, type Slot, type WadspaceV2 } from "@core/layers";
+import { newSecretName, resolve, setupOf, type BaseRef, type Library, type SecretKind, type Setup, type SignInRef, type Slot, type Wadspace } from "@core/layers";
 import { SECRET_KINDS } from "@core/catalog/catalog";
 import { DEFAULT_WALLPAPER } from "@/components/desktop/wallpapers";
 import { useApp } from "@/lib/store";
@@ -43,9 +43,9 @@ interface DraftState {
   /** Start from a template or a customization: on to Step 2. */
   begin: (base: BaseRef, lib: Library) => void;
   /** Open a saved wadspace, with its base and secrets. Like every start, it begins on Step 2. */
-  edit: (w: WadspaceV2, lib: Library) => void;
+  edit: (w: Wadspace, lib: Library) => void;
   /** A new wadspace starting from a saved one: its base, background, projects and secrets, but a name of its own. */
-  copy: (w: WadspaceV2, lib: Library) => void;
+  copy: (w: Wadspace, lib: Library) => void;
   /** After saving a customization: the draft now builds on it. */
   rebase: (base: BaseRef, setup: Setup) => void;
   setSetup: (patch: Partial<Setup>) => void;
@@ -90,7 +90,7 @@ export const useDraft = create<DraftState>((set, get) => ({
   reset: () => set({ step: "template", base: null, setup: null, wadspace: blankWadspace() }),
 }));
 
-export function fromSaved(w: Pick<WadspaceV2, "id" | "name" | "description" | "wallpaper" | "projects" | "secrets">): WadspaceDraft {
+export function fromSaved(w: Pick<Wadspace, "id" | "name" | "description" | "wallpaper" | "projects" | "secrets">): WadspaceDraft {
   return { id: w.id, name: w.name, description: w.description, wallpaper: w.wallpaper, projects: w.projects, secrets: asChoices(w.secrets) };
 }
 

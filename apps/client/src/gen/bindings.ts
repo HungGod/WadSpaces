@@ -36,7 +36,7 @@ export const commands = {
 } | null) => __TAURI_INVOKE<GithubSignedIn>("github_save_token", { account }),
 	/**  Tells the HUD which theme the app shows. */
 	setTheme: (theme: Theme) => __TAURI_INVOKE<null>("set_theme", { theme }),
-	/**  Calls wadd's HTTP API: `path` is like `/api/projects?x=1`. */
+	/**  Calls wadd's API: `path` is like `/api/projects?x=1` or `/v1/images`. */
 	waddRequest: (method: Method, path: string, body: unknown | null) => __TAURI_INVOKE<Json>("wadd_request", { method, path, body }),
 	/**  The last `state` event (wadd's snapshot), if one has arrived. */
 	waddLastState: () => __TAURI_INVOKE<unknown | null>("wadd_last_state"),

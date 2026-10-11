@@ -1,38 +1,20 @@
-// Client for wadd, the daemon on this machine (apps/wadd). The calls keep the
-// old Python wadd's /api shapes: the app's Rust side (src-tauri/src/rswadd.rs)
-// turns them into wadd's /v1.
-// In the machine app (Tauri) every call goes through the app's Rust side
-// (src-tauri/src/wadd.rs); in a browser (offline dev against a dev wadd) it's
-// fetch to 127.0.0.1:8080. The online app never calls wadd: it reaches
-// machines through the cloud relay (relay.ts).
+// Client for wadd, the daemon on this machine (apps/wadd). Every call goes
+// through the app's Rust side (src-tauri/src/wadd.rs), so only the machine
+// app (Tauri) reaches it. The older calls keep their /api shapes, which
+// src-tauri/src/rswadd.rs turns into wadd's /v1. The online app never calls
+// wadd: it reaches machines through the cloud relay (relay.ts).
 
 import type { GithubRepo, Project, ProjectDraft } from "@core/projects";
-import type { WaddSpec } from "@core/spec";
 import { inTauri } from "./shell";
 import type { TailnetStatus } from "./types";
 import type { ImageRow } from "@/data/layers";
 
-export const WADD_URL: string = import.meta.env.VITE_WADD_URL || "http://127.0.0.1:8080";
-
-/** While an image downloads (wadd/registry.py PullProgress). total_bytes is
- *  null when the registry sizes are unknown: show an indeterminate bar. */
-export interface Download {
-  total_bytes: number | null;
-  done_bytes: number;
-  layers: number;
-  rate_bps: number;
-  eta_s: number | null;
-  unpacking: boolean;
-}
-
 export interface WorkspaceState {
   container: string;
-  phase: "idle" | "pulling" | "starting" | "waiting" | "ready" | "stopping" | "error";
-  progress: number | null;
+  phase: "idle" | "starting" | "waiting" | "ready" | "stopping" | "error";
   message: string | null;
   error: string | null;
   image_present: boolean | null;
-  download: Download | null;
   since: number;
 }
 
@@ -312,31 +294,13 @@ async function callApp<T>(method: Method, path: string, body?: unknown): Promise
 
 async function call<T>(method: Method, path: string, body?: unknown): Promise<T> {
   if (inTauri) return callApp<T>(method, path, body);
-  let r: Response;
-  try {
-    r = await fetch(`${WADD_URL}${path}`, {
-      method,
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    const message = `Cannot reach wadd at ${WADD_URL}. Is this a WadSpaces machine?`;
-    recordFailure({ time: Date.now(), method, path, status: 0, message });
-    throw new WaddError(message, 0);
-  }
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const detail = (data as { detail?: unknown }).detail;
-    const message = typeof detail === "string" ? detail : r.statusText;
-    recordFailure({ time: Date.now(), method, path, status: r.status, message });
-    throw new WaddError(message, r.status);
-  }
-  return data as T;
+  const message = "wadd is reached through the WadSpaces app (npm run app:offline), not a browser.";
+  recordFailure({ time: Date.now(), method, path, status: 0, message });
+  throw new WaddError(message, 0);
 }
 
 export const wadd = {
-  specs: () => call<WaddSpec[]>("GET", "/api/specs"),
-  action: (id: string, action: "switch" | "start" | "stop" | "restart" | "download") =>
+  action: (id: string, action: "switch" | "start" | "stop" | "restart") =>
     call<{ ok: boolean }>("POST", `/api/workspaces/${encodeURIComponent(id)}/${action}`),
   launcher: () => call("POST", "/api/launcher"),
   /** End the session; `force` ends a focus session before its time is up. */
@@ -419,17 +383,13 @@ export const wadd = {
   metrics: () => call<Metrics>("GET", "/api/metrics"),
   runs: (workspace?: string, limit = 200) =>
     call<RunRecord[]>("GET", `/api/runs?limit=${limit}${workspace ? `&workspace=${encodeURIComponent(workspace)}` : ""}`),
-  /** Which of the newer endpoints this wadd has (older ones on a stick predate builds). */
+  /** Which of wadd's endpoints answer, and Tailscale's status. */
   features: async () => {
     // Probes, so they stay out of the failures list (call() would record them).
     const get = async (path: string): Promise<unknown> => {
-      if (inTauri) {
-        const { commands } = await import("@/gen/bindings");
-        return commands.waddRequest("GET", path, null);
-      }
-      const r = await fetch(`${WADD_URL}${path}`);
-      if (!r.ok) throw new Error(r.statusText);
-      return r.json();
+      if (!inTauri) throw new Error("not in the app");
+      const { commands } = await import("@/gen/bindings");
+      return commands.waddRequest("GET", path, null);
     };
     const has = (path: string) => get(path).then(() => true, () => false);
     // Tailscale's status too: whether it's installed decides the Tailnet card.
@@ -478,24 +438,9 @@ export function waddEvents(on: (event: string, data: unknown) => void, onDrop: (
       stop?.();
     };
   }
-  let es: EventSource | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const open = () => {
-    es = new EventSource(`${WADD_URL}/api/events`);
-    for (const name of ["state", "build", "launch", "projects", "signins", "tailnet"]) {
-      es.addEventListener(name, (e) => on(name, JSON.parse((e as MessageEvent).data)));
-    }
-    es.onerror = () => {
-      es?.close();
-      onDrop();
-      timer = setTimeout(open, 3000);
-    };
-  };
-  open();
-  return () => {
-    clearTimeout(timer);
-    es?.close();
-  };
+  // In a browser there's no wadd to follow.
+  onDrop();
+  return () => {};
 }
 
 // ------------------------------------------------------------ formatting
@@ -510,16 +455,4 @@ export function formatDuration(s: number): string {
   if (s < 90) return `${Math.max(1, Math.round(s))} s`;
   if (s < 5400) return `${Math.round(s / 60)} min`;
   return `${(s / 3600).toFixed(1)} h`;
-}
-
-/** "1.9 GB of 5.3 GB · 12.0 MB/s · about 4 min left" (matches wadd's). */
-export function downloadLabel(d: Download | null): string {
-  if (!d) return "";
-  if (d.total_bytes == null) return d.layers ? `downloading ${d.layers} layers` : "downloading";
-  if (d.total_bytes === 0) return "already downloaded, unpacking";
-  if (d.unpacking) return `downloaded ${formatBytes(d.done_bytes)}, unpacking`;
-  const bits = [`${formatBytes(d.done_bytes)} of ${formatBytes(d.total_bytes)}`];
-  if (d.rate_bps >= 1000) bits.push(`${formatBytes(d.rate_bps)}/s`);
-  if (d.eta_s != null) bits.push(`about ${formatDuration(d.eta_s)} left`);
-  return bits.join(" · ");
 }

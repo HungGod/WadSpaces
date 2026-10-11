@@ -5,7 +5,7 @@
 # that sway. Checks adoption, switching, Super+Tab (by API), focus rules and
 # stop.
 #
-#   apps/wadd/dev/try-view.sh [image]     default localhost/wadspaces-writing:latest
+#   apps/wadd/dev/try-view.sh [image]     default localhost/wadspaces-template-writing:latest
 #
 # Needs sway: installed, or unpacked under .build/sway (no root needed):
 #   cd .build/sway && dnf download sway sway-config-upstream wlroots libseat libliftoff xcb-util-errors \
@@ -13,14 +13,14 @@
 set -euo pipefail
 ulimit -c 0
 root=$(cd "$(dirname "$0")/../../.." && pwd)
-image=${1:-localhost/wadspaces-writing:latest}
+image=${1:-localhost/wadspaces-template-writing:latest}
 dir=$root/.build/wadd-try-view
 sock=$dir/wadd.sock
 rm -rf "$dir"
 mkdir -p "$dir/state" "$dir/projects"
 . "$root/apps/wadd/dev/sway.sh"
-podman image exists localhost/wadspaces-test:latest ||
-  podman build -q -t localhost/wadspaces-test:latest "$root/apps/wadd/dev/test-image" >/dev/null
+podman image exists localhost/wadspaces-template-trytest:latest ||
+  podman build -q -t localhost/wadspaces-template-trytest:latest "$root/apps/wadd/dev/test-image" >/dev/null
 start_sway "$dir"
 
 cat >"$dir/wadd.toml" <<TOML
@@ -30,7 +30,6 @@ name = "wadd-try-view"
 socket = "$sock"
 state_dir = "$dir/state"
 projects_dir = "$dir/projects"
-legacy_config = "$dir/none.yaml"
 ready_timeout_s = 120
 [display]
 socket = "$ipc"
@@ -40,7 +39,7 @@ cat >"$dir/state/workspaces.json" <<JSON
   "containerName":"wad-trynative","containerPort":3000,
   "env":[["PUID","1000"],["PGID","1000"],["WADSPACES_WAYLAND","$rt_name/wayland-1"]],
   "secrets":[],"volumes":[],"devices":[],"shmSize":"1g","projects":[]},
- {"id":"trystream","name":"Try stream","image":"localhost/wadspaces-test:latest","display":"stream","port":3198,"hotkey":2,
+ {"id":"trystream","name":"Try stream","image":"localhost/wadspaces-template-trytest:latest","display":"stream","port":3198,"hotkey":2,
   "enabled":true,"autostart":false,"containerName":"wad-trystream","containerPort":3000,
   "env":[],"secrets":[],"volumes":[],"devices":[],"projects":[]}]
 JSON

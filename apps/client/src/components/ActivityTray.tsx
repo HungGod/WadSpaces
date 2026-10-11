@@ -1,25 +1,23 @@
-// Background work in the sidebar: layer image builds (with their logs),
-// launches getting wadspaces ready, and image downloads on the machine.
+// Background work in the sidebar: layer image builds (with their logs)
+// and launches getting wadspaces ready.
 import { Link } from "react-router";
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { Check, CircleAlert, CloudDownload, Folder, Hammer, HardDrive, Loader2, Play, Rocket, X } from "lucide-react";
+import { Check, CircleAlert, Folder, Hammer, HardDrive, Loader2, Play, Rocket, X } from "lucide-react";
 import clsx from "clsx";
 import { imageRef, type LayerKey } from "@core/layers";
 import { cancelBuild, openBuilt, type BuildJob } from "@/lib/build";
 import type { LaunchJob } from "@/lib/launch";
 import { cancelLaunch } from "@/lib/launch";
 import { useApp } from "@/lib/store";
-import { useUi } from "@/lib/ui";
 import { Button, Modal, Progress } from "./ui";
 
-/** Background work in the sidebar: image builds, launches and container downloads. */
+/** Background work in the sidebar: image builds and launches. */
 export function ActivityTray({ narrow }: { narrow: boolean }) {
   return (
     <>
       <BuildsTray narrow={narrow} />
       <LaunchesTray narrow={narrow} />
-      <DownloadsTray narrow={narrow} />
     </>
   );
 }
@@ -181,43 +179,6 @@ const launchText = (l: LaunchJob) =>
   l.status === "done" ? "Open" : l.status === "error" ? "Failed" : l.status === "cancelled" ? "Cancelled" : l.phase === "starting" ? "Starting" : `${Math.floor(l.progress * 100)}%`;
 
 const statusText = (b: BuildJob) => (b.status === "done" ? "Ready" : b.status === "error" ? "Failed" : `${Math.floor(b.progress * 100)}%`);
-
-/** Background container downloads. Clicking one opens its wadspace's details. */
-function DownloadsTray({ narrow }: { narrow: boolean }) {
-  const downloads = useApp((s) => s.downloads);
-  const setWaitingFor = useUi((s) => s.openDetails);
-  if (!downloads.length) return null;
-
-  if (narrow) {
-    return (
-      <Ring
-        value={downloads.reduce((n, d) => n + d.progress, 0) / downloads.length}
-        icon={<CloudDownload className="size-4" />}
-        count={downloads.length}
-        label={`${downloads.length} download${downloads.length > 1 ? "s" : ""} in progress`}
-        title={downloads.map((d) => `${d.name} · ${Math.floor(d.progress * 100)}%`).join("\n")}
-        onClick={() => setWaitingFor(downloads[0].wadspaceId)}
-      />
-    );
-  }
-
-  return (
-    <div className="rounded-2xl bg-surface/60 p-2 ring-1 ring-line">
-      <div className="flex items-center gap-1.5 px-1.5 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
-        <CloudDownload className="size-3.5 text-accent" /> Downloading
-      </div>
-      {downloads.map((d) => (
-        <button key={d.wadspaceId} type="button" onClick={() => setWaitingFor(d.wadspaceId)} className="block w-full rounded-xl px-1.5 py-1.5 text-left hover:bg-surface-2">
-          <span className="flex items-baseline justify-between gap-2 text-xs">
-            <span className="truncate font-medium">{d.name}</span>
-            <span className="shrink-0 tabular-nums text-faint">{Math.floor(d.progress * 100)}%</span>
-          </span>
-          <Progress value={d.progress} className="mt-1.5 !h-1" />
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** The log for one build. Closing it never stops the build; it keeps going in the sidebar. */
 export function BuildLog() {

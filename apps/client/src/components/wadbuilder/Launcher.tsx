@@ -15,7 +15,7 @@
 import { useState } from "react";
 import { Check, Lock, Play, Plus, SlidersHorizontal, Timer, Trash2, X } from "lucide-react";
 import clsx from "clsx";
-import { browserSlots, desktopFor, imageKey, knownWebapps, named, opensFolders, resolve, slotsFor, webappIcon, webappId, type BrowserSetup, type SignInRef, type WadspaceV2, type WebApp } from "@core/layers";
+import { browserSlots, desktopFor, imageKey, knownWebapps, named, opensFolders, resolve, slotsFor, webappIcon, webappId, type BrowserSetup, type SignInRef, type Wadspace, type WebApp } from "@core/layers";
 import { backend } from "@/data";
 import { DEFAULT_BROWSERS, type BrowserConfig, type RunItem, type RunOverrides } from "@/data/layers";
 import { clockTime } from "@/lib/format";
@@ -32,7 +32,7 @@ import { SecretSlots } from "./StepConstruct";
 const PRESETS = [25, 50, 90, 120];
 const fmtMinutes = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`);
 const BROWSER_ICON = "/brand/wadbrowser-icon-dark.svg";
-const TERMINAL_ICON = "/catalog/terminal.png";
+const TERMINAL_ICON = "/icons/terminal.png";
 
 /** Something in the launcher to pick: a saved wadspace or WadBrowser setup, the terminal, or a throwaway run. */
 interface Entry {
@@ -80,7 +80,7 @@ function MachinePicker() {
   );
 }
 
-type Customizing = { kind: "wadspace"; w: WadspaceV2 } | { kind: "browser"; base: BrowserConfig; savedId?: string } | null;
+type Customizing = { kind: "wadspace"; w: Wadspace } | { kind: "browser"; base: BrowserConfig; savedId?: string } | null;
 
 function Flow({ onClose, customize }: { onClose: () => void; customize?: string }) {
   const all = useApp((s) => s.wadspaces);
@@ -310,7 +310,7 @@ function Check2({ on }: { on: boolean }) {
   return <span className={clsx("grid size-5 shrink-0 place-items-center rounded-full", on ? "bg-accent text-accent-fg" : "ring-1 ring-line-strong")}>{on && <Check className="size-3" />}</span>;
 }
 
-function SpaceCard({ entry, w, on, onToggle, onCustomize, onRemove }: { entry: Entry; w: WadspaceV2; on: boolean; onToggle: () => void; onCustomize?: () => void; onRemove?: () => void }) {
+function SpaceCard({ entry, w, on, onToggle, onCustomize, onRemove }: { entry: Entry; w: Wadspace; on: boolean; onToggle: () => void; onCustomize?: () => void; onRemove?: () => void }) {
   const templates = useApp((s) => s.templates);
   const customizations = useApp((s) => s.customizations);
   const projects = useApp((s) => s.projects);
@@ -319,7 +319,7 @@ function SpaceCard({ entry, w, on, onToggle, onCustomize, onRemove }: { entry: E
   const o = entry.item.kind === "wadspace" ? entry.item.overrides : undefined;
   const mounted = (o?.projects ?? w.projects).flatMap((id) => projects.find((p) => p.id === id) ?? []);
   const folders = `${mounted.length} folder${mounted.length === 1 ? "" : "s"}`;
-  const note = w.legacyImage ? `${folders} · its image from before layers` : state === "built" ? folders : state === "building" ? `${folders} · its image is building` : `${folders} · its image builds first`;
+  const note = state === "built" ? folders : state === "building" ? `${folders} · its image is building` : `${folders} · its image builds first`;
   return (
     <div className={clsx("flex items-center gap-3 rounded-2xl p-2 ring-1 transition-all", on ? "bg-accent-soft ring-2 ring-accent" : "bg-surface-2 ring-line hover:ring-line-strong")}>
       <button type="button" disabled={!r} onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-pressed={on}>
@@ -426,7 +426,7 @@ function useBusy() {
 }
 
 /** A wadspace's construction options for a run: name, background, folders and secrets. Save it as a new wadspace, or run it once. */
-export function WadspaceRun({ w, onCancel, onRun, onSaved }: { w: WadspaceV2; onCancel: () => void; onRun: (o: RunOverrides) => void; onSaved: (w: WadspaceV2) => void }) {
+export function WadspaceRun({ w, onCancel, onRun, onSaved }: { w: Wadspace; onCancel: () => void; onRun: (o: RunOverrides) => void; onSaved: (w: Wadspace) => void }) {
   const templates = useApp((s) => s.templates);
   const customizations = useApp((s) => s.customizations);
   const wadspaces = useApp((s) => s.wadspaces);

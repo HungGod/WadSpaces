@@ -1,26 +1,19 @@
 // The offline backend: this machine, through wadd.
 //
 // wadd's server-sent events give a live snapshot of every workspace (and of
-// builds); the Builder library and drafts are kept by wadd (library.ts). A
-// wadspace here is a library entry, an installed workspace, or both: installed
-// workspaces without a library copy (the presets on the stick, or ones added
-// by hand) show their preset desktop or a plain one.
+// builds); the Builder's documents are kept in wadd's library (layers.ts).
 //
 // Projects are wadd's too (/api/projects): it keeps them, syncs them with the
 // account when the machine is linked, clones them from GitHub with the
 // machine's github_token (/api/github) and mounts the clones when it launches
 // a wadspace (/api/launches). Tailscale is wadd's as well (/api/tailnet).
-import { defaultAdvanced, type WadspaceSpec } from "@core/model";
 import { cleanDraft, toProjectDoc, type Project, type ProjectDraft } from "@core/projects";
-import { presetProjects, presetWadspace } from "@core/presets";
-import { type WaddSpec } from "@core/spec";
 import { imageDataUrl } from "@/lib/images";
 import { THIS_MACHINE } from "@/lib/machine";
-import type { Container, ContainerRun, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
+import type { Container, ContainerRun, Machine, PublicUser, TailnetStatus } from "@/lib/types";
 import {
   waddEvents,
   WaddError,
-  downloadLabel,
   wadd,
   type BuildUpdate,
   type LaunchUpdate,
@@ -40,49 +33,21 @@ import {
   type NewRepo,
   type Topic,
 } from "../backend";
-import { ensureProjects, hasRepos, knownProjectIds, migrateRepos, withProjects } from "../projects";
 import { toLaunchProgress, toProgress } from "./builds";
-import { LocalLibrary } from "./library";
-import { lastSession, onboarded, presetProjectsMade } from "./store";
+import { lastSession, onboarded } from "./store";
 import { WaddLayerDocs, WaddMachine } from "./layers";
-import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
+import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch } from "../backend";
 import type { RunItem } from "../layers";
 
 export { THIS_MACHINE };
 const LOCAL_USER = "local";
-const PLAIN_WALLPAPER = "radial-gradient(90% 70% at 80% 10%, #ff3d8155 0%, transparent 60%), radial-gradient(70% 60% at 10% 90%, #5b2bff44 0%, transparent 60%), #0a0614";
-const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
 const iso = (t: number | null) => (t == null ? null : new Date(t * 1000).toISOString());
 
 /** wadd's project document, minus what only wadd needs (it keeps `legacy`:
  *  a folder from before projects were GitHub repos). */
 function toProject(p: WaddProject): Project {
   return toProjectDoc(p.id, p as unknown as Record<string, unknown>, (t) => (typeof t === "number" ? t : 0));
-}
-
-/** A workspace wadd runs that nobody designed in the Builder. */
-function fromInstalled(w: WaddSpec): WadspaceSpec {
-  return {
-    id: w.id,
-    name: w.name,
-    description: "",
-    layout: { wallpaper: { type: "gradient", value: PLAIN_WALLPAPER }, icons: [], grid: true },
-    advanced: {
-      ...defaultAdvanced(w.env?.TZ ?? tz()),
-      display: w.display ?? "stream",
-      port: w.port ?? null,
-      hotkey: w.hotkey ?? null,
-      tools: [],
-      env: w.env ?? {},
-      secrets: w.secrets ?? [],
-      devices: w.devices ?? [],
-      shmSize: w.shm_size ?? "1g",
-      persistConfig: (w.volumes ?? []).some((v) => v.startsWith(`wad-${w.id}-config:/config`)),
-      autostart: !!w.autostart,
-      image: w.image,
-    },
-  };
 }
 
 export class LocalBackend implements Backend {
@@ -98,20 +63,16 @@ export class LocalBackend implements Backend {
 
   private snap: Snapshot | null = null;
   private connected = false;
-  private specs: WaddSpec[] = [];
-  private specsKey = "";
   private listeners = new Set<(t: Topic) => void>();
   private buildListeners = new Set<(b: BuildProgress) => void>();
   private launchListeners = new Set<(l: LaunchProgress) => void>();
   private projects: Project[] = [];
   private firstSnap: Promise<void>;
   private gotFirstSnap!: () => void;
-  private lib = new LocalLibrary();
   private metrics: Metrics | null = null;
   private metricsAt = 0;
   private tailnet: TailnetStatus | null = null;
   private tailnetAt = 0;
-  private readonly seenAt = new Date().toISOString();
   /** The Builder's documents (wadd's library) and this machine's layer work. */
   readonly docs = new WaddLayerDocs(() => LOCAL_USER);
   readonly machine = new WaddMachine();
@@ -134,32 +95,7 @@ export class LocalBackend implements Backend {
     this.tailnet = f.tailnet;
     this.tailnetAt = Date.now();
     this.caps.tailnet = !!f.tailnet?.installed;
-    await this.lib.load(f.library).catch(() => this.lib.load(false));
-    if (this.caps.projects) {
-      await this.refreshProjects();
-      // In the background: the app needn't wait for the old repos to move.
-      this.migrateLibrary().catch(() => {});
-    }
-  }
-
-  /** Wadspaces saved before projects: their repos become projects (before
-   *  they move onto the layers, data/migrate.ts). */
-  private async migrateLibrary() {
-    let changed = false;
-    for (const e of this.lib.entries()) {
-      if (!hasRepos(e.spec.advanced)) continue;
-      await this.lib.put({ ...e, spec: { ...e.spec, advanced: await migrateRepos(this, e.spec.advanced) } });
-      changed = true;
-    }
-    if (changed) this.emit("wadspaces");
-  }
-
-  /** Drafts are gone from the Builder. wadd removes its library/drafts
-   *  itself; these are the ones an older app kept in its own storage. */
-  async discardDrafts() {
-    const drafts = this.lib.drafts();
-    for (const d of drafts) this.lib.removeDraft(d.id);
-    return drafts.length;
+    if (this.caps.projects) await this.refreshProjects();
   }
 
   // ---------------------------------------------------- the Builder's layers
@@ -197,7 +133,7 @@ export class LocalBackend implements Backend {
     return this.docs.wadspaces.list();
   }
   /** Kept in the library and installed here. */
-  async saveWadspace(w: WadspaceV2, lib: LayerLibrary) {
+  async saveWadspace(w: Wadspace, lib: LayerLibrary) {
     const saved = await this.docs.wadspaces.put(w);
     await this.machine.install(saved, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== w.id), saved] });
     this.emit("wadspaces");
@@ -279,12 +215,6 @@ export class LocalBackend implements Backend {
             this.gotFirstSnap();
             this.emit("machines");
             this.emit("focus");
-            // The set of installed workspaces (or whether their images are here) changed.
-            const key = snap.workspaces.map((w) => `${w.id}:${w.enabled}:${w.state.image_present}:${w.image}`).join(",");
-            if (key !== this.specsKey) {
-              this.specsKey = key;
-              this.refreshSpecs().then(() => this.emit("wadspaces"));
-            }
             break;
           }
           case "build": {
@@ -302,12 +232,9 @@ export class LocalBackend implements Backend {
             this.launchListeners.forEach((fn) => fn(l));
             break;
           }
-          // A project changed (here, or synced from the account): presets name theirs by id.
+          // A project changed (here, or synced from the account).
           case "projects":
-            this.refreshProjects().then(() => {
-              this.emit("projects");
-              this.emit("wadspaces");
-            });
+            this.refreshProjects().then(() => this.emit("projects"));
             break;
           // A saved sign-in was made, renamed, signed out or deleted.
           case "signins":
@@ -333,14 +260,6 @@ export class LocalBackend implements Backend {
     if (!this.caps.projects) return;
     try {
       this.projects = (await wadd.projects()).map(toProject);
-    } catch {
-      // wadd unreachable: keep the last list.
-    }
-  }
-
-  private async refreshSpecs() {
-    try {
-      this.specs = await wadd.specs();
     } catch {
       // wadd unreachable: keep the last list.
     }
@@ -376,64 +295,6 @@ export class LocalBackend implements Backend {
   }
   async users() {
     return [await this.me()];
-  }
-
-  // ------------------------------------------------------------ wadspaces
-  private live(id: string): MachineWorkspace | undefined {
-    return this.snap?.workspaces.find((w) => w.id === id);
-  }
-
-  private assemble(id: string): Wadspace | undefined {
-    const entry = this.lib.get(id);
-    const installed = this.specs.find((s) => s.id === id);
-    const preset = presetWadspace(id);
-    const spec = entry?.spec ?? (preset && { ...preset, advanced: { ...preset.advanced, projects: knownProjectIds(this.projects, presetProjects(id)) } }) ?? (installed && fromInstalled(installed));
-    if (!spec) return undefined;
-    const live = this.live(id);
-    return {
-      ...spec,
-      advanced: withProjects(spec.advanced),
-      // The machine's name for it wins: that's what the kiosk shows.
-      name: entry?.spec.name ?? installed?.name ?? spec.name,
-      owner: LOCAL_USER,
-      visibility: entry?.visibility ?? "private",
-      sharedWith: [],
-      installed: !!installed,
-      local: !!installed && live?.state.image_present !== false,
-      sizeMB: 0,
-      // One without a saved design: when this app first saw it, so it keeps
-      // its place in lists sorted by time.
-      updatedAt: entry?.updatedAt ?? this.seenAt,
-      templateId: entry?.templateId,
-      preset: !entry && !!preset,
-      ...(installed?.kind === "app" && { app: true }),
-      ...(installed?.projects && { mountedProjects: installed.projects.map((p) => p.id) }),
-      ...(entry?.deletedAt && { deletedAt: entry.deletedAt }),
-    };
-  }
-
-  /** The wadspaces from before the layers (library designs and installed
-   *  presets), for the migration (data/migrate.ts). */
-  async listOldWadspaces() {
-    await this.firstSnap;
-    if (!this.specs.length) await this.refreshSpecs();
-    await this.presetProjects().catch(() => {});
-    const ids = new Set([...this.lib.entries().map((e) => e.spec.id), ...this.specs.map((s) => s.id)]);
-    return [...ids].map((id) => this.assemble(id)).filter((w): w is Wadspace => !!w);
-  }
-
-  /** A preset on this machine opens with its projects: the first time it's
-   *  seen, make the ones the user doesn't have (only then, so one deleted
-   *  later stays deleted). */
-  private async presetProjects() {
-    if (!this.caps.projects) return;
-    const todo = this.specs.filter((s) => !this.lib.get(s.id) && !presetProjectsMade.has(s.id) && presetProjects(s.id).length);
-    if (!todo.length) return;
-    for (const s of todo) {
-      await ensureProjects(this, presetProjects(s.id));
-      presetProjectsMade.add(s.id);
-    }
-    await this.refreshProjects();
   }
 
   async cancelBuild(id: string) {
@@ -630,7 +491,6 @@ export class LocalBackend implements Backend {
   // ------------------------------------------------------------- machine
   private toContainer(w: MachineWorkspace, view: string): Container {
     const st = w.state;
-    const d = st.download;
     return {
       id: w.id,
       wadspaceId: w.id,
@@ -639,10 +499,6 @@ export class LocalBackend implements Backend {
       startedAt: new Date(st.since * 1000).toISOString(),
       phase: st.phase,
       error: st.error,
-      download:
-        st.phase === "pulling"
-          ? { progress: d?.total_bytes ? d.done_bytes / d.total_bytes : st.progress, label: d ? downloadLabel(d) : (st.message ?? "downloading") }
-          : null,
       onScreen: view === `workspace:${w.id}`,
       hotkey: w.hotkey,
       native: w.display === "host",
@@ -685,8 +541,7 @@ export class LocalBackend implements Backend {
   async container(_machineId: string, containerId: string, action: ContainerAction) {
     if (action === "remove") {
       await wadd.remove(containerId);
-      await this.refreshSpecs();
-      this.emit("wadspaces");
+      this.emit("machines");
       return;
     }
     await wadd.action(containerId, action);

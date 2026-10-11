@@ -2,9 +2,8 @@
 //! projects' folders on disk.
 //!
 //! Step 1 does everything that may take a while at once:
-//!   - the image: it must be here (a localhost/ image is built, never
-//!     pulled; a registry image is downloaded, with its progress), and, when
-//!     projects are mounted, labelled io.wadspaces.projects=1. Older images
+//!   - the image: it must be here (layer images are built, never
+//!     downloaded), and, when projects are mounted, labelled io.wadspaces.projects=1. Older images
 //!     clone their repos over ~/Desktop at every start and would wreck a
 //!     mounted folder, so they're refused.
 //!   - each project's folder:
@@ -713,38 +712,10 @@ impl Launches {
     async fn image(&self, id: &str, ws: &Workspace, need_label: bool) -> Result<(), String> {
         self.part(id, "image", Some(PartState::Working), None, Some("checking the image"));
         let r = async {
-            let mut labels = self.backend.image_labels(&ws.image).await?;
-            if labels.is_none() {
-                if ws.image.starts_with("localhost/") {
-                    return Err(format!("{} isn't on this machine; build {} in WadSpaces first", ws.image, ws.name));
-                }
-                self.line(id, &format!("downloading {}", ws.image));
-                // The download's progress, onto the image's line.
-                let me = self.me.upgrade().expect("alive");
-                let (jid, wid) = (id.to_string(), ws.id.clone());
-                let mirror = tokio::spawn(async move {
-                    loop {
-                        if let Some(st) = me.registry.state(&wid).filter(|s| s.progress.is_some()) {
-                            me.part(
-                                &jid,
-                                "image",
-                                None,
-                                st.progress.map(|p| f64::from(p) / 100.0),
-                                st.message.as_deref(),
-                            );
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                    }
-                });
-                let r = self.registry.download(&ws.id).await;
-                mirror.abort();
-                if r.is_err() {
-                    let why = self.registry.state(&ws.id).and_then(|s| s.error).unwrap_or_default();
-                    return Err(format!("downloading {} failed: {why}", ws.image));
-                }
-                labels = Some(self.backend.image_labels(&ws.image).await?.unwrap_or_default());
-            }
-            let labelled = labels.as_ref().and_then(|l| l.get(PROJECTS_LABEL)).and_then(Value::as_str) == Some("1");
+            let Some(labels) = self.backend.image_labels(&ws.image).await? else {
+                return Err(format!("{} isn't on this machine; build {} in WadSpaces first", ws.image, ws.name));
+            };
+            let labelled = labels.get(PROJECTS_LABEL).and_then(Value::as_str) == Some("1");
             if need_label && !labelled {
                 return Err(OLD_BASE.to_string());
             }

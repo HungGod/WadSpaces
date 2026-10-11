@@ -19,9 +19,9 @@ mkdir -p "$dir/state" "$dir/projects" "$dir/home/Notes" "$dir/stick-files/Books/
 echo "my notes" >"$dir/home/Notes/todo.md"
 echo "chapter one" >"$dir/stick-files/Books/Novel/one.md"
 
-podman image exists localhost/wadspaces-test:latest &&
-  [ "$(podman image inspect localhost/wadspaces-test:latest --format '{{index .Labels "io.wadspaces.projects"}}')" = 1 ] ||
-  podman build -q -t localhost/wadspaces-test:latest "$root/apps/wadd/dev/test-image" >/dev/null
+podman image exists localhost/wadspaces-template-trytest:latest &&
+  [ "$(podman image inspect localhost/wadspaces-template-trytest:latest --format '{{index .Labels "io.wadspaces.projects"}}')" = 1 ] ||
+  podman build -q -t localhost/wadspaces-template-trytest:latest "$root/apps/wadd/dev/test-image" >/dev/null
 
 # The "stick": a 64 MB disk with one ext4 partition holding Books/.
 img=$dir/stick.img
@@ -40,13 +40,12 @@ name = "wadd-try-projects"
 socket = "$sock"
 state_dir = "$dir/state"
 projects_dir = "$dir/projects"
-legacy_config = "$dir/none.yaml"
 ready_timeout_s = 60
 [display]
 enabled = false
 TOML
 cat >"$dir/state/workspaces.json" <<JSON
-[{"id":"tryprojects","name":"Try projects","image":"localhost/wadspaces-test:latest","display":"stream","port":$port,
+[{"id":"tryprojects","name":"Try projects","image":"localhost/wadspaces-template-trytest:latest","display":"stream","port":$port,
   "enabled":true,"autostart":false,"containerName":"wad-tryprojects","containerPort":3000,
   "env":[],"secrets":[],"volumes":[],"devices":[],"projects":[]}]
 JSON

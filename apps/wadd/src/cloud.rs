@@ -504,10 +504,6 @@ impl CloudRelay {
         let need_ws = |kind: &str| if ws.is_empty() { Err(format!("{kind} needs wsId")) } else { Ok(()) };
         let msg = |e: ApiError| e.message;
         match s(cmd, "type").as_str() {
-            "switch" => {
-                need_ws("switch")?;
-                p.view.switch(&ws).map_err(msg)?;
-            }
             "start" => {
                 need_ws("start")?;
                 p.registry.start(&ws).map_err(msg)?;
@@ -519,22 +515,6 @@ impl CloudRelay {
             "restart" => {
                 need_ws("restart")?;
                 p.view.restart(&ws).await.map_err(msg)?;
-            }
-            "launcher" | "home" => p.view.home(false).map_err(msg)?,
-            "refresh" => p.registry.reconcile().await,
-            "launch" => {
-                need_ws("launch")?;
-                let projects: Vec<String> = cmd
-                    .get("projects")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect();
-                let restart = cmd.get("restart").and_then(Value::as_bool).unwrap_or(false);
-                let l = p.launches.create(&ws, &projects, restart).map_err(msg)?;
-                return Ok(json!({"ok": true, "launchId": l.id}));
             }
             "sync-secrets" => {
                 let r = self.sync_secrets().await?;
@@ -550,7 +530,6 @@ impl CloudRelay {
                 };
                 return Ok(json!({"ok": true, "pulled": pulled, "pushed": pushed, "repos": repos}));
             }
-            "navigate" => return Err("this machine shows no web pages any more".into()),
             "build" => {
                 let req = self.layer_request(cmd).await?;
                 let b = p.builds.create_layer(&req).map_err(msg)?;
@@ -580,18 +559,6 @@ impl CloudRelay {
                 let minutes = cmd.get("focusMinutes").and_then(Value::as_u64).map(|m| m as u32);
                 let ids = p.launches.batch(items, minutes).await.map_err(msg)?;
                 return Ok(json!({"ok": true, "workspaces": ids}));
-            }
-            "session" => {
-                let ids: Vec<String> = cmd
-                    .get("workspaces")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect();
-                let minutes = cmd.get("minutes").and_then(Value::as_u64).map(|m| m as u32);
-                p.view.session_start(&ids, minutes, true).map_err(msg)?;
             }
             other => return Err(format!("unknown command type {other:?}")),
         }

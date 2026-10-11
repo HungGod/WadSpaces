@@ -51,7 +51,6 @@ async fn env() -> Env {
     let mut cfg = Config::defaults(Profile::User);
     cfg.machine.name = "parity".into();
     cfg.daemon.state_dir = d.path().join("state");
-    cfg.daemon.legacy_config = d.path().join("none.yaml");
     cfg.daemon.projects_dir = d.path().join("projects");
     cfg.display.enabled = false;
     cfg.cloud.enabled = false;
@@ -203,7 +202,7 @@ async fn the_snapshot_has_the_python_shape() {
     );
     assert_eq!(ws[1]["url"], "http://127.0.0.1:3100/");
     let st = &ws[0]["state"];
-    for k in ["container", "phase", "progress", "message", "error", "image_present", "download", "since"] {
+    for k in ["container", "phase", "message", "error", "image_present", "since"] {
         assert!(st.get(k).is_some(), "state has no {k}: {st}");
     }
     assert!(snap["network"].is_object() && snap.get("session").is_some() && snap.get("pending").is_some());
@@ -227,10 +226,6 @@ async fn the_snapshot_has_the_python_shape() {
 async fn shapes_the_ui_reads() {
     let e = env().await;
     let r = |m: Method, p: &'static str, b: Option<Value>| e.rs.request(m, p, b);
-    // Specs: workspaces.yaml's shape.
-    let specs = r(Method::Get, "/api/specs", None).await.unwrap();
-    assert_eq!(specs[0]["container_name"], "wad-writing");
-    assert_eq!(specs[0]["env"]["PUID"], "1000");
     // A session, then ending it (forced: it's a focus one).
     let sess = r(Method::Post, "/v1/session", Some(json!({"workspaces": ["writing"], "minutes": 25}))).await.unwrap();
     assert_eq!((sess["mode"].as_str(), sess["minutes"].as_u64()), (Some("focus"), Some(25)));

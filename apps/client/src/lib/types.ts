@@ -1,19 +1,7 @@
-// The app's view of the world. Both backends (src/data) produce these: the
-// offline one from wadd on this machine, the online one from Firestore and the
-// machines' relay heartbeats. The stored wadspace itself lives in core/model.
-import type { WadspaceSpec } from "@core/model";
-
-export type {
-  Advanced,
-  AgentConfig,
-  AgentRuntime,
-  Layout,
-  LayoutIcon,
-  Visibility,
-  Wallpaper,
-  WadspaceSpec,
-} from "@core/model";
-import type { Visibility } from "@core/model";
+// The app's view of the world. The backends (src/data) produce these: the
+// offline one from wadd on this machine, the online one from Firestore and
+// the machines' relay heartbeats. The Builder's documents are core/layers'.
+export type { Wallpaper } from "@core/layers";
 
 export interface PublicUser {
   /** The key used everywhere in the UI (owner, sharedWith, run history). */
@@ -37,52 +25,8 @@ export interface LastSession {
   at: string;
 }
 
-export interface Wadspace extends WadspaceSpec {
-  owner: string;
-  visibility: Visibility;
-  sharedWith: string[];
-  /** Installed on the launch-target machine with its image present. */
-  local: boolean;
-  sizeMB: number;
-  updatedAt: string;
-  /** Set when this is a throwaway copy of a Quick Launch template. */
-  templateId?: string;
-  /** Installed on the launch-target machine (image may still be missing). */
-  installed?: boolean;
-  /** Came with the machine (a preset) rather than from the Builder. */
-  preset?: boolean;
-  /** A program on the machine itself (Terminal, WadBrowser), not an image:
-   *  wadd opens and closes it like a wadspace, and there's nothing to edit. */
-  app?: boolean;
-  /** Online: built on a machine, not in the account; names the machine. */
-  machineOnly?: string;
-  /** Offline: the projects its unit mounts now (from its last launch). */
-  mountedProjects?: string[];
-  /** Deleted (ISO time), but not for good: the Wadspaces Manager can restore
-   *  it, or delete it for good with the other unused ones. */
-  deletedAt?: string;
-}
-
-/** Builder work that's been saved but not built yet. */
-export interface Draft {
-  id: string;
-  owner: string;
-  name: string;
-  description: string;
-  visibility: Visibility;
-  layout: WadspaceSpec["layout"];
-  advanced?: WadspaceSpec["advanced"];
-  agent?: WadspaceSpec["agent"];
-  dockerfile?: string;
-  /** Set when the draft holds unbuilt changes to a wadspace that already exists. */
-  wadspaceId?: string;
-  /** The Builder step it was saved on, so Continue picks up there. */
-  step: "apps" | "projects" | "customize";
-  updatedAt: string;
-}
-
 /** Where a wadspace is on a machine. */
-export type ContainerPhase = "idle" | "pulling" | "starting" | "waiting" | "ready" | "stopping" | "error";
+export type ContainerPhase = "idle" | "starting" | "waiting" | "ready" | "stopping" | "error";
 
 export interface Container {
   id: string;
@@ -93,8 +37,6 @@ export interface Container {
   /** Finer state from wadd, when known. */
   phase?: ContainerPhase;
   error?: string | null;
-  /** 0..1 while the image downloads. */
-  download?: { progress: number | null; label: string } | null;
   /** On screen on the machine right now. */
   onScreen?: boolean;
   hotkey?: number | null;

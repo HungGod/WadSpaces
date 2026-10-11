@@ -217,12 +217,11 @@ service cloud.firestore {
           allow read, delete: if isOwner(uid);
           allow create: if isOwner(uid)
             && request.resource.data.status == "pending"
-            // "launcher" and "navigate" are the Python wadd's; the Rust one says "home".
             // build: a layer's image; install: a wadspace on its layer, with the
             // wallpaper the app drew; launch-run: anything the launcher starts
             // (wadspaces, throwaway runs, WadBrowser setups, the terminal),
-            // optionally as a focus session; session: a session over ones there.
-            && request.resource.data.type in ["switch", "start", "stop", "restart", "home", "launcher", "navigate", "refresh", "sync-secrets", "projects-sync", "launch", "build", "install", "launch-run", "session"];
+            // optionally as a focus session.
+            && request.resource.data.type in ["start", "stop", "restart", "sync-secrets", "projects-sync", "build", "install", "launch-run"];
           allow read: if isMachine(uid, mid);
           allow update: if isMachine(uid, mid) && onlyChanges(["status", "result", "startedAt", "finishedAt", "progress"]);
         }

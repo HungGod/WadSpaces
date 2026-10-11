@@ -11,9 +11,9 @@
 // The UI keys people by username (owner, sharedWith, run history); each
 // backend translates to whatever it stores.
 import type { GithubRepo, Project, ProjectDraft, ProjectStatus } from "@core/projects";
-import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
+import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser, TailnetStatus } from "@/lib/types";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
-import type { BrowserSetup, Customization, LayerKey, Library, Template, WadspaceV2 } from "@core/layers";
+import type { BrowserSetup, Customization, LayerKey, Library, Template, Wadspace } from "@core/layers";
 import type { ImageRow, RunItem } from "./layers";
 
 export interface Caps {
@@ -31,7 +31,7 @@ export interface Caps {
   signins: boolean;
 }
 
-export type ContainerAction = "start" | "stop" | "restart" | "download" | "remove";
+export type ContainerAction = "start" | "stop" | "restart" | "remove";
 
 /** A build's state plus the log lines from line `from` on. */
 export interface BuildProgress {
@@ -145,13 +145,11 @@ export type Topic =
 /** A change to a layer document: soft delete (`deletedAt`) or restore (null). */
 export interface LayerPatch {
   deletedAt?: string | null;
-  /** Migrated from before the layers: null once its layers are built. */
-  legacyImage?: string | null;
 }
 
 /** Everything the Builder's documents are, for the calls that need them all. */
 export interface LayerLibrary extends Library {
-  wadspaces: WadspaceV2[];
+  wadspaces: Wadspace[];
   browsers: BrowserSetup[];
 }
 
@@ -171,9 +169,9 @@ export interface Backend {
   patchCustomization(id: string, patch: LayerPatch): Promise<Customization>;
   deleteCustomization(id: string): Promise<void>;
   /** Saved on a machine (offline, the machine app): installed there too. */
-  listWadspaces(): Promise<WadspaceV2[]>;
-  saveWadspace(w: WadspaceV2, lib: LayerLibrary): Promise<WadspaceV2>;
-  patchWadspace(id: string, patch: LayerPatch, lib: LayerLibrary): Promise<WadspaceV2>;
+  listWadspaces(): Promise<Wadspace[]>;
+  saveWadspace(w: Wadspace, lib: LayerLibrary): Promise<Wadspace>;
+  patchWadspace(id: string, patch: LayerPatch, lib: LayerLibrary): Promise<Wadspace>;
   deleteWadspace(id: string): Promise<void>;
   listBrowsers(): Promise<BrowserSetup[]>;
   saveBrowser(b: BrowserSetup): Promise<BrowserSetup>;
@@ -213,11 +211,6 @@ export interface Backend {
   /** People the UI may show: you, owners of wadspaces shared with you, share candidates. */
   users(): Promise<PublicUser[]>;
 
-
-  /** The wadspaces from before the layers, for the migration (data/migrate.ts). */
-  listOldWadspaces(): Promise<Wadspace[]>;
-  /** Drafts are gone from the Builder: deletes them all; how many there were. */
-  discardDrafts(): Promise<number>;
 
   listMachines(): Promise<Machine[]>;
   container(machineId: string, containerId: string, action: ContainerAction): Promise<void>;

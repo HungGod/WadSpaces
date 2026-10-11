@@ -37,8 +37,8 @@ use sha2::{Digest, Sha256};
 use wad_proto::v1::ProjectSource;
 
 use crate::folders::{self, FolderError};
-use crate::legacy::host_path_ok;
 use crate::state::truthy;
+use crate::workspaces::host_path_ok;
 
 pub const MAX_SETUP: usize = 4000;
 pub const NOT_A_SOURCE: &str = "a project is a GitHub repo, a folder or a drive";

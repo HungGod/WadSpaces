@@ -1,7 +1,7 @@
 // Step 3: WadSpaces construction. What makes it this wadspace rather than its
 // template: a name, a background, project folders, and secrets for the apps
 // that keep sign-ins. None of it is in an image: it's mounted at start.
-import { History, KeyRound, Users } from "lucide-react";
+import { KeyRound, Users } from "lucide-react";
 import clsx from "clsx";
 import { SECRET_KINDS } from "@core/catalog/catalog";
 import { fits, imageKey, opensFolders, resolve, slotsFor, type SignInRef, type Slot } from "@core/layers";
@@ -11,7 +11,7 @@ import { ProjectsPanel } from "./ProjectsPanel";
 import { Input, Label, Segmented, Textarea } from "../ui";
 import { WallpaperPicker } from "../WallpaperPicker";
 import { asChoices, choiceFor, defaultSecretName, resolvedName, resolveSlots, signInRefs, useDraft, type SlotChoice, type SlotDraft } from "./draft";
-import { BuildButton, Heading, ImageBadge, useImageState } from "./parts";
+import { BuildButton, Heading, ImageBadge } from "./parts";
 
 export function StepConstruct() {
   const base = useDraft((s) => s.base);
@@ -20,14 +20,12 @@ export function StepConstruct() {
   const setWadspace = useDraft((s) => s.setWadspace);
   const templates = useApp((s) => s.templates);
   const customizations = useApp((s) => s.customizations);
-  const legacy = useApp((s) => (w.id ? s.wadspaces.find((x) => x.id === w.id)?.legacyImage : null));
   const r = base && resolve({ templates, customizations }, base);
   if (!r || !setup || !base) return null;
   const slots = slotsFor(r.template, setup);
 
   return (
     <div className="space-y-7 p-5" data-tour="step-construct">
-      {legacy && <BuiltBefore image={legacy} layer={imageKey(base)} />}
       <div className="flex items-center gap-3 rounded-2xl bg-surface-2/50 p-3 ring-1 ring-line">
         <div className="min-w-0 flex-1">
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-faint">Runs on</div>
@@ -74,22 +72,6 @@ export function StepConstruct() {
         <Heading hint="Saved sign-ins, kept on the machine and mounted into this wadspace. Save a new one, or reuse one of the same kind.">Secrets</Heading>
         {slots.length ? <SecretsPanel slots={slots} /> : <p className="text-xs text-muted">Nothing in this template keeps a sign-in.</p>}
       </section>
-    </div>
-  );
-}
-
-/** A wadspace from before the layers: it runs its old image until its layer's is built. */
-function BuiltBefore({ image, layer }: { image: string; layer: ReturnType<typeof imageKey> }) {
-  const state = useImageState(layer);
-  return (
-    <div className="flex items-center gap-3 rounded-2xl bg-accent-2/10 p-3 ring-1 ring-accent-2/40">
-      <History className="size-5 shrink-0 text-accent-2" />
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold">Built from before layers</div>
-        <div className="text-xs text-muted">{state === "building" ? "Its new image is building: it switches when that's done." : "It runs its old image until you build its new one, then switches."}</div>
-        <div className="truncate font-mono text-[11px] text-faint">{image}</div>
-      </div>
-      <BuildButton image={layer} />
     </div>
   );
 }

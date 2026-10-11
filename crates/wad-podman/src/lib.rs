@@ -25,7 +25,7 @@ pub enum Error {
     /// Podman answered with an error status: what it said.
     #[error("{what}: HTTP {status}: {message}")]
     Status { what: String, status: u16, message: String },
-    /// An error inside a streamed answer (a pull or a build).
+    /// An error inside a streamed answer (a build).
     #[error("{0}")]
     Stream(String),
     #[error("podman's answer to {0} wasn't what was expected: {1}")]
@@ -298,37 +298,6 @@ impl Podman {
             None => "missing".into(),
             Some(info) => info.pointer("/State/Status").and_then(Value::as_str).unwrap_or("unknown").to_lowercase(),
         })
-    }
-
-    /// Pulls an image; `on_line` gets podman's progress lines as they come
-    /// (they can't drive a progress bar: see wadd's pull module).
-    pub async fn pull(&self, image: &str, mut on_line: impl FnMut(&str)) -> Result<(), Error> {
-        let path = format!("/images/pull?reference={}&policy=missing", segment(image));
-        let res = self.send(Method::POST, &path, None).await?;
-        if !res.status().is_success() {
-            return Err(Self::status_error(&format!("pull {image}"), res).await);
-        }
-        let mut body = res.into_body();
-        let mut buf: Vec<u8> = Vec::new();
-        while let Some(frame) = body.frame().await {
-            let frame = frame.map_err(|e| Error::Http(e.to_string()))?;
-            let Ok(data) = frame.into_data() else { continue };
-            buf.extend_from_slice(&data);
-            while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
-                let line: Vec<u8> = buf.drain(..=nl).collect();
-                let Ok(msg) = serde_json::from_slice::<Value>(&line) else { continue };
-                if let Some(e) = msg.get("error").and_then(Value::as_str).filter(|e| !e.is_empty()) {
-                    return Err(Error::Stream(format!("pull {image}: {e}")));
-                }
-                if let Some(text) = msg.get("stream").and_then(Value::as_str) {
-                    let text = text.trim();
-                    if !text.is_empty() {
-                        on_line(text);
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Where a named volume's files are on the host; None if there's no such volume.

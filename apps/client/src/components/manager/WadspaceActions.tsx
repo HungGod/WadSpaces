@@ -3,7 +3,7 @@
 // Builder or start a new one from it, look at its details, delete it.
 import { useNavigate } from "react-router";
 import { Copy, Info, Lock, MoreHorizontal, Pencil, Play, SlidersHorizontal, Trash2 } from "lucide-react";
-import type { WadspaceV2 } from "@core/layers";
+import type { Wadspace } from "@core/layers";
 import { useDraft } from "@/components/wadbuilder/draft";
 import { Dropdown, IconButton } from "@/components/ui";
 import { clockTime } from "@/lib/format";
@@ -12,7 +12,7 @@ import { isLocked, useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui";
 
 /** The actions, for menus and buttons alike. */
-export function useWadspaceActions(w: WadspaceV2) {
+export function useWadspaceActions(w: Wadspace) {
   const navigate = useNavigate();
   const { openDetails, openLauncher } = useUi();
   const lib = () => {
@@ -43,7 +43,7 @@ export function useWadspaceActions(w: WadspaceV2) {
 }
 
 /** Open, and the rest in a menu. */
-export function WadspaceActions({ w }: { w: WadspaceV2 }) {
+export function WadspaceActions({ w }: { w: Wadspace }) {
   const focus = useApp((s) => s.focus);
   const a = useWadspaceActions(w);
   const locked = isLocked(focus, w.id);

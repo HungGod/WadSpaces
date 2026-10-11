@@ -11,11 +11,10 @@ import { create } from "zustand";
 import { backend, type Topic } from "@/data";
 import type { BuildProgress, LaunchProgress } from "@/data/backend";
 import type { Project } from "@core/projects";
-import { imageKey, type BrowserSetup, type Customization, type LayerKey, type SignInRef, type Template, type WadspaceV2 } from "@core/layers";
+import { type BrowserSetup, type Customization, type LayerKey, type SignInRef, type Template, type Wadspace } from "@core/layers";
 import type { SecretKind } from "@core/layers";
 import type { LayerLibrary } from "@/data/backend";
 import { byLayer, imageState, type ImageRow, type ImageState, type RunItem } from "@/data/layers";
-import { migrateToLayers } from "@/data/migrate";
 import type { WaddSignIn } from "./wadd";
 import type { BuildJob } from "./build";
 import type { LaunchJob } from "./launch";
@@ -34,15 +33,6 @@ interface Toast {
   action?: { label: string; onClick: () => void };
 }
 
-/** A wadspace image downloading to the launch-target machine. */
-export interface Download {
-  wadspaceId: string;
-  name: string;
-  sizeMB: number;
-  progress: number; // 0..1; 0 while the size isn't known
-  label?: string;
-}
-
 /** The Builder's four kinds of document. */
 export type LayerKind = "template" | "customization" | "wadspace" | "browser";
 
@@ -59,7 +49,6 @@ interface AppState {
   clockSkew: number;
   launchTarget: string;
   toasts: Toast[];
-  downloads: Download[];
   builds: BuildJob[];
   /** The build whose log is open. */
   buildLog: string | null;
@@ -76,7 +65,7 @@ interface AppState {
   // The Builder's documents, deleted ones included (`deletedAt`): see `alive`.
   templates: Template[];
   customizations: Customization[];
-  wadspaces: WadspaceV2[];
+  wadspaces: Wadspace[];
   browsers: BrowserSetup[];
   /** The layer images on the launch machine. */
   images: Partial<Record<LayerKey, ImageRow>>;
@@ -106,7 +95,7 @@ interface AppState {
   saveTemplate: (t: New<Template>) => Promise<Template>;
   saveCustomization: (c: New<Customization>) => Promise<Customization>;
   /** Saves (and, on a machine, installs) the wadspace. */
-  saveWadspace: (w: New<Omit<WadspaceV2, "version">>) => Promise<WadspaceV2>;
+  saveWadspace: (w: New<Omit<Wadspace, "version">>) => Promise<Wadspace>;
   saveBrowser: (b: New<BrowserSetup>) => Promise<BrowserSetup>;
   /** New sign-ins a draft names, made now (online: an id the machine makes it under). */
   createSignIns: (list: { name: string; kind: SecretKind }[]) => Promise<SignInRef[]>;
@@ -216,7 +205,6 @@ export const useApp = create<AppState>((set, get) => {
     clockSkew: 0,
     launchTarget: THIS_MACHINE,
     toasts: [],
-    downloads: [],
     builds: [],
     buildLog: null,
     launchLog: null,
@@ -241,8 +229,6 @@ export const useApp = create<AppState>((set, get) => {
       backend.listBuilds?.().then((bs) => bs.forEach(get().applyBuild)).catch(() => {});
       backend.listLaunches?.().then((ls) => ls.forEach(get().applyLaunch)).catch(() => {});
       await Promise.all([get().loadMachines(), get().loadFocus(), get().loadLastSession(), get().loadProjects(), get().loadSignIns(), get().loadLayers()]);
-      // In the background: what's from before the layers moves onto them.
-      migrate().catch(() => {});
     },
     loadLayers: async () => {
       // A library seen the first time gets the starter templates (once).
@@ -258,18 +244,7 @@ export const useApp = create<AppState>((set, get) => {
       await get().loadImages();
     },
     loadWadspaces: async () => set({ wadspaces: await backend.listWadspaces() }),
-    loadImages: async () => {
-      set({ images: byLayer(await backend.listImages().catch(() => [])) });
-      // A wadspace from before the layers runs its old image until its own is
-      // built; from then on, the layer's (installed again on it).
-      for (const w of get().wadspaces.filter((x) => x.legacyImage && !x.deletedAt)) {
-        if (get().imageState(imageKey(w.base)) !== "built") continue;
-        backend
-          .patchWadspace(w.id, { legacyImage: null }, get().layerLib())
-          .then((saved) => put("wadspaces", saved))
-          .catch(() => {});
-      }
-    },
+    loadImages: async () => set({ images: byLayer(await backend.listImages().catch(() => [])) }),
     layerLib: () => {
       const { templates, customizations, wadspaces, browsers } = get();
       return { templates, customizations, wadspaces, browsers };
@@ -287,12 +262,7 @@ export const useApp = create<AppState>((set, get) => {
     loadMachines: async () => {
       const machines = await backend.listMachines();
       const target = backend.defaultMachineId();
-      const { wadspaces } = get();
-      // Image downloads in progress on the launch target show in the sidebar.
-      const downloads = (machines.find((m) => m.id === target)?.containers ?? [])
-        .filter((c) => c.download)
-        .map((c) => ({ wadspaceId: c.wadspaceId, name: wadspaces.find((w) => w.id === c.wadspaceId)?.name ?? c.wadspaceId, sizeMB: 0, progress: c.download!.progress ?? 0, label: c.download!.label }));
-      set({ machines, downloads, launchTarget: target ?? get().launchTarget });
+      set({ machines, launchTarget: target ?? get().launchTarget });
     },
     loadFocus: async () => {
       const { focus, now } = await backend.getFocus();
@@ -328,13 +298,11 @@ export const useApp = create<AppState>((set, get) => {
     saveWadspace: async (w) => {
       const { wadspaces } = get();
       const prev = w.id ? wadspaces.find((x) => x.id === w.id) : undefined;
-      const next: WadspaceV2 = {
+      const next: Wadspace = {
         ...w,
         version: 2,
         id: prev?.id ?? freeId(w.name, wadspaces),
         owner: prev?.owner ?? backend.owner(),
-        // Still on its image from before the layers until they're built.
-        ...(prev?.legacyImage && { legacyImage: prev.legacyImage }),
         createdAt: prev?.createdAt ?? now(),
         updatedAt: now(),
       };
@@ -478,17 +446,6 @@ export const useApp = create<AppState>((set, get) => {
     clearNotice: (id) => set({ notices: get().notices.filter((n) => n.id !== id) }),
   };
 });
-
-/** Moves the library from before the layers onto them (data/migrate.ts),
- *  once per load; a library already moved has nothing left to do. */
-async function migrate() {
-  const owner = backend.owner();
-  if (!owner) return;
-  const r = await migrateToLayers(backend, owner);
-  const s = useApp.getState();
-  if (r.migrated.length) await s.loadLayers();
-  for (const n of r.notices) s.notify({ title: "Moved onto the Builder's layers", body: n });
-}
 
 // Reload just what the backend says changed (wadd's events, Firestore listeners).
 let following = false;
