@@ -19,7 +19,17 @@ export type FeatureId =
   | "tiled"
   | "android-studio"
   | "hplip"
-  | "obsidian";
+  | "obsidian"
+  | "gcloud"
+  | "rust"
+  | "go"
+  | "java"
+  | "libresprite"
+  | "audacity"
+  | "krita"
+  | "openshot"
+  | "steam"
+  | "dolphin";
 
 export interface Feature {
   id: FeatureId;
@@ -38,6 +48,10 @@ export const FEATURES: Feature[] = [
   { id: "python", label: "Python", description: "python3, pip, venv" },
   { id: "nodejs", label: "Node.js", description: "Node 22 LTS and npm" },
   { id: "firebase", label: "Firebase CLI", description: "firebase-tools", needs: ["nodejs"] },
+  { id: "gcloud", label: "Google Cloud CLI", description: "gcloud, gsutil and bq from Google's apt repo" },
+  { id: "rust", label: "Rust", description: "rustup, cargo and the stable toolchain" },
+  { id: "go", label: "Go", description: "Debian's golang" },
+  { id: "java", label: "Java", description: "OpenJDK (Debian's default-jdk)" },
   { id: "electron-deps", label: "Electron libraries", description: "shared libraries for Electron apps", hidden: true },
   { id: "vscode", label: "VS Code", description: "Microsoft VS Code", needs: ["electron-deps"] },
   { id: "claude-code", label: "Claude Code", description: "Claude Code CLI with a desktop launcher", needs: ["nodejs"] },
@@ -46,6 +60,12 @@ export const FEATURES: Feature[] = [
   { id: "android-studio", label: "Android Studio", description: "large download; emulator needs /dev/kvm" },
   { id: "hplip", label: "HP printer tools", description: "hplip and CUPS client" },
   { id: "obsidian", label: "Obsidian", description: "Markdown notes", needs: ["electron-deps"] },
+  { id: "libresprite", label: "LibreSprite", description: "pixel art and sprite animation" },
+  { id: "audacity", label: "Audacity", description: "record and edit audio" },
+  { id: "krita", label: "Krita", description: "digital painting" },
+  { id: "openshot", label: "OpenShot", description: "video editor" },
+  { id: "steam", label: "Steam", description: "Valve's game launcher; needs /dev/dri" },
+  { id: "dolphin", label: "Dolphin", description: "GameCube and Wii emulator" },
 ];
 
 /** A default project (core/projects.ts): wadd mounts its folder at

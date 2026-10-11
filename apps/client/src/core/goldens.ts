@@ -10,6 +10,7 @@ import { presets, presetWadspace } from "./presets";
 import { defaultAdvanced, type Layout, type LayoutIcon, type WadspaceSpec } from "./model";
 import { newSpec, type CreatorSpec, type WaddSpec } from "./spec";
 import type { Project, ProjectDraft } from "./projects";
+import type { BrowserSetup, Customization, Setup, Template, WadspaceV2 } from "./layers";
 
 export interface Case {
   fn: string;
@@ -176,6 +177,79 @@ const URLS = [
 
 const STRINGS = ["Hello World", "  --Leading & trailing--  ", "ÜNÏCØDÉ name", "a".repeat(80), "", "!!!", "Café au lait", "ﬁle İstanbul ΣΑΣ", "tab\tand\u00a0nbsp\u2003em\ufeffbom\u0085nel"];
 
+// The Builder's layers: templates from the catalog and from before (an old
+// app, a 'soon' one), customizations, wadspaces on each kind of base.
+const T = (id: string, apps: string[], extra: Partial<Template> = {}): Template => ({
+  id,
+  owner: "me",
+  name: id[0].toUpperCase() + id.slice(1),
+  description: "",
+  apps,
+  createdAt: `2026-01-0${apps.length}`,
+  updatedAt: "2026-01-09",
+  ...extra,
+});
+const TEMPLATES: Template[] = [
+  T("writing", ["obsidian"], { starter: true }),
+  T("dev", ["wadbrowser", "vscode"], { starter: true }),
+  T("games", ["steam", "dolphin", "lmms", "obs"]),
+  T("old", ["chrome", "vscode", "gimp", "terminal", "brave", "tiled"], { name: "Chrome + 5 apps" }),
+  T("none", []),
+  T("gone", ["krita"], { deletedAt: "2026-02-02" }),
+];
+const webapp = (name: string, url: string) => ({ id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name, url });
+const SETUPS: Setup[] = [
+  { templateId: "dev", browserMode: "browser", webapps: [], extensions: [], tools: [], autostart: [] },
+  {
+    templateId: "dev",
+    browserMode: "focus",
+    webapps: [webapp("GitHub", "https://github.com"), webapp("Google Cloud", "https://console.cloud.google.com/"), webapp("Odd \"$x\"", "https://odd.example/a b")],
+    extensions: ["anthropic.claude-code", "openai.chatgpt", "github.copilot-chat", "ms-python.python", "bad id;x"],
+    tools: ["firebase", "go", "git", "nonsense"],
+    autostart: ["app:vscode", "web:github", "app:obsidian"],
+  },
+  { templateId: "writing", browserMode: "browser", webapps: [webapp("Gmail", "https://mail.google.com")], extensions: ["anthropic.claude-code"], tools: ["python"], autostart: ["app:obsidian"] },
+];
+const C = (id: string, setup: Setup, extra: Partial<Customization> = {}): Customization => ({
+  ...setup,
+  id,
+  owner: "me",
+  name: id,
+  description: "",
+  createdAt: "2026-03-01",
+  updatedAt: "2026-03-01",
+  ...extra,
+});
+const CUSTOMIZATIONS: Customization[] = [C("dev-plus", SETUPS[1], { name: "Dev plus" }), C("notes-plus", SETUPS[2], { createdAt: "2026-02-01" }), C("old-c", SETUPS[1], { deletedAt: "2026-04-01" })];
+const ref = (id: string, kind = "web") => ({ id, name: `${id}-name`, kind }) as WadspaceV2["secrets"][string];
+const W2 = (id: string, base: WadspaceV2["base"], extra: Partial<WadspaceV2> = {}): WadspaceV2 => ({
+  version: 2,
+  id,
+  owner: "me",
+  name: id,
+  description: "",
+  base,
+  wallpaper: { type: "gradient", value: "linear-gradient(#000, #fff)" },
+  projects: ["notes", "web"],
+  secrets: {},
+  createdAt: "2026-05-01",
+  updatedAt: "2026-05-01",
+  ...extra,
+});
+const V2: WadspaceV2[] = [
+  W2("novel", { kind: "template", id: "writing" }, { secrets: { "app:obsidian": ref("s-obs", "obsidian") }, wallpaper: { type: "image", value: "data:image/jpeg;base64,/9j/" } }),
+  W2("work", { kind: "customization", id: "dev-plus" }, {
+    secrets: { "web:github": ref("s-gh"), "web:google-cloud": ref("s-g"), "ext:anthropic.claude-code": ref("s-cc", "vscode-claude-code") },
+    createdAt: "2026-04-01",
+  }),
+  W2("legacy", { kind: "template", id: "old" }, { legacyImage: "localhost/wadspaces-legacy:latest", name: "Line\nbreak" }),
+  W2("trashed", { kind: "template", id: "dev" }, { deletedAt: "2026-06-01" }),
+];
+const BROWSERS: BrowserSetup[] = [
+  { id: "mail", owner: "me", name: "Mail", mode: "focus", webapps: [webapp("Gmail", "https://mail.google.com"), webapp("GitHub", "https://github.com/")], secrets: { "web:gmail": ref("s-g") }, createdAt: "t", updatedAt: "t" },
+];
+const LIB = { templates: TEMPLATES, customizations: CUSTOMIZATIONS };
+
 export function cases(): Case[] {
   const c: Case[] = [];
   const add = (fn: string, ...args: unknown[]) => c.push({ fn, args });
@@ -281,6 +355,75 @@ export function cases(): Case[] {
   for (const d of [DRAFTS[0], { ...DRAFTS[0], source: { kind: "git" as const, url: "https://github.com/HungGod/web" } }, { name: "x", mountName: "Photos", source: DRAFTS[8].source }, { name: "x", mountName: "Nope", source: DRAFTS[8].source }]) {
     add("findProject", PROJECTS, d);
   }
+
+  // the Builder's layers and catalog
+  add("catalog");
+  add("starters");
+  add("signInKinds");
+  add("emptySetup", "dev");
+  for (const x of [...SETUPS, ...CUSTOMIZATIONS, { templateId: "dev" }, {}]) add("setupOf", x);
+  add("sameSetup", CUSTOMIZATIONS[0], SETUPS[1]);
+  add("sameSetup", SETUPS[0], { templateId: "dev" });
+  add("sameSetup", SETUPS[0], SETUPS[1]);
+  for (const x of [...STRINGS, "Google Cloud", "Odd \"$x\"", "---"]) add("webappId", x);
+  for (const u of ["https://github.com", "https://mail.google.com/mail/u/0", "https://odd.example/a b", "not a url", "http://x.org:8080/a"]) add("webappIcon", u);
+  for (const b of [{ kind: "template", id: "dev" }, { kind: "customization", id: "dev-plus" }]) add("imageKey", b);
+  for (const k of ["template:dev", "custom:dev-plus", "bare"]) add("imageRef", k);
+  for (const b of [{ kind: "template", id: "dev" }, { kind: "customization", id: "dev-plus" }, { kind: "customization", id: "old-c" }, { kind: "template", id: "nope" }, { kind: "customization", id: "nope" }])
+    add("resolve", LIB, b);
+  for (const t of TEMPLATES) {
+    for (const st of SETUPS) {
+      add("slotsFor", t, st);
+      add("desktopFor", t, st, PROJECTS);
+      add("startMenuFor", t, st);
+      add("bootables", t, st);
+      add("layoutJsonFor", t, st);
+      add("importable", st, t);
+      add("importInto", SETUPS[0], st, t, ["webapps", "extensions", "tools", "autostart", "browserMode"]);
+    }
+    add("opensFolders", t);
+    add("templateDockerfile", t);
+    add("templateLayer", t);
+    for (const c of CUSTOMIZATIONS) {
+      add("customizationDockerfile", c, t);
+      add("customizationLayer", c, t);
+    }
+  }
+  add("importInto", SETUPS[2], SETUPS[1], TEMPLATES[1], ["webapps", "autostart"]);
+  add("importInto", SETUPS[1], SETUPS[1], TEMPLATES[1], ["webapps", "tools"]);
+  for (const st of SETUPS) add("browserSlots", st);
+  add("browserSlots", BROWSERS[0]);
+  const slots = [{ key: "web:github", kind: "web", label: "GitHub (web app)", appId: "WadBrowser-GitHub", iconUrl: "" }, { key: "ext:anthropic.claude-code", kind: "vscode-claude-code", label: "Claude Code (VS Code)", appId: "VSCode-ClaudeCode", iconUrl: "" }];
+  for (const n of ["VanuaAcademy", "Vanua Academy", "", "  ", "Ünï Cødé"]) {
+    for (const sl of slots) {
+      add("newSecretName", n, sl);
+      add("defaultBrowserSecretName", n, sl);
+    }
+  }
+  for (const [a, b] of [["web", "web"], ["wadbrowser", "web"], ["obsidian", "web"], ["steam", "steam"]]) add("fits", { kind: a }, { kind: b });
+  for (const k of ["web:x", "ext:openai.chatgpt", "ext:github.copilot-chat", "ext:unknown.ext", "app:steam", "app:obsidian", "app:vscode", "nokind", "zzz:x"]) add("kindOfSlotKey", k);
+  add("secretUse", V2, BROWSERS);
+  for (const w of V2) {
+    const r = TEMPLATES.find((t) => t.id === (w.base.kind === "template" ? w.base.id : CUSTOMIZATIONS.find((c) => c.id === w.base.id)?.templateId))!;
+    const st = w.base.kind === "customization" ? CUSTOMIZATIONS.find((c) => c.id === w.base.id)! : SETUPS[0];
+    add("runSummary", w, PROJECTS, [...slots, { key: "app:obsidian", kind: "obsidian", label: "Obsidian", appId: "Obsidian", iconUrl: "" }]);
+    add("workspaceFor", w, r, st, { tz: "Pacific/Fiji", secrets: ["github_token"] });
+    add("workspaceFor", w, r, st, {});
+    add("wallpaperExt", w.wallpaper);
+  }
+  for (const id of ["anthropic.claude-code", "a.b.c", "nodot", "a.$(x)", ""]) add("isExtensionId", id);
+  add("knownWebapps", [...SETUPS, ...CUSTOMIZATIONS], BROWSERS);
+  for (const [n, e] of [["work", undefined], [" WORK ", undefined], ["work", "work"], ["new", undefined]] as [string, string?][]) add("named", n, V2, ...(e ? [e] : []));
+  add("stacks", { ...LIB, wadspaces: V2 });
+  for (const [n, e] of [["dev", undefined], ["Dev plus", "dev-plus"], [" dev PLUS ", undefined], ["Gone", undefined], ["Fresh", undefined]] as [string, string?][]) add("nameTaken", n, LIB, ...(e ? [e] : []));
+  const signins = [{ id: "s-obs", name: "Notes", app: "obsidian" }, { id: "s-web", name: "Google", app: "web" }];
+  const opts = { owner: "me", now: "2026-10-11T00:00:00.000Z", signins, legacyImage: null };
+  for (const w of WADSPACES) {
+    add("migrateWadspaceV1", w, LIB, opts);
+    add("migrateWadspaceV1", w, { templates: [], customizations: [] }, { ...opts, legacyImage: `localhost/wadspaces-${w.id}:latest`, projects: ["notes"] });
+  }
+  for (const p of presets()) add("migrateWadspaceV1", presetWadspace(p.id), LIB, opts);
+  add("migrateWadspaceV1", { id: "x", name: "", description: "" }, LIB, opts);
 
   // tar
   add("tar", [

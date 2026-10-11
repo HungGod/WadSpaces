@@ -31,7 +31,7 @@ fn custom_icon(icon: &Value) -> Option<String> {
 }
 
 /// The site a web icon opens: its own url, else the domain of its favicon URL.
-fn site_of(icon: &Value) -> Option<String> {
+pub(crate) fn site_of(icon: &Value) -> Option<String> {
     if let Some(u) = icon.get("url").filter(|u| js::truthy(u)) {
         return Some(js::string(u));
     }

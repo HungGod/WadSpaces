@@ -10,6 +10,11 @@
 /// A web app's kind of sign-in.
 pub const WEB: &str = "web";
 
+/// The kinds a Builder slot can keep, besides [`WEB`]. (GitHub Copilot isn't
+/// one: VS Code keeps its GitHub session in state.vscdb with the rest of its
+/// global state, so it can't be kept apart; it signs in inside each wadspace.)
+pub const SLOT_KINDS: &[&str] = &[WEB, "obsidian", "steam", "vscode-claude-code", "vscode-codex"];
+
 /// Where a wadspace sees each sign-in it mounts: `<MOUNT_ROOT>/<id>`.
 pub const MOUNT_ROOT: &str = "/run/wadspaces-signins";
 
@@ -26,6 +31,15 @@ pub fn paths_for(app: &str) -> Option<&'static [&'static str]> {
         // The Obsidian account (Sync, Publish) is in the app's local storage.
         "obsidian" => &[".config/obsidian/Local Storage/"],
         "claude-code" => &[".claude/.credentials.json", ".claude.json"],
+        // The Builder's kinds (catalog.json's `secret`). VS Code's Claude Code
+        // extension runs the same CLI, so the same files, and the whole
+        // folder: it keeps its settings beside the login.
+        "vscode-claude-code" => &[".claude/", ".claude.json"],
+        // Codex (the openai.chatgpt extension): auth.json and its config.
+        "vscode-codex" => &[".codex/"],
+        // Steam's login (config.vdf, loginusers.vdf, registry.vdf) and each
+        // account's settings; the games stay in the wadspace.
+        "steam" => &[".steam/", ".local/share/Steam/config/", ".local/share/Steam/userdata/"],
         _ => return None,
     })
 }
@@ -68,7 +82,7 @@ mod tests {
         ] {
             assert!(!is_path(bad), "{bad:?}");
         }
-        for app in ["vscode", "cursor", "obsidian", "claude-code"] {
+        for app in ["vscode", "cursor", "obsidian", "claude-code", "vscode-claude-code", "vscode-codex", "steam"] {
             assert!(paths_for(app).unwrap().iter().all(|p| is_path(p)), "{app}");
         }
         assert!(paths_for("github").is_none());

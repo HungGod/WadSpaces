@@ -15,6 +15,8 @@ import * as projects from "./projects";
 import { presetProjects, presetWadspace } from "./presets";
 import { baseImageFor, fromWaddSpec, newSpec, resolveFeatures, slugify, toWaddSpec, validate, volumesFor } from "./spec";
 import { tar } from "./tar";
+import { call } from "./wasm";
+import * as layers from "./layers";
 
 const FILE = fileURLToPath(new URL("../../../../fixtures/core/goldens.json", import.meta.url));
 
@@ -87,6 +89,45 @@ const IMPL: Record<string, Fn> = {
   projectForRepo: projects.projectForRepo,
   findProject: projects.findProject,
   tar,
+  // the Builder's layers and catalog (the data itself is JSON: catalog.ts)
+  catalog: (() => call("catalog")) as Fn,
+  starters: (() => call("starters")) as Fn,
+  signInKinds: layers.signInKinds,
+  emptySetup: layers.emptySetup,
+  setupOf: layers.setupOf,
+  sameSetup: layers.sameSetup,
+  webappId: layers.webappId,
+  webappIcon: layers.webappIcon,
+  imageKey: layers.imageKey,
+  imageRef: layers.imageRef,
+  resolve: layers.resolve,
+  slotsFor: layers.slotsFor,
+  browserSlots: layers.browserSlots,
+  newSecretName: layers.newSecretName,
+  defaultBrowserSecretName: layers.defaultBrowserSecretName,
+  fits: layers.fits,
+  kindOfSlotKey: layers.kindOfSlotKey,
+  secretUse: layers.secretUse,
+  opensFolders: layers.opensFolders,
+  desktopFor: layers.desktopFor,
+  startMenuFor: layers.startMenuFor,
+  bootables: layers.bootables,
+  layoutJsonFor: layers.layoutJsonFor,
+  isExtensionId: layers.isExtensionId,
+  templateDockerfile: layers.templateDockerfile,
+  customizationDockerfile: layers.customizationDockerfile,
+  templateLayer: layers.templateLayer,
+  customizationLayer: layers.customizationLayer,
+  wallpaperExt: layers.wallpaperExt,
+  runSummary: layers.runSummary,
+  workspaceFor: layers.workspaceFor,
+  knownWebapps: layers.knownWebapps,
+  named: layers.named,
+  stacks: layers.stacks,
+  nameTaken: layers.nameTaken,
+  importable: layers.importable,
+  importInto: layers.importInto,
+  migrateWadspaceV1: layers.migrateWadspaceV1,
 };
 
 export function run(fn: string, args: unknown[]): unknown {

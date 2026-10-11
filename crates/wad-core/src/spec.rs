@@ -12,6 +12,10 @@ pub const FEATURES: &[&str] = &[
     "python",
     "nodejs",
     "firebase",
+    "gcloud",
+    "rust",
+    "go",
+    "java",
     "electron-deps",
     "vscode",
     "claude-code",
@@ -20,6 +24,12 @@ pub const FEATURES: &[&str] = &[
     "android-studio",
     "hplip",
     "obsidian",
+    "libresprite",
+    "audacity",
+    "krita",
+    "openshot",
+    "steam",
+    "dolphin",
 ];
 
 pub const DEFAULT_BASE_IMAGE: &str = "localhost/wadspaces-base:trixie";

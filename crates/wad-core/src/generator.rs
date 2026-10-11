@@ -15,7 +15,7 @@ use crate::js;
 use crate::spec::{display_of, resolve_features, to_wadd_spec, volumes_for};
 
 /// A shell-safe double-quoted string (Dockerfile ENV and RUN arguments).
-fn q(s: &str) -> String {
+pub(crate) fn q(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {
