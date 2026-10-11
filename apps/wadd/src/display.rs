@@ -28,6 +28,17 @@ pub trait Display: Send + Sync + 'static {
     async fn show_shell(&self);
     /// Focuses a native workspace's window; false if it has none.
     async fn show_native(&self, id: &str) -> bool;
+    /// The screen's logical size; None without a compositor.
+    async fn screen(&self) -> Option<wad_proto::v1::Screen> {
+        None
+    }
+}
+
+/// The first active output's logical size and scale (sway's get_outputs).
+pub fn screen_of(outputs: &serde_json::Value) -> Option<wad_proto::v1::Screen> {
+    let o = outputs.as_array()?.iter().find(|o| o["active"] == true)?;
+    let (w, h) = (o["rect"]["width"].as_u64()?, o["rect"]["height"].as_u64()?);
+    Some(wad_proto::v1::Screen { width: w as u32, height: h as u32, scale: o["scale"].as_f64().unwrap_or(1.0) })
 }
 
 /// Who a window belongs to, and what to do when one comes or goes (the view).
@@ -207,6 +218,10 @@ impl SwayDisplay {
 
 #[async_trait]
 impl Display for SwayDisplay {
+    async fn screen(&self) -> Option<wad_proto::v1::Screen> {
+        screen_of(&self.sway.outputs().await.ok()?)
+    }
+
     async fn show_shell(&self) {
         self.cmd(&format!("workspace {SHELL}")).await;
     }
@@ -217,5 +232,19 @@ impl Display for SwayDisplay {
             Some(c) => self.cmd(&format!("[con_id={c}] focus")).await,
             None => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod screen_tests {
+    #[test]
+    fn the_screen_is_the_first_active_outputs_logical_size() {
+        let outputs = serde_json::json!([
+            {"name": "eDP-1", "active": false, "rect": {"width": 1, "height": 1}, "scale": 1.0},
+            {"name": "eDP-2", "active": true, "rect": {"width": 1500, "height": 1000}, "scale": 2.0},
+        ]);
+        let s = super::screen_of(&outputs).unwrap();
+        assert_eq!((s.width, s.height, s.scale), (1500, 1000, 2.0));
+        assert!(super::screen_of(&serde_json::json!([])).is_none());
     }
 }

@@ -108,7 +108,8 @@ describe("quadlet", () => {
     const got = quadlet({ id: "a", name: "A", image: "i", port: 3100, projects: [{ id: "wrtvault0000000000ab", mount: "Writing" }] }, "/srv/p", "/srv/s");
     expect(got).toContain("Volume=/srv/p/wrtvault0000000000ab:/config/Desktop/Writing:rw,z\n");
     expect(got).toContain("Volume=/srv/s/extra/a:/run/wadspaces-extra:ro,z\n");
-    expect(quadlet({ id: "a", name: "A", image: "i", port: 3100, projects: [] })).not.toContain("wadspaces-extra");
+    // Mounted for every container, projects or not: its wallpaper is there too.
+    expect(quadlet({ id: "a", name: "A", image: "i", port: 3100, projects: [] })).toContain("Volume=/var/lib/wadspaces/extra/a:/run/wadspaces-extra:ro,z\n");
   });
 
 });

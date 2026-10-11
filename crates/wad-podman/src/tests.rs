@@ -100,11 +100,14 @@ async fn images_containers_and_pulls() {
     assert_eq!(p.secret_value("nope").await.unwrap(), None);
     let mut out = vec![];
     let args = serde_json::json!({"BASE_IMAGE": "localhost/wadspaces-base:trixie"}).as_object().unwrap().clone();
-    let id =
-        p.build(b"tar".to_vec(), "localhost/wadspaces-ok:latest", &args, |l| out.push(l.to_string())).await.unwrap();
+    let labels = serde_json::json!({"io.wadspaces.layer": "template:x"}).as_object().unwrap().clone();
+    let id = p
+        .build(b"tar".to_vec(), "localhost/wadspaces-ok:latest", &args, &labels, |l| out.push(l.to_string()))
+        .await
+        .unwrap();
     assert_eq!(id, "f".repeat(64));
     assert_eq!(out, ["STEP 1/2: FROM localhost/wadspaces-base:trixie", "STEP 2/2: COPY root/ /", "--> abc"]);
-    let e = p.build(b"tar".to_vec(), "localhost/wadspaces-bad:latest", &args, |_| {}).await.unwrap_err();
+    let e = p.build(b"tar".to_vec(), "localhost/wadspaces-bad:latest", &args, &labels, |_| {}).await.unwrap_err();
     assert_eq!(e.to_string(), "RUN failed: exit status 1");
     let mut lines = vec![];
     p.pull("ghcr.io/o/ok:1", |l| lines.push(l.to_string())).await.unwrap();
@@ -146,4 +149,12 @@ fn container_output_frames() {
     framed.extend_from_slice(b"oops");
     assert_eq!(demux(&framed), "hello\noops");
     assert_eq!(demux(b"plain text\n"), "plain text\n");
+}
+
+#[test]
+fn image_times_are_read_as_unix_seconds() {
+    assert_eq!(crate::rfc3339_secs("1970-01-01T00:00:00Z"), Some(0.0));
+    assert_eq!(crate::rfc3339_secs("2026-10-11T19:05:00Z"), Some(1_791_745_500.0));
+    assert_eq!(crate::rfc3339_secs("2026-10-11T19:05:00.5+12:00"), Some(1_791_702_300.5));
+    assert_eq!(crate::rfc3339_secs("nonsense"), None);
 }

@@ -64,6 +64,7 @@ fn workspace(id: &str) -> Workspace {
         shm_size: None,
         projects: vec![],
         signins: vec![],
+        ephemeral: false,
     }
 }
 

@@ -153,6 +153,31 @@ pub struct CarouselItem {
     pub icon: Option<String>,
     #[serde(default = "yes")]
     pub running: bool,
+    /// "home" (WadSpaces), "space" (a wadspace) or "app" (WadBrowser, the
+    /// terminal: what runs on the machine itself).
+    #[serde(default)]
+    pub kind: String,
+    /// Its Super+number, while it runs.
+    #[serde(default)]
+    pub number: Option<u8>,
+}
+
+impl CarouselItem {
+    pub fn is_app(&self) -> bool {
+        self.kind == "app"
+    }
+
+    /// "Super+3" under its name.
+    pub fn shortcut(&self) -> Option<String> {
+        self.number.map(|n| format!("Super+{n}"))
+    }
+}
+
+/// Where the switcher's divider goes: before the first app that follows a
+/// space (wadd lists the spaces first, then what runs on the machine).
+pub fn divider_at(items: &[CarouselItem]) -> Option<usize> {
+    let first_app = items.iter().position(CarouselItem::is_app)?;
+    (first_app > 0 && items[..first_app].iter().any(|i| i.kind == "space")).then_some(first_app)
 }
 
 /// wadd's View: `{"kind":"home"}` or `{"kind":"workspace","id":...}`.
@@ -329,6 +354,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!((c.items[0].view.as_str(), c.items[1].view.as_str()), ("home", "writing"));
+        assert_eq!((c.items[1].kind.as_str(), c.items[1].number), ("", None), "an older wadd's");
         let v: ViewState =
             serde_json::from_str(r#"{"view":{"kind":"workspace","id":"writing"},"pending":null,"nativeDisplay":true}"#)
                 .unwrap();
@@ -363,5 +389,35 @@ mod tests {
         }
         let names: Vec<String> = notespaces(&spaces).into_iter().map(|(_, n)| n).collect();
         assert_eq!(names, ["Default", "IQ Dev", "Writing"]);
+    }
+
+    #[test]
+    fn the_switcher_lists_spaces_then_apps_with_their_numbers() {
+        let c: Carousel = serde_json::from_str(
+            r#"{"open":true,"index":2,"items":[
+                {"view":{"kind":"home"},"name":"WadSpaces","icon":null,"running":true,"kind":"home","number":null},
+                {"view":{"kind":"workspace","id":"academy"},"name":"Academy","running":true,"kind":"space","number":1},
+                {"view":{"kind":"workspace","id":"novel"},"name":"Novel","running":true,"kind":"space","number":2},
+                {"view":{"kind":"workspace","id":"browser-mail"},"name":"Mail","running":true,"kind":"app","number":3},
+                {"view":{"kind":"workspace","id":"terminal"},"name":"WadTerminal","running":true,"kind":"app","number":4}]}"#,
+        )
+        .unwrap();
+        assert_eq!(divider_at(&c.items), Some(3));
+        let shortcuts: Vec<Option<String>> = c.items.iter().map(CarouselItem::shortcut).collect();
+        assert_eq!(
+            shortcuts,
+            [None, Some("Super+1".into()), Some("Super+2".into()), Some("Super+3".into()), Some("Super+4".into())]
+        );
+        // Something stopped: wadd numbers what's left, and the divider follows.
+        let mut after = c.items.clone();
+        after.remove(1);
+        for (i, it) in after.iter_mut().skip(1).enumerate() {
+            it.number = Some(i as u8 + 1);
+        }
+        assert_eq!(divider_at(&after), Some(2));
+        assert_eq!(after.iter().map(|i| i.number).collect::<Vec<_>>(), [None, Some(1), Some(2), Some(3)]);
+        // No spaces running: apps alone, no divider (nor with spaces alone).
+        assert_eq!(divider_at(&[c.items[0].clone(), c.items[3].clone()]), None);
+        assert_eq!(divider_at(&c.items[..3]), None);
     }
 }

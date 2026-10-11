@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 use wad_input::Action;
 use wad_proto::v1::{
-    Carousel, CarouselItem, Display as Shown, Event, Phase, Session, SessionMode, View as V, ViewState,
+    Carousel, CarouselItem, Display as Shown, Event, Kind, Phase, Session, SessionMode, View as V, ViewState, Workspace,
 };
 use wad_proto::{ApiError, ErrorCode};
 use wad_sway::Owner;
@@ -138,6 +138,11 @@ impl View {
     }
 
     // ------------------------------------------------------------- state
+    /// The screen's logical size, for laying a desktop out at it.
+    pub async fn screen(&self) -> Option<wad_proto::v1::Screen> {
+        self.display.screen().await
+    }
+
     pub fn state(&self) -> ViewState {
         let i = self.inner.lock().unwrap();
         ViewState {
@@ -285,39 +290,52 @@ impl View {
     }
 
     // ---------------------------------------------------------- switcher
-    /// What Super+Tab offers: only what runs (a stopped wadspace, terminal or
-    /// browser drops out). During a focus session that's the running picks
-    /// alone (WadSpaces Client joins once the time is up); otherwise
-    /// WadSpaces Client and everything that runs, picked or not.
-    /// Most recently used first, the current view leading.
-    pub fn carousel_items(&self) -> Vec<CarouselItem> {
-        let (session, mru, current) = {
-            let i = self.inner.lock().unwrap();
-            (i.session.clone(), i.mru.clone(), i.view.clone())
-        };
+    /// What runs, in Super+N's order: the spaces (container workspaces) in
+    /// the order they started, then what runs on the machine itself (apps:
+    /// WadBrowsers, the terminal), likewise. During a focus session only its
+    /// picks (the only ones allowed on screen).
+    pub fn running_items(&self) -> Vec<Workspace> {
         let locked = self.locked();
-        let mut entries: Vec<CarouselItem> = vec![];
-        if !locked {
-            entries.push(CarouselItem { view: V::Home, name: "WadSpaces".into(), icon: None, running: true });
+        let picks = self.session_ids();
+        let list = self.registry.workspaces();
+        let up: Vec<Workspace> = self
+            .registry
+            .running_order()
+            .into_iter()
+            .filter_map(|id| list.iter().find(|w| w.id == id && w.enabled).cloned())
+            .filter(|w| self.running(&w.id) && (!locked || picks.contains(&w.id)))
+            .collect();
+        let (spaces, apps): (Vec<Workspace>, Vec<Workspace>) = up.into_iter().partition(|w| w.kind == Kind::Container);
+        spaces.into_iter().chain(apps).collect()
+    }
+
+    /// What Super+Tab offers: WadSpaces Client (not during a focus session's
+    /// time), then what runs as `running_items` orders it, each with its
+    /// Super+number. A fixed strip: Super+Tab steps along it from what's on
+    /// screen.
+    pub fn carousel_items(&self) -> Vec<CarouselItem> {
+        let mut items: Vec<CarouselItem> = vec![];
+        if !self.locked() {
+            items.push(CarouselItem {
+                view: V::Home,
+                name: "WadSpaces".into(),
+                icon: None,
+                running: true,
+                kind: "home".into(),
+                number: None,
+            });
         }
-        for ws in self.registry.workspaces().into_iter().filter(|w| w.enabled) {
-            let allowed = !locked || session.as_ref().is_some_and(|s| s.workspaces.contains(&ws.id));
-            if allowed && self.running(&ws.id) {
-                entries.push(CarouselItem {
-                    view: V::Workspace(ws.id.clone()),
-                    name: ws.name.clone(),
-                    icon: ws.icon.as_ref().map(|_| format!("/v1/workspaces/{}/icon", ws.id)),
-                    running: true,
-                });
-            }
+        for (n, ws) in self.running_items().into_iter().enumerate() {
+            items.push(CarouselItem {
+                view: V::Workspace(ws.id.clone()),
+                name: ws.name.clone(),
+                icon: ws.icon.as_ref().map(|_| format!("/v1/workspaces/{}/icon", ws.id)),
+                running: true,
+                kind: if ws.kind == Kind::App { "app" } else { "space" }.into(),
+                number: (n < 9).then_some(n as u8 + 1),
+            });
         }
-        let mut order: Vec<V> = mru.into_iter().filter(|v| entries.iter().any(|e| e.view == *v)).collect();
-        order.extend(entries.iter().map(|e| e.view.clone()).filter(|v| !order.contains(v)).collect::<Vec<_>>());
-        if order.contains(&current) && order[0] != current {
-            order.retain(|v| *v != current);
-            order.insert(0, current);
-        }
-        order.iter().filter_map(|v| entries.iter().find(|e| e.view == *v).cloned()).collect()
+        items
     }
 
     fn publish_carousel(&self) {
@@ -340,7 +358,10 @@ impl View {
                     if items.len() < 2 {
                         return;
                     }
-                    let index = if forward { 1 } else { items.len() as u32 - 1 };
+                    // From what's on screen, one along.
+                    let n = items.len();
+                    let at = items.iter().position(|it| it.view == i.view).unwrap_or(0);
+                    let index = (if forward { (at + 1) % n } else { (at + n - 1) % n }) as u32;
                     // The HUD draws it above whatever is on screen.
                     i.carousel = Some(Carousel { open: true, items, index });
                 }
@@ -402,8 +423,12 @@ impl View {
                 self.bus.publish(Event::Shortcut { name: b });
                 Ok(())
             }
-            Action::Bound(b) => match b.strip_prefix("switch:") {
-                Some(id) => self.switch(id),
+            // Super+N: the n-th of what runs, if there's one there.
+            Action::Bound(b) => match b.strip_prefix("switch:running:").and_then(|n| n.parse::<usize>().ok()) {
+                Some(n) => match self.running_items().get(n.wrapping_sub(1)) {
+                    Some(ws) => self.switch(&ws.id),
+                    None => Ok(()),
+                },
                 None => Ok(()),
             },
         };
@@ -647,7 +672,7 @@ impl View {
     }
 
     /// Super+key bindings: WadSpaces Client's keys, the clipboard history's, and
-    /// each workspace's hotkey.
+    /// Super+1..9 for the 1st..9th of what runs (resolved when pressed).
     pub fn bindings(&self, keys: &wad_config::Keys) -> std::collections::HashMap<u16, String> {
         let mut b = std::collections::HashMap::new();
         for (list, name) in [(&keys.home, "home"), (&keys.clipboard, "clipboard")] {
@@ -660,11 +685,9 @@ impl View {
                 }
             }
         }
-        for ws in self.registry.workspaces().into_iter().filter(|w| w.enabled) {
-            if let Some(h) = ws.hotkey
-                && let Ok(c) = wad_input::keys::code(&h.to_string())
-            {
-                b.insert(c, format!("switch:{}", ws.id));
+        for n in 1..=9u8 {
+            if let Ok(c) = wad_input::keys::code(&n.to_string()) {
+                b.insert(c, format!("switch:running:{n}"));
             }
         }
         b

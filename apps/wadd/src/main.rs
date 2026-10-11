@@ -96,8 +96,7 @@ fn keys(seconds: u64, grab: bool) -> ExitCode {
         }
     }
     for n in 1..=9u8 {
-        bindings
-            .insert(wad_input::keys::code(&n.to_string()).expect("digits are keys"), format!("switch:<hotkey {n}>"));
+        bindings.insert(wad_input::keys::code(&n.to_string()).expect("digits are keys"), format!("switch:running:{n}"));
     }
     let block = cfg.block.iter().filter_map(|c| wad_input::Chord::parse(c).ok()).collect();
     let router = wad_input::KeyRouter::new(bindings, block, false);

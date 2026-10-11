@@ -186,6 +186,7 @@ button.forget:hover { color: @fg; background: @surface3; }
 .item .icon { background: @surface3; border-radius: 16px; min-width: 64px; min-height: 64px; font-size: 26px; font-weight: 700; color: @fg; }
 .item .name { color: @fg; font-size: 13px; font-weight: 500; margin-top: 8px; }
 .item .state { color: @faint; font-size: 11px; }
+.switcher .divider { background: @line_strong; min-width: 1px; margin: 10px 6px; }
 
 /* WadNotes (notes/): the panel on the right, its cards, and reminders. */
 .pill.on { background: @accent_soft; border-color: alpha(@accent, 0.5); }

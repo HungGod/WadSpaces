@@ -23,7 +23,7 @@ pub enum Profile {
 }
 
 /// GET /v1/machine
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineInfo {
     pub name: String,
@@ -31,6 +31,19 @@ pub struct MachineInfo {
     pub profile: Profile,
     /// When this wadd started (Unix seconds).
     pub started_at: u64,
+    /// The screen's logical size (what the Builder lays a desktop out at);
+    /// None while there's no compositor to ask.
+    #[serde(default)]
+    pub screen: Option<Screen>,
+}
+
+/// A screen's logical size, and its scale.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Screen {
+    pub width: u32,
+    pub height: u32,
+    pub scale: f64,
 }
 
 /// GET /v1/logs: one line of wadd's own log (redacted).
@@ -130,7 +143,8 @@ pub struct ViewState {
     pub native_display: bool,
 }
 
-/// The Super+Tab switcher, most recently used first.
+/// The Super+Tab switcher: WadSpaces, then the spaces running, then what runs
+/// on the machine, each in the order it started (Super+N's order).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Carousel {
@@ -148,6 +162,13 @@ pub struct CarouselItem {
     /// The workspace's icon (a /v1 path), if it has one.
     pub icon: Option<String>,
     pub running: bool,
+    /// "home" (WadSpaces), "space" (a wadspace) or "app" (WadBrowser, the
+    /// terminal: what runs on the machine itself).
+    #[serde(default)]
+    pub kind: String,
+    /// Its Super+number: its place among what runs (spaces, then apps).
+    #[serde(default)]
+    pub number: Option<u8>,
 }
 
 /// POST /v1/session
@@ -247,6 +268,10 @@ pub struct Workspace {
     /// The saved sign-ins it mounts (from its design).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signins: Vec<WorkspaceSignIn>,
+    /// A throwaway run (or a WadBrowser setup run once): never saved
+    /// anywhere, and removed, with its extra folder, once it stops.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ephemeral: bool,
 }
 
 /// A saved sign-in a workspace mounts, for one of its apps.
@@ -264,6 +289,14 @@ pub struct WorkspaceSignIn {
     /// Its name, for making it on a machine that hasn't got it yet.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
+    /// Its kind ("web", "obsidian", "steam", "vscode-claude-code", ...), for
+    /// making it here: the Builder's slots say (an extension's app is vscode).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
+    /// The Builder's slot it fills ("web:<id>", "ext:<id>", "app:<id>"): one
+    /// sign-in per slot (two extensions of one app may each have one).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub slot: String,
 }
 
 /// What kind of sign-in: a WadBrowser profile, for any web app.
@@ -287,7 +320,8 @@ pub struct SignIn {
     pub size: u64,
     /// When anything in it last changed (epoch milliseconds); None while empty.
     pub changed_at: Option<i64>,
-    /// The workspaces here that mount it.
+    /// The workspaces here that mount it, and the WadBrowser setups that use
+    /// it (as `browser-<id>`, the workspace each launches as).
     pub used_by: Vec<String>,
     /// Those of them running now.
     pub in_use: Vec<String>,
@@ -539,7 +573,115 @@ pub struct ProjectDeleted {
     pub purged: bool,
 }
 
-/// POST /v1/launches: open a workspace with these projects.
+/// POST /v1/launches: what to launch. A workspace (with its projects), a
+/// throwaway run of one, a WadBrowser setup, or the terminal. A body with no
+/// `kind` is the older shape: a workspace ([`LaunchRequest`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum LaunchItem {
+    Workspace {
+        workspace: String,
+        #[serde(default)]
+        projects: Vec<String>,
+        #[serde(default)]
+        restart: bool,
+        #[serde(default)]
+        background: bool,
+    },
+    /// A wadspace launched once with other construction options, saved nowhere.
+    Run {
+        /// The wadspace it's a run of.
+        from: String,
+        overrides: RunOverrides,
+        #[serde(default)]
+        background: bool,
+    },
+    /// WadBrowser set up as the launcher says, on the machine beside the spaces.
+    Browser {
+        setup: BrowserSetup,
+        /// A saved setup's id: it launches as `browser-<id>`; none: a run of its own.
+        #[serde(default)]
+        saved_id: Option<String>,
+        #[serde(default)]
+        background: bool,
+    },
+    Terminal {
+        #[serde(default)]
+        background: bool,
+    },
+}
+
+/// POST /v1/launches takes either shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(untagged)]
+pub enum LaunchBody {
+    Item(LaunchItem),
+    Workspace(LaunchRequest),
+}
+
+impl LaunchBody {
+    pub fn item(self) -> LaunchItem {
+        match self {
+            LaunchBody::Item(i) => i,
+            LaunchBody::Workspace(r) => LaunchItem::Workspace {
+                workspace: r.workspace,
+                projects: r.projects,
+                restart: r.restart,
+                background: r.background,
+            },
+        }
+    }
+}
+
+/// What a throwaway run has instead of its wadspace's own.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunOverrides {
+    /// The wallpaper (none: the wadspace's own).
+    #[serde(default)]
+    pub wallpaper: Option<WallpaperUpload>,
+    #[serde(default)]
+    pub projects: Vec<String>,
+    /// Its sign-ins, by slot; a slot left out keeps nothing.
+    #[serde(default)]
+    pub signins: Vec<WorkspaceSignIn>,
+}
+
+/// PUT /v1/workspaces/{id}/wallpaper: a picture (WadSpaces draws gradients
+/// and colours to a PNG), mounted in at /run/wadspaces-extra/wallpaper.<ext>.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WallpaperUpload {
+    /// "png" or "jpg".
+    pub ext: String,
+    /// The image, base64.
+    pub data: String,
+}
+
+/// A WadBrowser setup: WadBrowser or Focus, and web apps, each in a window of
+/// its own with its saved sign-in (or none: nothing kept).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserSetup {
+    pub name: String,
+    /// "browser" or "focus".
+    pub mode: String,
+    #[serde(default)]
+    pub webapps: Vec<SetupWebApp>,
+    /// Sign-ins by web app (`app`: the web app's id; `web` is implied).
+    #[serde(default)]
+    pub signins: Vec<WorkspaceSignIn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupWebApp {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+}
+
+/// The older POST /v1/launches body: open a workspace with these projects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchRequest {
@@ -706,6 +848,40 @@ impl BuildStatus {
     }
 }
 
+/// POST /v1/images/build: build a layer's image here. A customization's
+/// needs its template's: built first when it's missing or out of date.
+/// Not in the TypeScript bindings: the documents are the UI's own
+/// (src/core/layers.ts), which wadd reads with wad-core.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerBuildRequest {
+    /// "template:<id>" or "custom:<id>".
+    pub layer: String,
+    pub template: serde_json::Value,
+    #[serde(default)]
+    pub customization: Option<serde_json::Value>,
+}
+
+/// GET /v1/images: a layer's image here, from its labels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageRow {
+    /// "template:<id>" or "custom:<id>".
+    pub layer: String,
+    #[serde(rename = "ref")]
+    pub image_ref: String,
+    /// podman's id for it.
+    pub id: String,
+    /// The sha of the build folder it was built from (wad-core's layers).
+    pub dockerfile_sha: String,
+    /// Unix seconds.
+    pub built_at: f64,
+    pub size_mb: f64,
+    /// The id of the image it was built FROM, as it was then (a template's
+    /// image rebuilt since makes its customizations "changed").
+    pub from: String,
+}
+
 /// Something in the design the build leaves out, and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -738,6 +914,9 @@ pub struct Build {
     pub restart_required: bool,
     pub skipped: Vec<Skipped>,
     pub line_count: u64,
+    /// A layer's build ("template:<id>" or "custom:<id>"); none: a design's.
+    #[serde(default)]
+    pub layer: Option<String>,
 }
 
 /// GET /v1/builds/{id}?since=n, and build events: the job, and its log from

@@ -310,9 +310,9 @@ fn workspace_unit(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: 
         let path = js::string(&s["path"]);
         lines.push(format!("Volume={path}:{}/{}:rw,z", crate::signins::MOUNT_ROOT, js::field(s, "id")));
     }
-    if !projects.is_empty() || !signins.is_empty() {
-        lines.push(format!("Volume={state_dir}/extra/{id}:/run/wadspaces-extra:ro,z"));
-    }
+    // Its extra folder, always: projects.json, signins.json and the wallpaper
+    // it's started with (a wadspace's is mounted, not in its image).
+    lines.push(format!("Volume={state_dir}/extra/{id}:/run/wadspaces-extra:ro,z"));
     // The kiosk session's sway (uid 1000) is the compositor it draws on.
     if native {
         lines.push("Volume=/run/user/1000:/run/wadspaces-display".into());

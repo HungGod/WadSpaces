@@ -71,6 +71,7 @@ async fn setup_in(dir: Arc<tempfile::TempDir>, list: Vec<Workspace>, fake: Fake)
         version: "0".into(),
         profile: wad_proto::v1::Profile::User,
         started_at: 0,
+        screen: None,
     });
     let reg = Registry::new(
         Arc::new(fake.clone()),
@@ -176,14 +177,14 @@ async fn the_switcher_without_a_session_is_wad_creator_and_what_runs() {
     assert_eq!(s.view.state().view, V::Home); // nothing to switch between: it doesn't open
     s.view.switch("a").unwrap();
     settle(&s).await;
-    assert_eq!(items(&s), [wsv("a"), V::Home]);
-    s.view.carousel_step(true); // lands on where you came from
+    assert_eq!(items(&s), [V::Home, wsv("a")]);
+    s.view.carousel_step(true); // one along from what's shown (round to the start)
     s.view.carousel_commit();
     assert_eq!(s.view.current(), V::Home);
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_switcher_starts_on_the_view_before_and_commits() {
+async fn the_switcher_is_a_strip_in_super_ns_order() {
     let s = abc().await;
     s.view.session_begin(&["a".into(), "b".into()], None).unwrap();
     for id in ["a", "b"] {
@@ -191,11 +192,13 @@ async fn the_switcher_starts_on_the_view_before_and_commits() {
         settle(&s).await;
     }
     assert_eq!(s.view.current(), wsv("b"));
-    let its = items(&s);
-    assert_eq!(its[..2], [wsv("b"), wsv("a")]);
-    s.view.carousel_step(true);
-    s.view.carousel_step(true);
-    s.view.carousel_step(false);
+    assert_eq!(items(&s), [V::Home, wsv("a"), wsv("b")]);
+    let numbers: Vec<Option<u8>> = s.view.carousel_items().iter().map(|i| i.number).collect();
+    assert_eq!(numbers, [None, Some(1), Some(2)]);
+    s.view.carousel_step(true); // from b, round to WadSpaces
+    s.view.carousel_step(true); // then a
+    s.view.carousel_step(true); // then b
+    s.view.carousel_step(false); // back to a
     s.view.carousel_commit();
     assert_eq!(s.view.current(), wsv("a"));
 }
@@ -209,10 +212,11 @@ async fn only_what_runs_is_on_the_switcher() {
     s.view.switch("a").unwrap();
     settle(&s).await;
     // A stopped pick drops out; one that runs without being picked is there.
-    assert_eq!(items(&s), [wsv("a"), V::Home]);
+    assert_eq!(items(&s), [V::Home, wsv("a")]);
     s.reg.start("c").unwrap();
     settle(&s).await;
     assert_eq!(sorted(items(&s)), sorted(vec![wsv("a"), V::Home, wsv("c")]));
+    assert_eq!(items(&s), [V::Home, wsv("a"), wsv("c")], "in the order they started");
     s.view.carousel_step(false); // Shift+Tab: from the end
     s.view.carousel_cancel();
     assert_eq!(s.view.current(), wsv("a"));
@@ -394,11 +398,13 @@ async fn time_running_out_says_so() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn super_keys_are_bound_to_hotkeys_and_home() {
+async fn super_keys_are_bound_to_whats_running_and_home() {
     let s = abc().await;
     let b = s.view.bindings(&wad_config::Keys::for_profile(wad_config::Profile::System));
-    assert_eq!(b[&2], "switch:a");
-    assert_eq!(b[&3], "switch:b");
+    // Super+1..9 whatever runs (a, b and c have fixed hotkeys: no longer read).
+    assert_eq!(b[&2], "switch:running:1");
+    assert_eq!(b[&3], "switch:running:2");
+    assert_eq!(b[&10], "switch:running:9");
     assert_eq!(b[&11], "home");
     assert_eq!(b[&57], "home");
     assert_eq!(b[&47], "clipboard"); // Super+V
@@ -605,4 +611,44 @@ async fn an_app_can_be_a_focus_pick_and_is_locked_out_otherwise() {
     settle(&s).await;
     let e = s.view.switch("t").unwrap_err();
     assert_eq!(e.code, ErrorCode::Conflict);
+}
+
+#[tokio::test(start_paused = true)]
+async fn super_n_is_the_nth_of_whats_running_spaces_then_apps() {
+    let s = setup(vec![
+        stream("a", 3100, 1),
+        stream("b", 3101, 2),
+        stream("c", 3102, 3),
+        common::app("t", "/usr/bin/foot"),
+    ])
+    .await;
+    // Started: the terminal, then c, then a (b stays off).
+    s.reg.start("t").unwrap();
+    settle(&s).await;
+    for id in ["c", "a"] {
+        s.reg.start(id).unwrap();
+        settle(&s).await;
+    }
+    let order: Vec<String> = s.view.running_items().into_iter().map(|w| w.id).collect();
+    assert_eq!(order, ["c", "a", "t"], "spaces in the order they started, then apps");
+    let kinds: Vec<String> = s.view.carousel_items().into_iter().map(|i| i.kind).collect();
+    assert_eq!(kinds, ["home", "space", "space", "app"]);
+    // Super+2: the second; Super+5 with three running: nothing.
+    s.view.on_key(Action::Bound("switch:running:2".into()));
+    settle(&s).await;
+    assert_eq!(s.view.current(), wsv("a"));
+    s.view.on_key(Action::Bound("switch:running:5".into()));
+    settle(&s).await;
+    assert_eq!(s.view.current(), wsv("a"));
+    // c stops: a is Super+1 now, and the terminal Super+2.
+    s.view.stop("c").await.unwrap();
+    settle(&s).await;
+    s.view.on_key(Action::Bound("switch:running:2".into()));
+    settle(&s).await;
+    assert_eq!(s.view.current(), wsv("t"));
+    // In a focus session, only its picks are numbered.
+    s.view.session_begin(&["t".into()], Some(25)).unwrap();
+    settle(&s).await;
+    let numbered: Vec<(V, Option<u8>)> = s.view.carousel_items().into_iter().map(|i| (i.view, i.number)).collect();
+    assert_eq!(numbered, [(wsv("t"), Some(1))]);
 }

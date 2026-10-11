@@ -35,6 +35,7 @@ const WORKSPACE_KEYS: &[&str] = &[
     "kind",
     "exec",
     "signins",
+    "ephemeral",
 ];
 const DAEMON_KEYS: &[&str] = &[
     "bind",
@@ -232,7 +233,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
     };
 
     let mut workspaces = Vec::new();
-    let (mut ids, mut ports, mut hotkeys, mut names) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut ids, mut ports, mut names) = (Vec::new(), Vec::new(), Vec::new());
     for (i, raw) in data.get("workspaces").and_then(Value::as_array).cloned().unwrap_or_default().iter().enumerate() {
         let where_ = format!("workspaces[{i}]");
         let raw = raw.as_object().cloned().ok_or_else(|| err(format!("{where_}: not a mapping")))?;
@@ -263,10 +264,15 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
             if raw.get("display").is_some_and(|d| py_str(d) != "host") {
                 return Err(err(format!("{where_}: an app is shown on this screen (display must be 'host')")));
             }
-            for key in ["image", "port", "secrets", "volumes", "devices", "projects", "signins"] {
+            for key in ["image", "port", "secrets", "volumes", "devices", "projects"] {
                 if raw.get(key).is_some_and(crate::state::truthy) {
                     return Err(err(format!("{where_}: an app has no {key}")));
                 }
+            }
+            // A WadBrowser setup's web apps keep web sign-ins; nothing else does.
+            let web_only = |s: &Value| s.get("web").and_then(Value::as_bool) == Some(true);
+            if raw.get("signins").and_then(Value::as_array).is_some_and(|l| !l.iter().all(web_only)) {
+                return Err(err(format!("{where_}: an app keeps only web sign-ins (a WadBrowser's)")));
             }
         } else if !exec.is_empty() {
             return Err(err(format!("{where_}: only an app has exec")));
@@ -308,16 +314,11 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
         let signins = check_signins(raw.get("signins"), &where_)?;
         let enabled = raw.get("enabled").and_then(Value::as_bool).unwrap_or(true);
         let hotkey = int(raw.get("hotkey").filter(|h| !h.is_null()));
-        if let Some(h) = hotkey {
-            if !(1..=9).contains(&h) {
-                return Err(err(format!("{where_}: hotkey must be 1..9")));
-            }
-            if enabled && hotkeys.contains(&h) {
-                return Err(err(format!("{where_}: hotkey {h} already used")));
-            }
-            if enabled {
-                hotkeys.push(h);
-            }
+        // Kept for older files, never bound: Super+N follows what runs.
+        if let Some(h) = hotkey
+            && !(1..=9).contains(&h)
+        {
+            return Err(err(format!("{where_}: hotkey must be 1..9")));
         }
         let env = raw
             .get("env")
@@ -352,6 +353,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
             shm_size,
             projects,
             signins,
+            ephemeral: raw.get("ephemeral").and_then(Value::as_bool).unwrap_or(false),
         });
     }
     Ok(LegacyConfig { machine_name, daemon, cloud, workspaces })
@@ -397,7 +399,17 @@ fn check_projects(v: Option<&Value>, where_: &str) -> Result<Vec<MountedProject>
     Ok(out)
 }
 
-/// `[{id, app, web?, name?}]`: one sign-in per app, ids and apps as ids are.
+/// A Builder slot: "web:<id>", "ext:<marketplace id>" or "app:<id>".
+fn slot_ok(slot: &str) -> bool {
+    let Some((kind, rest)) = slot.split_once(':') else { return false };
+    matches!(kind, "web" | "ext" | "app")
+        && !rest.is_empty()
+        && rest.len() <= 120
+        && rest.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// `[{id, app, web?, name?, kind?, slot?}]`: one sign-in per slot (or per
+/// app, without one), ids, apps and kinds as ids are.
 fn check_signins(v: Option<&Value>, where_: &str) -> Result<Vec<WorkspaceSignIn>, Error> {
     let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(vec![]) };
     let list = v.as_array().ok_or_else(|| err(format!("{where_}: signins must be a list")))?;
@@ -408,27 +420,37 @@ fn check_signins(v: Option<&Value>, where_: &str) -> Result<Vec<WorkspaceSignIn>
             o.contains_key("id")
                 && o.contains_key("app")
                 && o.iter().all(|(k, v)| match k.as_str() {
-                    "id" | "app" | "name" => v.is_string(),
+                    "id" | "app" | "name" | "kind" | "slot" => v.is_string(),
                     "web" => v.is_boolean(),
                     _ => false,
                 })
         });
         if !shape_ok {
-            return Err(err(format!("{where_}: each sign-in is {{id, app, web?, name?}}, not {s}")));
+            return Err(err(format!("{where_}: each sign-in is {{id, app, web?, name?, kind?, slot?}}, not {s}")));
         }
         let o = o.unwrap();
         let (id, app) = (py_str(&o["id"]), py_str(&o["app"]));
         let name = o.get("name").map(py_str).unwrap_or_default();
         let web = o.get("web").and_then(Value::as_bool).unwrap_or(false);
+        let kind = o.get("kind").map(py_str).unwrap_or_default();
+        let slot = o.get("slot").map(py_str).unwrap_or_default();
         if !wad_core::spec::is_id(&id) || !wad_core::spec::is_id(&app) {
             return Err(err(format!(
                 "{where_}: sign-in {id:?} for {app:?}: both must match ^[a-z0-9][a-z0-9-]{{0,62}}$"
             )));
         }
-        if out.iter().any(|x| x.app == app) {
-            return Err(err(format!("{where_}: {app} has two sign-ins")));
+        if !kind.is_empty() && !wad_core::spec::is_id(&kind) {
+            return Err(err(format!("{where_}: sign-in {id:?}: {kind:?} isn't a kind")));
         }
-        out.push(WorkspaceSignIn { id, app, web, name });
+        if !slot.is_empty() && !slot_ok(&slot) {
+            return Err(err(format!("{where_}: sign-in {id:?}: {slot:?} isn't a slot")));
+        }
+        let key = |x: &WorkspaceSignIn| if x.slot.is_empty() { x.app.clone() } else { x.slot.clone() };
+        let this = if slot.is_empty() { app.clone() } else { slot.clone() };
+        if out.iter().any(|x| key(x) == this) {
+            return Err(err(format!("{where_}: {this} has two sign-ins")));
+        }
+        out.push(WorkspaceSignIn { id, app, web, name, kind, slot });
     }
     Ok(out)
 }
@@ -492,16 +514,25 @@ pub fn to_yaml(w: &Workspace) -> Value {
                 if !s.name.is_empty() {
                     m.insert("name".into(), s.name.clone().into());
                 }
+                if !s.kind.is_empty() {
+                    m.insert("kind".into(), s.kind.clone().into());
+                }
+                if !s.slot.is_empty() {
+                    m.insert("slot".into(), s.slot.clone().into());
+                }
                 Value::Object(m)
             })
             .collect();
         o.insert("signins".into(), signins.into());
     }
+    if w.ephemeral {
+        o.insert("ephemeral".into(), true.into());
+    }
     Value::Object(o)
 }
 
 /// Workspaces (in workspaces.yaml's shape) checked together, as the file
-/// would be: ids, ports, hotkeys and names unique, and each one valid.
+/// would be: ids, ports and names unique, and each one valid.
 pub fn check_workspaces(list: Vec<Value>) -> Result<Vec<Workspace>, Error> {
     // The Rust wadd has no TCP port of its own to keep free.
     let data = serde_json::json!({"daemon": {"port": 0}, "wadcreator": {"enabled": false}, "workspaces": list});

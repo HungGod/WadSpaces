@@ -29,6 +29,17 @@
 //! One launch per workspace at a time; different workspaces launch in
 //! parallel. Progress goes out as `launch` events: the job, plus the log
 //! lines since the last event.
+//!
+//! What's launched (`create_item`) is a workspace, or:
+//!   - a throwaway run of a wadspace: a workspace `run-<from>-<6>` copied
+//!     from it with the run's own wallpaper, projects and sign-ins, no
+//!     /config volume, and `ephemeral` (the registry removes it once it
+//!     stops);
+//!   - a WadBrowser setup: an app `browser-<saved id>` (or an ephemeral
+//!     `browser-run-<6>`) running `wadbrowser --instance <id> --setup <file>`,
+//!     its files with the sign-ins' folders (the screen user's), so it's a
+//!     WadBrowser of its own beside any other;
+//!   - the terminal (the machine's own app).
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -41,7 +52,10 @@ use serde_json::Value;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use wad_git::Update;
-use wad_proto::v1::{Event, Launch, LaunchLog, LaunchPart, LaunchStatus, MountedProject, PartState, Phase, Workspace};
+use wad_proto::v1::{
+    BrowserSetup, Event, Kind, Launch, LaunchItem, LaunchLog, LaunchPart, LaunchStatus, MountedProject, PartState,
+    Phase, RunOverrides, Workspace, WorkspaceSignIn,
+};
 use wad_proto::{ApiError, ErrorCode};
 
 use crate::backend::Backend;
@@ -101,8 +115,15 @@ pub trait Elsewhere: Send + Sync + 'static {
     async fn open_elsewhere(&self, pids: &[String]) -> Vec<(String, Vec<String>)>;
 }
 
+/// The machine's own terminal app.
+pub const TERMINAL: &str = "terminal";
+/// The machine's own WadBrowser app (its exec names the program).
+pub const BROWSER: &str = "browser";
+
 pub struct Launches {
     me: Weak<Launches>,
+    signins: Mutex<Option<Weak<crate::signins::SignIns>>>,
+    builds: Mutex<Option<Weak<crate::builds::Builds>>>,
     elsewhere: Mutex<Option<Weak<dyn Elsewhere>>>,
     registry: Arc<Registry>,
     view: Arc<View>,
@@ -131,6 +152,8 @@ impl Launches {
     ) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
+            signins: Mutex::default(),
+            builds: Mutex::default(),
             elsewhere: Mutex::default(),
             registry,
             view,
@@ -152,7 +175,247 @@ impl Launches {
         *self.elsewhere.lock().unwrap() = Some(e);
     }
 
+    /// The saved sign-ins (a WadBrowser setup's are made when missing).
+    pub fn set_signins(&self, s: Weak<crate::signins::SignIns>) {
+        *self.signins.lock().unwrap() = Some(s);
+    }
+
+    /// The layer builds (a batch waits for the images it needs).
+    pub fn set_builds(&self, b: Weak<crate::builds::Builds>) {
+        *self.builds.lock().unwrap() = Some(b);
+    }
+
     // ------------------------------------------------------------- jobs
+    /// Launches what the launcher asked for (any LaunchItem).
+    pub async fn create_item(&self, item: LaunchItem) -> Result<Launch, ApiError> {
+        let background = match &item {
+            LaunchItem::Workspace { background, .. }
+            | LaunchItem::Run { background, .. }
+            | LaunchItem::Browser { background, .. }
+            | LaunchItem::Terminal { background } => *background,
+        };
+        let p = self.prepare_item(&item).await?;
+        self.create_as(&p.workspace, &p.projects, p.restart, background)
+    }
+
+    /// What an item launches as: a workspace here (a run's and a setup's
+    /// are made now), with its projects.
+    pub async fn prepare_item(&self, item: &LaunchItem) -> Result<Prepared, ApiError> {
+        Ok(match item {
+            LaunchItem::Workspace { workspace, projects, restart, .. } => {
+                self.registry.workspace(workspace)?;
+                Prepared { workspace: workspace.clone(), projects: projects.clone(), restart: *restart }
+            }
+            LaunchItem::Terminal { .. } => {
+                self.registry.workspace(TERMINAL)?;
+                Prepared { workspace: TERMINAL.into(), projects: vec![], restart: false }
+            }
+            LaunchItem::Run { from, overrides, .. } => {
+                let id = self.make_run(from, overrides).await?;
+                Prepared { workspace: id, projects: overrides.projects.clone(), restart: false }
+            }
+            LaunchItem::Browser { setup, saved_id, .. } => {
+                let id = self.make_browser(setup, saved_id.as_deref()).await?;
+                Prepared { workspace: id, projects: vec![], restart: false }
+            }
+        })
+    }
+
+    /// The launcher's pick, together: each item made ready, a focus session
+    /// over them when `minutes` says, then each launched (the first switched
+    /// to, the rest in the background), once any layer image one needs has
+    /// finished building. The workspaces' ids, at once; the launches follow
+    /// as launch events.
+    pub async fn batch(
+        self: &Arc<Self>,
+        items: Vec<LaunchItem>,
+        minutes: Option<u32>,
+    ) -> Result<Vec<String>, ApiError> {
+        if items.is_empty() {
+            return Err(bad("pick something to launch"));
+        }
+        let mut prepared = vec![];
+        for it in &items {
+            prepared.push(self.prepare_item(it).await?);
+        }
+        let ids: Vec<String> = prepared.iter().map(|p| p.workspace.clone()).collect();
+        let me = self.clone();
+        let session_ids = ids.clone();
+        tokio::spawn(async move {
+            me.wait_for_images(&session_ids).await;
+            if minutes.is_some()
+                && let Err(e) = me.view.session_start(&session_ids, minutes, false)
+            {
+                tracing::warn!("the focus session: {}", e.message);
+            }
+            for (i, p) in prepared.into_iter().enumerate() {
+                if let Err(e) = me.create_as(&p.workspace, &p.projects, p.restart, i > 0) {
+                    tracing::warn!("launching {}: {}", p.workspace, e.message);
+                    me.bus.publish(Event::Notice { text: format!("{} didn't launch: {}", p.workspace, e.message) });
+                }
+            }
+        });
+        Ok(ids)
+    }
+
+    /// Waits while a layer image these workspaces run on is building here.
+    async fn wait_for_images(&self, ids: &[String]) {
+        let Some(builds) = self.builds.lock().unwrap().as_ref().and_then(Weak::upgrade) else { return };
+        for id in ids {
+            let Ok(ws) = self.registry.workspace(id) else { continue };
+            let layer = layer_of(&ws.image);
+            let Some(layer) = layer else { continue };
+            for _ in 0..(3 * 3600) {
+                if !builds.building(&layer) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+
+    /// A throwaway run's workspace, from its wadspace's: its id.
+    async fn make_run(&self, from: &str, o: &RunOverrides) -> Result<String, ApiError> {
+        let src = self.registry.workspace(from)?;
+        if src.kind != Kind::Container {
+            return Err(bad(format!("{} is an app: run it as it is", src.name)));
+        }
+        if src.ephemeral {
+            return Err(bad(format!("{} is a run already", src.name)));
+        }
+        if src.display != wad_proto::v1::Display::Host {
+            return Err(bad(format!("{} is streamed (from before the Builder): it can't be run once", src.name)));
+        }
+        let base = from.get(..from.len().min(48)).unwrap_or(from).trim_end_matches('-');
+        let id = format!("run-{base}-{}", tail());
+        let mut ws = src.clone();
+        ws.id = id.clone();
+        ws.name = format!("{} (run)", src.name);
+        ws.container_name = format!("wad-{id}");
+        // No /config of its own: nothing it does is kept.
+        let config = config_volume(&src.volumes);
+        ws.volumes.retain(|v| config.as_deref() != v.split(':').next());
+        ws.projects = vec![];
+        ws.signins = slot_signins(&o.signins)?;
+        ws.ephemeral = true;
+        ws.hotkey = None;
+        ws.autostart = false;
+        crate::images::ensure_extra(&self.state_dir, &id).map_err(|e| internal(format!("its extra folder: {e}")))?;
+        match &o.wallpaper {
+            Some(up) => {
+                let bytes = crate::images::decode_wallpaper(up)?;
+                crate::images::write_wallpaper(&self.state_dir, &id, &up.ext, &bytes).map_err(internal)?;
+                set_env(&mut ws.env, "WALLPAPER", &format!("{}/wallpaper.{}", wad_core::layers::WALLPAPER_DIR, up.ext));
+                set_env(&mut ws.env, "WALLPAPER_MODE", "fill");
+            }
+            None => {
+                // Its wadspace's own runtime wallpaper comes along.
+                for ext in ["png", "jpg"] {
+                    let own = crate::images::extra_dir(&self.state_dir, from).join(format!("wallpaper.{ext}"));
+                    if let Ok(bytes) = std::fs::read(&own) {
+                        crate::images::write_wallpaper(&self.state_dir, &id, ext, &bytes).map_err(internal)?;
+                    }
+                }
+            }
+        }
+        self.registry.put_workspace(ws).await?;
+        Ok(id)
+    }
+
+    /// A WadBrowser setup's app workspace and files: its id.
+    async fn make_browser(&self, setup: &BrowserSetup, saved: Option<&str>) -> Result<String, ApiError> {
+        if !matches!(setup.mode.as_str(), "browser" | "focus") {
+            return Err(bad("a setup's mode is browser or focus"));
+        }
+        let name = setup.name.trim();
+        if name.chars().count() > 80 || name.chars().any(char::is_control) {
+            return Err(bad("a setup's name is at most 80 characters, on one line"));
+        }
+        let mut seen = vec![];
+        for w in &setup.webapps {
+            let url_ok = (w.url.starts_with("https://") || w.url.starts_with("http://"))
+                && w.url.len() < 2048
+                && !w.url.contains(char::is_control);
+            if !wad_core::spec::is_id(&w.id) || seen.contains(&w.id) || !url_ok || w.name.contains(char::is_control) {
+                return Err(bad(format!("{}: a web app's id, name and address", w.name)));
+            }
+            seen.push(w.id.clone());
+        }
+        let id = match saved {
+            Some(s) if wad_core::spec::is_id(s) => format!("browser-{}", s.get(..s.len().min(54)).unwrap_or(s)),
+            Some(s) => return Err(bad(format!("{s:?} isn't a setup id"))),
+            None => format!("browser-run-{}", tail()),
+        };
+        let signins =
+            self.signins.lock().unwrap().as_ref().and_then(Weak::upgrade).ok_or_else(|| internal("no sign-ins"))?;
+        // Each web app's sign-in, made here (empty) if it's new to this machine.
+        let mut ws_signins: Vec<WorkspaceSignIn> = vec![];
+        let mut manifest: Vec<Value> = vec![];
+        let mut by_app = serde_json::Map::new();
+        for s in &setup.signins {
+            if !seen.contains(&s.app) || ws_signins.iter().any(|x| x.app == s.app) {
+                return Err(bad(format!("a sign-in for {:?}, which isn't one of the setup's web apps", s.app)));
+            }
+            let si = WorkspaceSignIn {
+                web: true,
+                kind: wad_core::signins::WEB.into(),
+                slot: format!("web:{}", s.app),
+                ..s.clone()
+            };
+            let (sname, dir) = signins.ensure(&si).map_err(internal)?;
+            by_app.insert(s.app.clone(), s.id.clone().into());
+            match manifest.iter_mut().find(|e| e["id"] == s.id.as_str()) {
+                Some(e) => e["apps"].as_array_mut().expect("a list").push(s.app.clone().into()),
+                None => manifest.push(serde_json::json!({
+                    "id": s.id, "name": sname, "web": true, "apps": [s.app], "dir": dir.to_string_lossy(),
+                })),
+            }
+            ws_signins.push(si);
+        }
+        let dir = signins.data_dir().join(crate::registry::SETUPS_DIR);
+        let file = dir.join(format!("{id}.json"));
+        let manifest_file = dir.join(format!("{id}.signins.json"));
+        let setup_json = serde_json::json!({
+            "mode": setup.mode, "webapps": setup.webapps, "signins": by_app, "ephemeral": saved.is_none(),
+        });
+        write_for_screen(&dir, &file, &setup_json, self.projects.uid).map_err(internal)?;
+        write_for_screen(
+            &dir,
+            &manifest_file,
+            &serde_json::json!({"version": 1, "signins": manifest}),
+            self.projects.uid,
+        )
+        .map_err(internal)?;
+        let own = self.registry.workspace(BROWSER).ok();
+        let program =
+            own.as_ref().and_then(|w| w.exec.first().cloned()).unwrap_or_else(|| "/usr/bin/wadbrowser".into());
+        let ws = Workspace {
+            id: id.clone(),
+            name: if name.is_empty() { "WadBrowser".into() } else { name.into() },
+            kind: Kind::App,
+            exec: vec![program, "--instance".into(), id.clone(), "--setup".into(), file.to_string_lossy().into()],
+            image: String::new(),
+            display: wad_proto::v1::Display::Host,
+            port: None,
+            hotkey: None,
+            icon: own.and_then(|w| w.icon),
+            enabled: true,
+            autostart: false,
+            container_name: format!("wad-{id}"),
+            container_port: 3000,
+            env: vec![("WADBROWSER_SIGNINS".into(), manifest_file.to_string_lossy().into())],
+            secrets: vec![],
+            volumes: vec![],
+            devices: vec![],
+            shm_size: None,
+            projects: vec![],
+            signins: ws_signins,
+            ephemeral: saved.is_none(),
+        };
+        self.registry.put_workspace(ws).await?;
+        Ok(id)
+    }
+
     /// Checks what can be checked up front, then starts.
     pub fn create(&self, ws_id: &str, project_ids: &[String], restart: bool) -> Result<Launch, ApiError> {
         self.create_as(ws_id, project_ids, restart, false)
@@ -725,6 +988,73 @@ impl Launches {
             _ => Ok(()),
         }
     }
+}
+
+/// A launch item made ready: the workspace it launches, with its projects.
+pub struct Prepared {
+    pub workspace: String,
+    pub projects: Vec<String>,
+    pub restart: bool,
+}
+
+/// The layer an image belongs to ("template:<id>" / "custom:<id>"), if it's one.
+fn layer_of(image: &str) -> Option<String> {
+    let rest = image.strip_prefix("localhost/wadspaces-")?.strip_suffix(":latest")?;
+    if let Some(id) = rest.strip_prefix("template-") {
+        return Some(format!("template:{id}"));
+    }
+    rest.strip_prefix("custom-").map(|id| format!("custom:{id}"))
+}
+
+fn bad(msg: impl Into<String>) -> ApiError {
+    ApiError::new(ErrorCode::BadRequest, msg)
+}
+
+fn internal(e: impl std::fmt::Display) -> ApiError {
+    ApiError::new(ErrorCode::Internal, e.to_string())
+}
+
+/// Six lowercase letters and digits, for a run's id.
+fn tail() -> String {
+    wad_store::projects::new_id().to_lowercase().chars().filter(char::is_ascii_alphanumeric).take(6).collect()
+}
+
+/// A run's sign-ins, by slot: each slot at most once, with its kind.
+fn slot_signins(list: &[WorkspaceSignIn]) -> Result<Vec<WorkspaceSignIn>, ApiError> {
+    let mut out: Vec<WorkspaceSignIn> = vec![];
+    for s in list {
+        let key = if s.slot.is_empty() { &s.app } else { &s.slot };
+        if !wad_core::spec::is_id(&s.id)
+            || out.iter().any(|x| (if x.slot.is_empty() { &x.app } else { &x.slot }) == key)
+        {
+            return Err(bad(format!("sign-in {:?} for {key}", s.id)));
+        }
+        out.push(s.clone());
+    }
+    Ok(out)
+}
+
+fn set_env(env: &mut Vec<(String, String)>, key: &str, value: &str) {
+    match env.iter_mut().find(|(k, _)| k == key) {
+        Some(e) => e.1 = value.into(),
+        None => env.push((key.into(), value.into())),
+    }
+}
+
+/// A WadBrowser setup's file, where the screen's user (who runs it) can read
+/// it: beside the sign-ins' folders, theirs too.
+fn write_for_screen(dir: &Path, file: &Path, v: &Value, uid: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir)?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    let tmp = file.with_extension("tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(v).expect("json") + "\n")?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    if nix::unistd::geteuid().is_root() {
+        nix::unistd::chown(dir, Some(uid.into()), Some(uid.into())).map_err(std::io::Error::from)?;
+        nix::unistd::chown(&tmp, Some(uid.into()), Some(uid.into())).map_err(std::io::Error::from)?;
+    }
+    std::fs::rename(&tmp, file)
 }
 
 fn no_launch(id: &str) -> ApiError {

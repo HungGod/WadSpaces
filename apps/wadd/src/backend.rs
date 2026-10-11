@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
+pub use wad_podman::ImageInfo;
 use wad_podman::Podman;
 use wad_proto::v1::Workspace;
 use wad_systemd::{Systemd, TransientSpec};
@@ -85,8 +86,28 @@ pub trait Backend: Send + Sync + 'static {
         Err("no podman".into())
     }
     /// Builds an image from a tar build context on `base` (its BASE_IMAGE
-    /// build argument). Dropping the future stops the build.
-    async fn build(&self, _context: Vec<u8>, _tag: &str, _base: &str, _on_line: OnLine) -> Result<(), String> {
+    /// build argument), with these labels. Dropping the future stops the build.
+    async fn build(
+        &self,
+        _context: Vec<u8>,
+        _tag: &str,
+        _base: &str,
+        _labels: serde_json::Map<String, serde_json::Value>,
+        _on_line: OnLine,
+    ) -> Result<(), String> {
+        Err("no podman".into())
+    }
+    /// An image's id, age, size and labels; None if it isn't here.
+    async fn image_info(&self, _image: &str) -> Result<Option<ImageInfo>, String> {
+        Err("no podman".into())
+    }
+    /// The images that carry a label.
+    async fn images_labelled(&self, _label: &str) -> Result<Vec<ImageInfo>, String> {
+        Err("no podman".into())
+    }
+    /// Removes an image (just its name, when others are built on it). False
+    /// if there was none.
+    async fn remove_image(&self, _image: &str) -> Result<bool, String> {
         Err("no podman".into())
     }
 }
@@ -361,10 +382,29 @@ impl Backend for Real {
         self.podman.delete_secret(name).await.map_err(|e| e.to_string())
     }
 
-    async fn build(&self, context: Vec<u8>, tag: &str, base: &str, mut on_line: OnLine) -> Result<(), String> {
+    async fn build(
+        &self,
+        context: Vec<u8>,
+        tag: &str,
+        base: &str,
+        labels: serde_json::Map<String, serde_json::Value>,
+        mut on_line: OnLine,
+    ) -> Result<(), String> {
         let mut args = serde_json::Map::new();
         args.insert("BASE_IMAGE".into(), base.into());
-        self.podman.build(context, tag, &args, |l| on_line(l)).await.map(drop).map_err(|e| e.to_string())
+        self.podman.build(context, tag, &args, &labels, |l| on_line(l)).await.map(drop).map_err(|e| e.to_string())
+    }
+
+    async fn image_info(&self, image: &str) -> Result<Option<ImageInfo>, String> {
+        self.podman.image_info(image).await.map_err(|e| e.to_string())
+    }
+
+    async fn images_labelled(&self, label: &str) -> Result<Vec<ImageInfo>, String> {
+        self.podman.images_labelled(label).await.map_err(|e| e.to_string())
+    }
+
+    async fn remove_image(&self, image: &str) -> Result<bool, String> {
+        self.podman.remove_image(image).await.map_err(|e| e.to_string())
     }
 
     async fn github_token(&self) -> Option<String> {
@@ -417,6 +457,7 @@ mod tests {
             shm_size: None,
             projects: vec![],
             signins: vec![],
+            ephemeral: false,
         };
         let session = wad_sway::Session {
             uid: 1000,

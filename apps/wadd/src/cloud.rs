@@ -18,6 +18,12 @@
 //! - the owner's GitHub repo list (users/{uid}/github/repos) for the online
 //!   app, which has no token: checked every 20th heartbeat, and written only
 //!   when it changed; sooner after a repo is made or a sign-in here.
+//! - the Builder's commands from the online app: `build` (a layer's image;
+//!   its documents come with it, else they're read from the account),
+//!   `install` (a wadspace on its layer, with its wallpaper drawn by the app),
+//!   `launch-run` (anything the launcher starts, maybe as a focus session)
+//!   and `session`. The heartbeat carries the layer images here, the saved
+//!   sign-ins' names (never what they hold) and the screen's size.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
@@ -149,6 +155,10 @@ pub struct Parts {
     pub launches: Arc<Launches>,
     pub github: Arc<crate::github::GithubService>,
     pub bus: Bus,
+    pub builds: Arc<crate::builds::Builds>,
+    pub signins: Arc<crate::signins::SignIns>,
+    /// podman, for the layer images.
+    pub backend: Arc<dyn crate::backend::Backend>,
 }
 
 pub struct CloudRelay {
@@ -446,10 +456,27 @@ impl CloudRelay {
         m
     }
 
+    /// What the Builder reads from the heartbeat: the layer images, the
+    /// saved sign-ins (ids, names, kinds) and the screen's size.
+    pub async fn builder_fields(&self) -> Map<String, Value> {
+        let p = &self.parts;
+        let mut m = Map::new();
+        if let Ok(images) = crate::images::list(p.backend.as_ref()).await {
+            m.insert("images".into(), serde_json::to_value(images).unwrap_or(Value::Null));
+        }
+        let signins: Vec<Value> =
+            p.signins.list().into_iter().map(|s| json!({"id": s.id, "name": s.name, "app": s.app})).collect();
+        m.insert("signins".into(), signins.into());
+        m.insert("screen".into(), serde_json::to_value(p.view.screen().await).unwrap_or(Value::Null));
+        m
+    }
+
     pub async fn heartbeat(&self) -> Result<(), String> {
         let path = self.machine_doc()?;
         let tok = self.id_token().await?;
-        self.firestore()?.patch(&tok, &path, &self.heartbeat_fields(), &[]).await.map_err(|e| e.to_string())?;
+        let mut fields = self.heartbeat_fields();
+        fields.extend(self.builder_fields().await);
+        self.firestore()?.patch(&tok, &path, &fields, &[]).await.map_err(|e| e.to_string())?;
         self.status.lock().unwrap().0 = Some((now_ms() / 1000) as u64);
         Ok(())
     }
@@ -524,9 +551,86 @@ impl CloudRelay {
                 return Ok(json!({"ok": true, "pulled": pulled, "pushed": pushed, "repos": repos}));
             }
             "navigate" => return Err("this machine shows no web pages any more".into()),
+            "build" => {
+                let req = self.layer_request(cmd).await?;
+                let b = p.builds.create_layer(&req).map_err(msg)?;
+                return Ok(json!({"ok": true, "buildId": b.id}));
+            }
+            "install" => {
+                let id = s(cmd, "wsId");
+                let req: crate::images::Install = serde_json::from_value(json!({
+                    "wadspace": cmd.get("wadspace").cloned().unwrap_or(Value::Null),
+                    "template": cmd.get("template").cloned().unwrap_or(Value::Null),
+                    "customization": cmd.get("customization").cloned().filter(|c| !c.is_null()),
+                    "tz": cmd.get("tz").cloned().filter(|t| !t.is_null()),
+                }))
+                .map_err(|e| e.to_string())?;
+                let saved = crate::images::install(&p.registry, p.backend.as_ref(), &id, &req).await.map_err(msg)?;
+                if let Some(w) = cmd.get("wallpaper").filter(|w| w.is_object()) {
+                    let up: wad_proto::v1::WallpaperUpload =
+                        serde_json::from_value(w.clone()).map_err(|e| e.to_string())?;
+                    crate::images::put_wallpaper(&self.settings.state_dir, &saved.workspace, &up).map_err(msg)?;
+                }
+                return Ok(json!({"ok": true, "restartRequired": saved.restart_required}));
+            }
+            "launch-run" => {
+                let items: Vec<wad_proto::v1::LaunchItem> =
+                    serde_json::from_value(cmd.get("items").cloned().unwrap_or(json!([])))
+                        .map_err(|e| e.to_string())?;
+                let minutes = cmd.get("focusMinutes").and_then(Value::as_u64).map(|m| m as u32);
+                let ids = p.launches.batch(items, minutes).await.map_err(msg)?;
+                return Ok(json!({"ok": true, "workspaces": ids}));
+            }
+            "session" => {
+                let ids: Vec<String> = cmd
+                    .get("workspaces")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect();
+                let minutes = cmd.get("minutes").and_then(Value::as_u64).map(|m| m as u32);
+                p.view.session_start(&ids, minutes, true).map_err(msg)?;
+            }
             other => return Err(format!("unknown command type {other:?}")),
         }
         Ok(json!({"ok": true}))
+    }
+
+    /// A `build` command's layer, with its documents: as sent, else read
+    /// from the owner's account.
+    async fn layer_request(&self, cmd: &Value) -> Result<wad_proto::v1::LayerBuildRequest, String> {
+        let layer = s(cmd, "layer");
+        let given = |k: &str| cmd.get(k).cloned().filter(Value::is_object);
+        let (mut template, mut customization) = (given("template"), given("customization"));
+        let (kind, id) = layer.split_once(':').ok_or_else(|| format!("{layer:?} isn't a layer"))?;
+        if !wad_core::spec::is_id(id) {
+            return Err(format!("{layer:?} isn't a layer"));
+        }
+        if kind == "custom" && customization.is_none() {
+            customization = Some(self.owner_doc("customizations", id).await?);
+        }
+        if template.is_none() {
+            let tid = match (kind, &customization) {
+                ("custom", Some(c)) => s(c, "templateId"),
+                _ => id.to_string(),
+            };
+            template = Some(self.owner_doc("templates", &tid).await?);
+        }
+        Ok(wad_proto::v1::LayerBuildRequest { layer, template: template.unwrap_or_default(), customization })
+    }
+
+    /// One of the owner's documents (users/{uid}/<collection>/<id>), with its id.
+    async fn owner_doc(&self, collection: &str, id: &str) -> Result<Value, String> {
+        let (uid, _) = self.ids().ok_or("not linked")?;
+        let tok = self.id_token().await?;
+        let path = format!("users/{uid}/{collection}/{id}");
+        let doc = self.firestore()?.get(&tok, &path).await.map_err(|e| e.to_string())?;
+        let doc = doc.ok_or_else(|| format!("no {path} in the account"))?;
+        let mut v = from_fields(doc.get("fields").unwrap_or(&Value::Null));
+        v["id"] = id.into();
+        Ok(v)
     }
 
     pub async fn poll_once(&self) -> Result<(), String> {

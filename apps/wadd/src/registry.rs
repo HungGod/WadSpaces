@@ -30,6 +30,8 @@ use crate::pull::Progress;
 /// hundreds a second); phase changes always do.
 const PUBLISH_EVERY: Duration = Duration::from_millis(700);
 const RUNNING: &str = "running";
+/// Under the sign-ins folder (the screen user's): WadBrowser setups' files.
+pub const SETUPS_DIR: &str = ".wadbrowser";
 
 pub struct Settings {
     pub ready_timeout: Duration,
@@ -65,6 +67,10 @@ pub struct Registry {
     on_list: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     /// Gets what a container mounts ready, just before it starts.
     on_prepare: Mutex<Option<PrepareHook>>,
+    /// Ephemeral workspaces seen running: once one stops, it goes.
+    ran: Mutex<std::collections::HashSet<String>>,
+    /// What runs, in the order it started (Super+N and the switcher follow it).
+    up_order: Mutex<Vec<String>>,
     /// Itself, for the tasks it starts.
     me: std::sync::Weak<Registry>,
 }
@@ -169,6 +175,8 @@ impl Registry {
             on_ready: Mutex::new(None),
             on_list: Mutex::new(None),
             on_prepare: Mutex::new(None),
+            ran: Mutex::default(),
+            up_order: Mutex::default(),
         })
     }
 
@@ -367,6 +375,8 @@ impl Registry {
             }
             if st.container != before.container {
                 self.track_run(ws, &st.container);
+                self.note_ephemeral(ws, &st.container);
+                self.note_order(ws, &st.container);
             }
             let only_progress = st.phase == before.phase
                 && st.container == before.container
@@ -404,6 +414,77 @@ impl Registry {
         };
         if let Err(e) = r {
             tracing::debug!("run history {}: {e}", ws.id);
+        }
+    }
+
+    /// Keeps the start order: one that starts goes last, one that stops goes.
+    fn note_order(&self, ws: &Workspace, container: &str) {
+        let mut order = self.up_order.lock().unwrap();
+        if container == RUNNING {
+            if !order.contains(&ws.id) {
+                order.push(ws.id.clone());
+            }
+        } else if container != "unknown" {
+            order.retain(|id| id != &ws.id);
+        }
+    }
+
+    /// The workspaces running, in the order they started.
+    pub fn running_order(&self) -> Vec<String> {
+        let order = self.up_order.lock().unwrap().clone();
+        order.into_iter().filter(|id| self.state(id).is_some_and(|s| s.container == RUNNING)).collect()
+    }
+
+    /// A throwaway run (or a WadBrowser setup run once) that was up and has
+    /// stopped is removed: its workspace, extra folder and setup files.
+    fn note_ephemeral(&self, ws: &Workspace, container: &str) {
+        if !ws.ephemeral {
+            return;
+        }
+        if container == RUNNING {
+            self.ran.lock().unwrap().insert(ws.id.clone());
+            return;
+        }
+        if container == "unknown" || !self.ran.lock().unwrap().remove(&ws.id) {
+            return;
+        }
+        if let Some(me) = self.me.upgrade() {
+            let id = ws.id.clone();
+            tokio::spawn(async move { me.forget_ephemeral(&id).await });
+        }
+    }
+
+    /// Removes an ephemeral workspace and what it left on disk.
+    pub async fn forget_ephemeral(&self, id: &str) {
+        let mut list = self.workspaces();
+        let before = list.len();
+        list.retain(|w| !(w.id == id && w.ephemeral));
+        if list.len() == before {
+            return;
+        }
+        if let Err(e) = self.set_workspaces(list).await {
+            tracing::warn!("removing the run {id}: {e}");
+            return;
+        }
+        let _ = std::fs::remove_dir_all(self.settings.state_dir.join("extra").join(id));
+        for f in [format!("{id}.json"), format!("{id}.signins.json")] {
+            let _ = std::fs::remove_file(self.settings.signins_dir.join(SETUPS_DIR).join(f));
+        }
+        tracing::info!("{id}, run once, stopped: removed");
+    }
+
+    /// Ephemeral workspaces left from before (wadd restarted, the machine
+    /// too) that aren't running: removed. Call after a reconcile.
+    pub async fn sweep_ephemeral(&self) {
+        let gone: Vec<String> = self
+            .workspaces()
+            .into_iter()
+            .filter(|w| w.ephemeral)
+            .filter(|w| self.state(&w.id).is_some_and(|s| s.container != RUNNING && s.container != "unknown"))
+            .map(|w| w.id)
+            .collect();
+        for id in gone {
+            self.forget_ephemeral(&id).await;
         }
     }
 
@@ -492,6 +573,9 @@ impl Registry {
         }
         self.pull(ws).await?;
         if self.backend.container(&ws.container_name).await.unwrap_or_default() != RUNNING {
+            // Its unit mounts the extra folder (projects, sign-ins, wallpaper).
+            crate::images::ensure_extra(&self.settings.state_dir, &ws.id)
+                .map_err(|e| format!("its extra folder: {e}"))?;
             if let Some(f) = self.on_prepare.lock().unwrap().as_ref() {
                 f(ws)?;
             }

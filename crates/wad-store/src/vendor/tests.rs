@@ -44,7 +44,8 @@ fn refuses_a_bad_set() {
     write(d.path(), "writing.toml", &format!("id = \"other\"\n{WRITING}"));
     assert!(read(d.path()).unwrap_err().to_string().contains("isn't the file's name"));
     write(d.path(), "writing.toml", WRITING);
-    write(d.path(), "second.toml", &WRITING.replace("Writing", "Second")); // hotkey 1 twice
+    // Streamed, with no port: not a workspace.
+    write(d.path(), "second.toml", &WRITING.replace("display = \"host\"", "display = \"stream\""));
     assert!(read(d.path()).is_err());
 }
 
@@ -86,16 +87,15 @@ fn a_clash_with_the_machines_workspaces_is_left_out_and_retried() {
     let d = tempfile::tempdir().unwrap();
     write(d.path(), "writing.toml", WRITING);
     let vendor = read(d.path()).unwrap();
-    // A workspace built here already has Super+1.
+    // A workspace built here already has its container's name.
     let mut mine = vendor[0].workspace.clone();
     mine.id = "mine".into();
-    mine.container_name = "wad-mine".into();
     mine.name = "Mine".into();
     let (mut list, mut book) = (vec![mine], Book::new());
     let a = apply(&mut list, &mut book, &vendor);
     assert_eq!((a.changed.len(), a.refused.len()), (0, 1));
     assert!(book.is_empty() && list.len() == 1);
-    list[0].hotkey = Some(5);
+    list[0].container_name = "wad-mine".into();
     assert_eq!(apply(&mut list, &mut book, &vendor).changed, ["writing"]);
 }
 
@@ -106,7 +106,10 @@ fn the_images_workspaces_are_valid() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../host/usr/lib/wadspaces/workspaces.d");
     let v = read(&dir).unwrap();
     let ids: Vec<&str> = v.iter().map(|w| w.workspace.id.as_str()).collect();
-    assert_eq!(ids, ["browser", "iq-dev", "kale-b", "kale-p", "terminal", "vanua-academy", "wad-c", "writing"]);
+    assert_eq!(
+        ids,
+        ["browser-focus", "browser", "iq-dev", "kale-b", "kale-p", "terminal", "vanua-academy", "wad-c", "writing"]
+    );
     for w in &v {
         let w = &w.workspace;
         assert_eq!(w.display, Display::Host, "{}", w.id);

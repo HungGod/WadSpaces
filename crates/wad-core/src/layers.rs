@@ -570,12 +570,10 @@ pub fn layer_sha(files: &[(String, String)]) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The extension a wallpaper is stored with: a JPEG picture's "jpg", else
-/// "png" (gradients and colours are drawn to a PNG).
+/// The extension a wallpaper is stored with, as WadSpaces draws it
+/// (lib/wallpaperRender.ts): a picture is a JPEG, a gradient or colour a PNG.
 pub fn wallpaper_ext(wallpaper: &Value) -> &'static str {
-    let v = s(wallpaper, "value").to_ascii_lowercase();
-    let jpeg = v.starts_with("data:image/jpeg") || v.ends_with(".jpg") || v.ends_with(".jpeg");
-    if s(wallpaper, "type") == "image" && jpeg { "jpg" } else { "png" }
+    if s(wallpaper, "type") == "image" { "jpg" } else { "png" }
 }
 
 /// What wadd mounts when the wadspace starts (none of it is in an image), for
@@ -632,6 +630,8 @@ pub fn workspace_for(w: &Value, template: &Value, setup: &Value, opts: &Value) -
     if legacy.is_none() {
         let wp = w.get("wallpaper").unwrap_or(&Value::Null);
         env.insert("WALLPAPER".into(), format!("{WALLPAPER_DIR}/wallpaper.{}", wallpaper_ext(wp)).into());
+        // Filling the screen, as the Builder's preview shows it (the base centres).
+        env.insert("WALLPAPER_MODE".into(), "fill".into());
     }
     let mut signins = Vec::new();
     for sl in slots_for(template, setup) {

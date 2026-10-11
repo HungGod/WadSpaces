@@ -345,7 +345,9 @@ fn summarises_what_is_mounted_at_start() {
                 .to_string()
         )
     );
-    assert_eq!(wallpaper_ext(&json!({ "type": "image", "value": "data:image/jpeg;base64,xx" })), "jpg");
+    // As WadSpaces draws them: a picture is a JPEG (whatever it was), the rest PNGs.
+    assert_eq!(wallpaper_ext(&json!({ "type": "image", "value": "/wallpapers/x.png" })), "jpg");
+    assert_eq!(wallpaper_ext(&json!({ "type": "gradient", "value": "linear-gradient(#000, #fff)" })), "png");
 }
 
 #[test]
@@ -355,7 +357,7 @@ fn installs_a_wadspace_on_its_layers_image_with_its_secrets() {
     assert_eq!(ws["image"], "localhost/wadspaces-custom-academy-dev:latest");
     assert_eq!(
         ws["env"],
-        json!({ "PUID": "1000", "PGID": "1000", "TZ": "Pacific/Fiji", "TITLE": "Academy", "WALLPAPER": "/run/wadspaces-extra/wallpaper.png" })
+        json!({ "PUID": "1000", "PGID": "1000", "TZ": "Pacific/Fiji", "TITLE": "Academy", "WALLPAPER": "/run/wadspaces-extra/wallpaper.png", "WALLPAPER_MODE": "fill" })
     );
     assert_eq!(ws["volumes"], json!(["wad-academy-config:/config:z"]));
     assert_eq!((ws["hotkey"].clone(), ws["autostart"].clone()), (Value::Null, json!(false)));

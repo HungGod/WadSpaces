@@ -26,6 +26,7 @@ async fn setup(list: Vec<Workspace>) -> Setup {
         version: "0".into(),
         profile: wad_proto::v1::Profile::User,
         started_at: 0,
+        screen: None,
     });
     let reg = Registry::new(
         Arc::new(Fake::default()),
@@ -66,6 +67,8 @@ fn using(id: &str, signins: &[(&str, &str, bool)]) -> Workspace {
                 app: (*app).into(),
                 web: *web,
                 name: String::new(),
+                kind: String::new(),
+                slot: String::new(),
             })
             .collect(),
         ..ws(id, "ghcr.io/o/x:1", Display::Host, None)
@@ -162,4 +165,57 @@ async fn a_rebuild_takes_the_designs_signins() {
     with["signins"] = serde_json::json!([{"id": "github-bb", "app": "github", "web": true}]);
     let (list, _) = wadd::builds::merged(&[old], &with).unwrap();
     assert_eq!(list[0].signins[0].id, "github-bb");
+}
+
+#[tokio::test]
+async fn the_builders_kinds_unique_names_and_setups_that_use_one() {
+    let s = setup(vec![]).await;
+    let steam = s.signins.create(SignInRequest { name: "Steam".into(), app: "steam".into(), paths: vec![] }).unwrap();
+    assert_eq!(steam.paths, [".steam/", ".local/share/Steam/config/", ".local/share/Steam/userdata/"]);
+    let claude = s
+        .signins
+        .create(SignInRequest { name: "Me-VSCode-ClaudeCode".into(), app: "vscode-claude-code".into(), paths: vec![] })
+        .unwrap();
+    assert_eq!(claude.paths, [".claude/", ".claude.json"]);
+    // Names are what sign-ins are picked by: one each, letter case aside.
+    let dup = s.signins.create(SignInRequest { name: "steam".into(), app: "steam".into(), paths: vec![] }).unwrap_err();
+    assert_eq!(dup.code, ErrorCode::Conflict);
+    let rename = s.signins.patch(&claude.id, SignInPatch { name: Some("STEAM".into()), paths: None }).unwrap_err();
+    assert_eq!(rename.code, ErrorCode::Conflict);
+    s.signins.patch(&claude.id, SignInPatch { name: Some("Claude".into()), paths: None }).unwrap();
+    // A saved WadBrowser setup that uses one counts as a user (and keeps it).
+    let google = s.signins.create(web("Google")).unwrap();
+    let lib = s.dir.path().join("state/library/browsers");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(
+        lib.join("mail.json"),
+        serde_json::json!({"id": "mail", "name": "Mail", "secrets": {"web:gmail": {"id": google.id, "name": "Google", "kind": "web"}}})
+            .to_string(),
+    )
+    .unwrap();
+    assert_eq!(s.signins.get(&google.id).unwrap().used_by, ["browser-mail"]);
+    assert_eq!(s.signins.delete(&google.id).unwrap_err().code, ErrorCode::Conflict);
+    // A slot's kind makes one a wadspace names on a machine that hasn't it.
+    let ws = Workspace {
+        signins: vec![WorkspaceSignIn {
+            id: "codex-abc123".into(),
+            app: "vscode".into(),
+            web: false,
+            name: "Codex".into(),
+            kind: "vscode-codex".into(),
+            slot: "ext:openai.chatgpt".into(),
+        }],
+        ..ws("w", "ghcr.io/o/x:1", Display::Host, None)
+    };
+    s.signins.prepare(&ws).unwrap();
+    let made = s.signins.get("codex-abc123").unwrap();
+    assert_eq!((made.app.as_str(), made.paths.clone()), ("vscode-codex", vec![".codex/".to_string()]));
+    // Two extensions of one app each keep their own (a slot each).
+    let two = serde_json::json!([{"id": "w", "name": "W", "image": "i", "display": "host", "signins": [
+        {"id": "a1", "app": "vscode", "kind": "vscode-codex", "slot": "ext:openai.chatgpt"},
+        {"id": "a2", "app": "vscode", "kind": "vscode-claude-code", "slot": "ext:anthropic.claude-code"}]}]);
+    assert_eq!(wad_store::legacy::check_workspaces(two.as_array().unwrap().clone()).unwrap()[0].signins.len(), 2);
+    let same = serde_json::json!([{"id": "w", "name": "W", "image": "i", "display": "host", "signins": [
+        {"id": "a1", "app": "vscode", "slot": "ext:openai.chatgpt"}, {"id": "a2", "app": "vscode", "slot": "ext:openai.chatgpt"}]}]);
+    assert!(wad_store::legacy::check_workspaces(same.as_array().unwrap().clone()).is_err());
 }

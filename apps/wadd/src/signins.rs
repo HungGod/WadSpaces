@@ -11,7 +11,10 @@
 //!   an app's holds its files (`paths`, under the home folder), which the
 //!   image's init links to it.
 //!
-//! Two running workspaces may share one: whichever writes last wins.
+//! Two running workspaces may share one: whichever writes last wins. Names
+//! are unique here (they're what people pick sign-ins by). WadBrowser setups
+//! (launched beside the spaces) use web sign-ins too: `usedBy` lists the saved
+//! ones, as `browser-<id>`, the workspace each launches as.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -19,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wad_core::signins as core;
-use wad_proto::v1::{Event, SignIn, SignInPatch, SignInRequest, Workspace};
+use wad_proto::v1::{Event, SignIn, SignInPatch, SignInRequest, Workspace, WorkspaceSignIn};
 use wad_proto::{ApiError, ErrorCode};
 
 use crate::events::Bus;
@@ -197,15 +200,29 @@ impl SignIns {
         out
     }
 
-    /// The workspaces here that mount it, and those of them running.
+    /// Where its folder is kept: `<signins_dir>`.
+    pub fn data_dir(&self) -> &Path {
+        &self.data
+    }
+
+    /// The workspaces here that mount it (and the saved WadBrowser setups
+    /// that use it), and those of them running.
     fn users(&self, id: &str) -> (Vec<String>, Vec<String>) {
-        let used: Vec<String> = self
+        let mut used: Vec<String> = self
             .registry
             .workspaces()
             .into_iter()
             .filter(|w| w.signins.iter().any(|s| s.id == id))
             .map(|w| w.id)
             .collect();
+        let setups = wad_store::State::new(&self.state_dir).library("browsers").unwrap_or_default();
+        for b in setups.iter().filter(|b| !b.get("deletedAt").is_some_and(wad_store::state::truthy)) {
+            let uses = b["secrets"].as_object().is_some_and(|m| m.values().any(|r| r["id"] == id));
+            let ws = format!("browser-{}", b["id"].as_str().unwrap_or_default());
+            if uses && !used.contains(&ws) {
+                used.push(ws);
+            }
+        }
         let running =
             used.iter().filter(|w| self.registry.state(w).is_some_and(|s| s.container == "running")).cloned().collect();
         (used, running)
@@ -235,9 +252,19 @@ impl SignIns {
         self.read(id).map(|r| self.view(r)).ok_or_else(|| not_found(id))
     }
 
+    /// Refuses a name another sign-in here has (letter case aside).
+    fn name_free(&self, name: &str, except: Option<&str>) -> Result<(), ApiError> {
+        let n = name.to_lowercase();
+        if self.records().iter().any(|r| Some(r.id.as_str()) != except && r.name.to_lowercase() == n) {
+            return Err(ApiError::new(ErrorCode::Conflict, format!("there's a sign-in called {name} already")));
+        }
+        Ok(())
+    }
+
     pub fn create(&self, req: SignInRequest) -> Result<SignIn, ApiError> {
         let _one = self.lock.lock().unwrap();
         let name = clean_name(&req.name)?;
+        self.name_free(&name, None)?;
         if req.app != core::WEB && !wad_core::spec::is_id(&req.app) {
             return Err(bad(format!("{:?} isn't an app id", req.app)));
         }
@@ -259,6 +286,7 @@ impl SignIns {
         let mut r = self.read(id).ok_or_else(|| not_found(id))?;
         if let Some(name) = patch.name {
             r.name = clean_name(&name)?;
+            self.name_free(&r.name, Some(id))?;
         }
         if let Some(paths) = patch.paths {
             if r.app == core::WEB || core::paths_for(&r.app).is_some() {
@@ -321,6 +349,46 @@ impl SignIns {
         Ok(())
     }
 
+    /// A sign-in a launch names, made here (empty) when this machine hasn't
+    /// got it yet: its record and its folder.
+    pub fn ensure(&self, s: &WorkspaceSignIn) -> Result<(String, PathBuf), String> {
+        let _one = self.lock.lock().unwrap();
+        let r = self.ensure_record(s)?;
+        make_private_dir(&self.dir(&s.id), self.uid).map_err(|e| format!("sign-in {}: {e}", r.name))?;
+        Ok((r.name, self.dir(&s.id)))
+    }
+
+    /// Its record, made from what the workspace says when it isn't here.
+    /// (Under the lock.)
+    fn ensure_record(&self, s: &WorkspaceSignIn) -> Result<Record, String> {
+        if let Some(r) = self.read(&s.id) {
+            return Ok(r);
+        }
+        if !wad_core::spec::is_id(&s.id) {
+            return Err(format!("{:?} isn't a sign-in id", s.id));
+        }
+        let app = if !s.kind.is_empty() {
+            s.kind.clone()
+        } else if s.web {
+            core::WEB.to_string()
+        } else {
+            s.app.clone()
+        };
+        let paths = paths_for(&app, vec![]).unwrap_or_default();
+        let wanted = if s.name.trim().is_empty() { s.app.clone() } else { s.name.trim().to_string() };
+        // Another here has its name: keep both, this one marked.
+        let mut name = wanted.clone();
+        let mut n = 2;
+        while self.records().iter().any(|r| r.name.to_lowercase() == name.to_lowercase()) {
+            name = format!("{wanted} ({n})");
+            n += 1;
+        }
+        let r = Record { id: s.id.clone(), name, app, paths, created_at: now_ms() };
+        self.write(&r).map_err(|e| e.message)?;
+        self.publish(vec![s.id.clone()]);
+        Ok(r)
+    }
+
     /// Gets a container's sign-ins ready to mount: each one's folder (made
     /// here, empty, when its design came from a machine that has it), and
     /// signins.json for inside.
@@ -331,21 +399,9 @@ impl SignIns {
             return Ok(());
         }
         let _one = self.lock.lock().unwrap();
-        let mut made = vec![];
         let mut entries: Vec<serde_json::Value> = vec![];
         for s in &ws.signins {
-            let r = match self.read(&s.id) {
-                Some(r) => r,
-                None => {
-                    let app = if s.web { core::WEB.to_string() } else { s.app.clone() };
-                    let paths = paths_for(&app, vec![]).unwrap_or_default();
-                    let name = if s.name.trim().is_empty() { s.app.clone() } else { s.name.trim().to_string() };
-                    let r = Record { id: s.id.clone(), name, app, paths, created_at: now_ms() };
-                    self.write(&r).map_err(|e| e.message)?;
-                    made.push(s.id.clone());
-                    r
-                }
-            };
+            let r = self.ensure_record(s)?;
             make_private_dir(&self.dir(&s.id), self.uid).map_err(|e| format!("sign-in {}: {e}", r.name))?;
             if (r.app == core::WEB) != s.web {
                 tracing::warn!("{}: {} is a {} sign-in; {} can't use it", ws.id, r.name, r.app, s.app);
@@ -365,9 +421,6 @@ impl SignIns {
         }
         write_manifest(&manifest, &json!({"version": 1, "signins": entries}))
             .map_err(|e| format!("signins.json: {e}"))?;
-        if !made.is_empty() {
-            self.publish(made);
-        }
         Ok(())
     }
 }

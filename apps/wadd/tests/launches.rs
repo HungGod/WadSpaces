@@ -115,6 +115,7 @@ async fn env() -> Env {
         version: "0".into(),
         profile: wad_proto::v1::Profile::User,
         started_at: 0,
+        screen: None,
     });
     let state = tmp.join("state");
     let reg = Registry::new(
@@ -536,4 +537,183 @@ async fn folder_and_drive_projects_that_arent_here() {
         assert_eq!(starts(&e, "wad-a.service"), 0, "{case}");
         let _ = &e.d;
     }
+}
+
+// ---------------------------------------------- runs, WadBrowser setups, the terminal
+
+const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+fn signins(e: &Env) -> Arc<wadd::signins::SignIns> {
+    let s =
+        wadd::signins::SignIns::new(&e.tmp.join("state"), e.tmp.join("signins"), 1000, e.reg.clone(), e.bus.clone());
+    e.launches.set_signins(Arc::downgrade(&s));
+    s
+}
+
+async fn item(e: &Env, it: wad_proto::v1::LaunchItem) -> LaunchLog {
+    let l = e.launches.create_item(it).await.unwrap();
+    wait(e, &l.id).await
+}
+
+#[tokio::test]
+async fn a_throwaway_run_is_a_copy_that_goes_once_it_stops() {
+    let e = env().await;
+    // A native wadspace (a streamed one has a port of its own: it isn't run once).
+    let mut n = ws("n", IMAGE, Display::Host, None);
+    n.name = "N".into();
+    n.volumes = vec!["wad-n-config:/config:z".into()];
+    e.reg.put_workspace(n).await.unwrap();
+    let streamed = e.launches.create_item(wad_proto::v1::LaunchItem::Run {
+        from: "a".into(),
+        overrides: Default::default(),
+        background: true,
+    });
+    assert_eq!(streamed.await.unwrap_err().code, ErrorCode::BadRequest);
+    let overrides = wad_proto::v1::RunOverrides {
+        wallpaper: Some(wad_proto::v1::WallpaperUpload { ext: "png".into(), data: PNG.into() }),
+        projects: vec!["notes".into()],
+        signins: vec![],
+    };
+    let l = item(&e, wad_proto::v1::LaunchItem::Run { from: "n".into(), overrides, background: true }).await;
+    assert_eq!(l.launch.status, LaunchStatus::Done, "{l:?}");
+    let id = l.launch.ws_id.clone();
+    assert!(id.starts_with("run-n-") && id.len() == "run-n-".len() + 6, "{id}");
+    let run = e.reg.workspace(&id).unwrap();
+    assert!(run.ephemeral);
+    assert_eq!((run.name.as_str(), run.image.as_str()), ("N (run)", IMAGE));
+    assert!(run.volumes.is_empty(), "no /config of its own: {:?}", run.volumes);
+    assert_eq!(run.projects.iter().map(|p| p.mount.as_str()).collect::<Vec<_>>(), ["Notes"]);
+    assert!(run.env.contains(&("WALLPAPER".into(), "/run/wadspaces-extra/wallpaper.png".into())));
+    let extra = e.tmp.join("state/extra").join(&id);
+    assert!(extra.join("wallpaper.png").is_file());
+    // Its wadspace is untouched.
+    assert!(e.reg.workspace("n").unwrap().volumes.contains(&"wad-n-config:/config:z".to_string()));
+    // Stopped: gone, and its extra folder too.
+    e.view.stop(&id).await.unwrap();
+    e.reg.reconcile().await;
+    for _ in 0..200 {
+        if e.reg.workspace(&id).is_err() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(e.reg.workspace(&id).is_err(), "the run is still listed");
+    assert!(!extra.exists());
+    // A run of a run, or of an app, isn't one.
+    let refuse = e.launches.create_item(wad_proto::v1::LaunchItem::Run {
+        from: "t".into(),
+        overrides: Default::default(),
+        background: true,
+    });
+    assert_eq!(refuse.await.unwrap_err().code, ErrorCode::BadRequest);
+}
+
+fn setup(name: &str, mode: &str, apps: &[(&str, &str)], signin: Option<(&str, &str)>) -> wad_proto::v1::BrowserSetup {
+    wad_proto::v1::BrowserSetup {
+        name: name.into(),
+        mode: mode.into(),
+        webapps: apps
+            .iter()
+            .map(|(id, url)| wad_proto::v1::SetupWebApp {
+                id: (*id).into(),
+                name: id.to_uppercase(),
+                url: (*url).into(),
+            })
+            .collect(),
+        signins: signin
+            .map(|(app, id)| wad_proto::v1::WorkspaceSignIn {
+                id: id.into(),
+                app: app.into(),
+                web: true,
+                name: "Work-WadBrowser-Google".into(),
+                kind: String::new(),
+                slot: String::new(),
+            })
+            .into_iter()
+            .collect(),
+    }
+}
+
+#[tokio::test]
+async fn wadbrowser_setups_run_as_instances_of_their_own() {
+    let e = env().await;
+    let si = signins(&e);
+    let mail = setup(
+        "Mail",
+        "focus",
+        &[("gmail", "https://mail.google.com"), ("drive", "https://drive.google.com")],
+        Some(("gmail", "google-abc123")),
+    );
+    let l =
+        item(&e, wad_proto::v1::LaunchItem::Browser { setup: mail, saved_id: Some("mail".into()), background: true })
+            .await;
+    assert_eq!(l.launch.status, LaunchStatus::Done, "{l:?}");
+    let ws = e.reg.workspace("browser-mail").unwrap();
+    let file = e.tmp.join("signins/.wadbrowser/browser-mail.json");
+    assert_eq!(ws.exec, ["/usr/bin/wadbrowser", "--instance", "browser-mail", "--setup", file.to_str().unwrap()]);
+    assert!(!ws.ephemeral, "a saved setup stays listed");
+    // Its files: the setup, and its sign-ins at their folders here (made now).
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(written["signins"], json!({"gmail": "google-abc123"}));
+    assert_eq!(written["mode"], "focus");
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(e.tmp.join("signins/.wadbrowser/browser-mail.signins.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["signins"][0]["dir"], e.tmp.join("signins/google-abc123").to_str().unwrap());
+    assert_eq!(manifest["signins"][0]["apps"], json!(["gmail"]));
+    assert!(e.tmp.join("signins/google-abc123").is_dir());
+    let made = si.get("google-abc123").unwrap();
+    assert_eq!((made.app.as_str(), made.name.as_str()), ("web", "Work-WadBrowser-Google"));
+    assert_eq!(made.used_by, ["browser-mail"]);
+    // A second, set up otherwise, beside it: a unit of its own, run once.
+    let scratch = setup("", "browser", &[], None);
+    let l = item(&e, wad_proto::v1::LaunchItem::Browser { setup: scratch, saved_id: None, background: true }).await;
+    let run = e.reg.workspace(&l.launch.ws_id).unwrap();
+    assert!(run.id.starts_with("browser-run-") && run.ephemeral, "{}", run.id);
+    let units: Vec<String> = e.fake.0.lock().unwrap().apps.keys().cloned().collect();
+    assert!(
+        units.contains(&"wad-browser-mail.service".to_string()) && units.contains(&format!("wad-{}.service", run.id)),
+        "{units:?}"
+    );
+    // Its last window closed: the app ends, and the run goes with its files.
+    e.fake.with(|m| {
+        m.apps.remove(&format!("wad-{}.service", run.id));
+    });
+    e.reg.reconcile().await;
+    for _ in 0..200 {
+        if e.reg.workspace(&run.id).is_err() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(e.reg.workspace(&run.id).is_err());
+    assert!(!e.tmp.join(format!("signins/.wadbrowser/{}.json", run.id)).exists());
+    // A sign-in for a web app the setup hasn't is refused.
+    let wrong = setup("X", "browser", &[("a", "https://a.example")], Some(("b", "google-abc123")));
+    let r =
+        e.launches.create_item(wad_proto::v1::LaunchItem::Browser { setup: wrong, saved_id: None, background: true });
+    assert_eq!(r.await.unwrap_err().code, ErrorCode::BadRequest);
+}
+
+#[tokio::test]
+async fn the_terminal_and_older_requests_launch_and_sessions_take_apps() {
+    let e = env().await;
+    e.reg.put_workspace(common::app("terminal", "/usr/bin/foot")).await.unwrap();
+    let l = item(&e, wad_proto::v1::LaunchItem::Terminal { background: true }).await;
+    assert_eq!((l.launch.status, l.launch.ws_id.as_str()), (LaunchStatus::Done, "terminal"));
+    // The older shape (no kind) is a workspace's launch; the new one is tagged.
+    let old: wad_proto::v1::LaunchBody =
+        serde_json::from_value(json!({"workspace": "a", "projects": ["notes"]})).unwrap();
+    assert!(
+        matches!(old.item(), wad_proto::v1::LaunchItem::Workspace { workspace, projects, .. } if workspace == "a" && projects == ["notes"])
+    );
+    let tagged: wad_proto::v1::LaunchBody = serde_json::from_value(json!({"kind": "terminal"})).unwrap();
+    assert_eq!(tagged.item(), wad_proto::v1::LaunchItem::Terminal { background: false });
+    let run: wad_proto::v1::LaunchBody =
+        serde_json::from_value(json!({"kind": "run", "from": "a", "overrides": {"projects": []}})).unwrap();
+    assert!(matches!(run.item(), wad_proto::v1::LaunchItem::Run { from, .. } if from == "a"));
+    // A focus session over spaces and apps together.
+    let s = e.view.session_start(&["a".into(), "terminal".into()], Some(25), false).unwrap();
+    assert_eq!(s.workspaces, ["a", "terminal"]);
 }

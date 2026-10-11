@@ -26,6 +26,7 @@ async fn setup(list: Vec<Workspace>, pulls: usize) -> Setup {
         version: "0".into(),
         profile: wad_proto::v1::Profile::User,
         started_at: 0,
+        screen: None,
     });
     let reg = Registry::new(
         Arc::new(fake.clone()),

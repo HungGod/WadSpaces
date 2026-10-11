@@ -37,6 +37,8 @@ pub struct Machine {
     pub installs: usize,
     /// Builds asked for: (tag, base, context).
     pub builds: Vec<(String, String, Vec<u8>)>,
+    /// Each built image's id (a new one each build).
+    pub image_ids: HashMap<String, String>,
     pub build_fails: Option<String>,
     pub build_slow: bool,
     /// podman's secrets: name -> value.
@@ -186,7 +188,14 @@ impl Backend for Fake {
     async fn delete_secret(&self, name: &str) -> Result<bool, String> {
         Ok(self.0.lock().unwrap().secrets.remove(name).is_some())
     }
-    async fn build(&self, context: Vec<u8>, tag: &str, base: &str, mut on_line: OnLine) -> Result<(), String> {
+    async fn build(
+        &self,
+        context: Vec<u8>,
+        tag: &str,
+        base: &str,
+        labels: serde_json::Map<String, serde_json::Value>,
+        mut on_line: OnLine,
+    ) -> Result<(), String> {
         let (fails, slow) = {
             let mut m = self.0.lock().unwrap();
             m.builds.push((tag.into(), base.into(), context));
@@ -203,8 +212,46 @@ impl Backend for Fake {
         on_line("--> 0123abcd");
         self.with(|m| {
             m.images.insert(tag.into());
+            // A build keeps its base's labels (FROM), then adds its own.
+            let mut all = m.image_labels.get(base).cloned().unwrap_or_default();
+            all.extend(labels);
+            m.image_labels.insert(tag.into(), all);
+            let n = m.builds.len();
+            m.image_ids.insert(tag.into(), format!("{n:0>64}"));
         });
         Ok(())
+    }
+    async fn image_info(&self, image: &str) -> Result<Option<wadd::backend::ImageInfo>, String> {
+        let m = self.0.lock().unwrap();
+        Ok(m.images.contains(image).then(|| wadd::backend::ImageInfo {
+            id: m.image_ids.get(image).cloned().unwrap_or_else(|| format!("{:x<64}", image.len())),
+            created: 1_700_000_000.0,
+            size: 2_000_000_000,
+            labels: m.image_labels.get(image).cloned().unwrap_or_default(),
+            tags: vec![image.into()],
+        }))
+    }
+    async fn images_labelled(&self, label: &str) -> Result<Vec<wadd::backend::ImageInfo>, String> {
+        let names: Vec<String> = {
+            let m = self.0.lock().unwrap();
+            let mut n: Vec<String> = m
+                .images
+                .iter()
+                .filter(|i| m.image_labels.get(*i).is_some_and(|l| l.contains_key(label)))
+                .cloned()
+                .collect();
+            n.sort();
+            n
+        };
+        let mut out = vec![];
+        for n in names {
+            out.extend(self.image_info(&n).await?);
+        }
+        Ok(out)
+    }
+    async fn remove_image(&self, image: &str) -> Result<bool, String> {
+        self.with(|m| m.calls.push(format!("rmi {image}")));
+        Ok(self.0.lock().unwrap().images.remove(image))
     }
     async fn workspace_of(&self, container: &str) -> Option<String> {
         self.0.lock().unwrap().labels.get(container).cloned()
@@ -247,5 +294,6 @@ pub fn ws(id: &str, image: &str, display: Display, port: Option<u16>) -> Workspa
         shm_size: Some("1g".into()),
         projects: vec![],
         signins: vec![],
+        ephemeral: false,
     }
 }

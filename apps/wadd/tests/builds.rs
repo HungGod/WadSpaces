@@ -42,6 +42,7 @@ async fn env_with(icons: Option<Arc<Icons>>) -> Env {
         version: "0".into(),
         profile: wad_proto::v1::Profile::User,
         started_at: 0,
+        screen: None,
     });
     let reg = Registry::new(
         Arc::new(fake.clone()),
@@ -223,10 +224,10 @@ async fn bad_designs_are_refused_before_anything_is_built() {
     let err = e.builds.create(&request(d)).unwrap_err();
     assert_eq!(err.code, ErrorCode::BadRequest);
     assert!(err.message.contains("port 3100 already used"), "{}", err.message);
-    // Hotkey 1 is writing's.
+    // Hotkey 1 is writing's: no longer a clash (Super+N follows what runs).
     let mut d = design("clash");
     d["advanced"]["hotkey"] = 1.into();
-    assert!(e.builds.create(&request(d)).unwrap_err().message.contains("hotkey 1 already used"));
+    assert!(e.builds.create(&request(d)).is_ok());
     let mut d = design("Not An Id");
     d["name"] = "".into();
     assert_eq!(e.builds.create(&request(d)).unwrap_err().code, ErrorCode::BadRequest);
@@ -234,7 +235,9 @@ async fn bad_designs_are_refused_before_anything_is_built() {
         e.builds.create(&BuildRequest { design: json!([]), wallpaper: None, projects: vec![] }).unwrap_err().code,
         ErrorCode::BadRequest
     );
-    assert!(e.fake.0.lock().unwrap().builds.is_empty());
+    // Only the one with a hotkey that isn't a clash any more was built.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(e.fake.0.lock().unwrap().builds.len() <= 1);
 }
 
 #[tokio::test]

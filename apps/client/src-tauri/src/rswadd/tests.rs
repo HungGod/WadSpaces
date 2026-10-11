@@ -41,6 +41,7 @@ fn workspace(id: &str, display: Display, port: Option<u16>, hotkey: u8) -> Works
         shm_size: Some("1g".into()),
         projects: vec![],
         signins: vec![],
+        ephemeral: false,
     }
 }
 
@@ -257,13 +258,13 @@ async fn shapes_the_ui_reads() {
         r(
             Method::Put,
             "/api/workspaces/writing",
-            Some(json!({"id": "writing", "name": "W", "image": "i", "display": "host", "hotkey": 2}))
+            Some(json!({"id": "writing", "name": "W", "image": "i", "display": "stream"}))
         )
         .await
         .unwrap_err()
         .status,
         422
-    ); // stream has hotkey 2
+    ); // streamed, with no port
     // Projects and their status.
     let p = r(Method::Post, "/api/projects", Some(json!({"name": "Notes", "mountName": "Notes", "source": {"kind": "git", "url": "https://github.com/o/notes"}}))).await.unwrap();
     let id = p["id"].as_str().unwrap().to_string();

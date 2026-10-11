@@ -36,6 +36,12 @@ fn reads_what_python_reads() {
             if yaml_text.trim().is_empty() { json!({}) } else { serde_norway::from_str(yaml_text).unwrap() };
         let data = if data.is_null() { json!({}) } else { data };
         let got = parse(&data);
+        // Super+N follows what runs now: two workspaces may name the same
+        // (unused) hotkey, which Python refused.
+        if name == "hotkey-twice" {
+            assert!(got.is_ok(), "{name}: {got:?}");
+            continue;
+        }
         match (c.get("error"), got) {
             (Some(want), Err(e)) => {
                 // The same complaint about the same place (Python prints its

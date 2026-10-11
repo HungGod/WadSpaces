@@ -19,9 +19,10 @@ use serde::Deserialize;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::BroadcastStream;
 use wad_proto::v1::{
-    Browse, Build, BuildLog, BuildRequest, CloudLink, Drive, Event, Health, IconPrefetch, IconSource, KeysStatus,
-    Launch, LaunchLog, LaunchRequest, LogLine, MachineInfo, Project, ProjectDeleted, ProjectStatus, Run, Session,
-    SessionRequest, SignIn, SignInPatch, SignInRequest, ViewState, WebappIcon, Workspace, WorkspaceState,
+    Browse, Build, BuildLog, BuildRequest, CloudLink, Drive, Event, Health, IconPrefetch, IconSource, ImageRow,
+    KeysStatus, Launch, LaunchBody, LaunchLog, LayerBuildRequest, LogLine, MachineInfo, Project, ProjectDeleted,
+    ProjectStatus, Run, Session, SessionRequest, SignIn, SignInPatch, SignInRequest, ViewState, WallpaperUpload,
+    WebappIcon, Workspace, WorkspaceSaved, WorkspaceState,
 };
 use wad_proto::{ApiError, ErrorCode};
 
@@ -123,6 +124,14 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/workspaces/{id}", get(workspace).put(workspace_put).delete(workspace_delete))
         .route("/v1/workspaces/{id}/state", get(workspace_state))
         .route("/v1/workspaces/{id}/icon", get(workspace_icon))
+        .route(
+            "/v1/workspaces/{id}/wallpaper",
+            axum::routing::put(workspace_wallpaper).layer(axum::extract::DefaultBodyLimit::max(WALLPAPER_BODY)),
+        )
+        .route("/v1/wadspaces/{id}", axum::routing::put(wadspace_install))
+        .route("/v1/images", get(images))
+        .route("/v1/images/build", post(image_build))
+        .route("/v1/images/{layer}", delete(image_delete))
         .route("/v1/workspaces/{id}/start", post(start))
         .route("/v1/workspaces/{id}/stop", post(stop))
         .route("/v1/workspaces/{id}/restart", post(restart))
@@ -141,7 +150,11 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/signins/{id}/signout", post(signin_sign_out))
         .route("/v1/drives", get(drives))
         .route("/v1/browse", get(browse))
-        .route("/v1/launches", get(launches).post(launch_create))
+        .route(
+            "/v1/launches",
+            get(launches).post(launch_create).layer(axum::extract::DefaultBodyLimit::max(WALLPAPER_BODY)),
+        )
+        .route("/v1/launches/batch", post(launch_batch).layer(axum::extract::DefaultBodyLimit::max(WALLPAPER_BODY)))
         .route("/v1/launches/{id}", get(launch).delete(launch_cancel))
         // A design and its wallpaper (base64): more than axum's default 2 MB.
         .route(
@@ -178,12 +191,17 @@ pub fn router(app: Arc<AppState>) -> Router {
         .with_state(app)
 }
 
+/// A wallpaper (16 MB) as base64, and the rest of its request.
+const WALLPAPER_BODY: usize = 24 * 1024 * 1024;
+
 async fn health() -> Json<Health> {
     Json(Health { ok: true, version: env!("CARGO_PKG_VERSION").into() })
 }
 
 async fn machine(State(app): State<Arc<AppState>>) -> Json<MachineInfo> {
-    Json(app.bus.machine())
+    let mut info = app.bus.machine();
+    info.screen = app.view.screen().await;
+    Json(info)
 }
 
 #[derive(Deserialize)]
@@ -487,12 +505,69 @@ async fn launches(State(app): State<Arc<AppState>>) -> Json<Vec<Launch>> {
     Json(app.launches.list())
 }
 
-/// Opens a workspace with projects; its progress arrives as launch events.
+/// Opens a workspace with projects, a throwaway run of one, a WadBrowser
+/// setup or the terminal; its progress arrives as launch events.
 async fn launch_create(
     State(app): State<Arc<AppState>>,
-    Json(req): Json<LaunchRequest>,
+    Json(req): Json<LaunchBody>,
 ) -> Result<(StatusCode, Json<Launch>), Failure> {
-    Ok((StatusCode::CREATED, Json(app.launches.create_as(&req.workspace, &req.projects, req.restart, req.background)?)))
+    Ok((StatusCode::CREATED, Json(app.launches.create_item(req.item()).await?)))
+}
+
+/// POST /v1/launches/batch: the launcher's pick, launched together.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Batch {
+    items: Vec<wad_proto::v1::LaunchItem>,
+    #[serde(default)]
+    focus_minutes: Option<u32>,
+}
+
+/// Launches the launcher's pick (optionally as a focus session): the
+/// workspaces' ids; the launches arrive as launch events.
+async fn launch_batch(
+    State(app): State<Arc<AppState>>,
+    Json(b): Json<Batch>,
+) -> Result<(StatusCode, Json<Vec<String>>), Failure> {
+    Ok((StatusCode::ACCEPTED, Json(app.launches.batch(b.items, b.focus_minutes).await?)))
+}
+
+/// The layer images here.
+async fn images(State(app): State<Arc<AppState>>) -> Result<Json<Vec<ImageRow>>, Failure> {
+    Ok(Json(crate::images::list(app.registry_backend.as_ref()).await?))
+}
+
+/// Builds a layer's image (a customization's template first when needed).
+async fn image_build(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<LayerBuildRequest>,
+) -> Result<(StatusCode, Json<Build>), Failure> {
+    Ok((StatusCode::CREATED, Json(app.builds.create_layer(&req)?)))
+}
+
+async fn image_delete(State(app): State<Arc<AppState>>, Path(layer): Path<String>) -> Result<StatusCode, Failure> {
+    crate::images::delete(&app.registry, &app.builds, app.registry_backend.as_ref(), &layer).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Installs a wadspace as a workspace on its layer's image (or updates it).
+async fn wadspace_install(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<crate::images::Install>,
+) -> Result<Json<WorkspaceSaved>, Failure> {
+    Ok(Json(crate::images::install(&app.registry, app.registry_backend.as_ref(), &id, &req).await?))
+}
+
+/// The wallpaper a wadspace starts with.
+async fn workspace_wallpaper(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(up): Json<WallpaperUpload>,
+) -> Result<StatusCode, Failure> {
+    let ws = app.registry.workspace(&id)?;
+    crate::images::put_wallpaper(&app.store.dir, &ws, &up)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

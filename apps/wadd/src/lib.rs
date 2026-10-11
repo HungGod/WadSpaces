@@ -14,6 +14,7 @@ pub mod drives;
 pub mod events;
 pub mod github;
 pub mod icons;
+pub mod images;
 pub mod joblog;
 pub mod launches;
 pub mod logbuf;
@@ -216,6 +217,7 @@ impl Server {
                 Profile::User => v1::Profile::User,
             },
             started_at: now_secs(),
+            screen: None,
         };
         let policy = Policy {
             own_uid: nix::unistd::getuid().as_raw(),
@@ -292,6 +294,8 @@ impl Server {
             let signins = Arc::downgrade(&signins);
             registry.on_prepare(move |ws| signins.upgrade().map_or(Ok(()), |s| s.prepare(ws)));
         }
+        launches.set_signins(Arc::downgrade(&signins));
+        launches.set_builds(Arc::downgrade(&builds));
         let registry_backend = backend.clone();
         let cloud_cfg = cloud_settings(config);
         let github = github::GithubService::new(
@@ -311,6 +315,9 @@ impl Server {
                     launches: launches.clone(),
                     github: github.clone(),
                     bus: bus.clone(),
+                    builds: builds.clone(),
+                    signins: signins.clone(),
+                    backend: registry_backend.clone(),
                 },
             )
         });
@@ -387,6 +394,12 @@ impl Server {
             tracing::warn!("workspace units: {e}");
         }
         self.state.view.restore_session();
+        // Runs left over from before (wadd or the machine restarted).
+        let sweep = registry.clone();
+        tokio::spawn(async move {
+            sweep.reconcile().await;
+            sweep.sweep_ephemeral().await;
+        });
         let watcher = self.sway.clone().map(|d| tokio::spawn(d.run(self.state.view.clone() as Arc<dyn WindowSink>)));
         *self.state.keys.lock().unwrap() = self.start_keys();
         // A build can add a workspace (its hotkey, the secrets it names).

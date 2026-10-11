@@ -30,7 +30,10 @@ service cloud.firestore {
 
     match /profiles/{uid} {
       function profileKeys() {
-        return request.resource.data.keys().hasOnly(["username", "displayName", "color", "photoURL", "onboarded", "lastSession", "createdAt"]);
+        // startersCreated: the starter templates (Writing, Dev) were made in
+        // this library once, so a deleted one doesn't come back.
+        return request.resource.data.keys().hasOnly(["username", "displayName", "color", "photoURL", "onboarded", "lastSession", "createdAt", "startersCreated"])
+          && (!("startersCreated" in request.resource.data) || request.resource.data.startersCreated is bool);
       }
       // Other people see your name and avatar (owners of shared wadspaces).
       allow read: if signedIn();
@@ -60,6 +63,57 @@ service cloud.firestore {
 
     // ------------------------------------------------------- per-user data
     match /users/{uid} {
+      // The Builder's layers (src/core/layers.ts) and saved WadBrowser setups:
+      // the owner's alone (public templates come later). The owner's machines
+      // read them, to build a layer's image or launch a setup.
+      function layerId(id) { return id.matches('^[a-z0-9][a-z0-9-]{0,62}$'); }
+      function shortList(l) { return l is list && l.size() <= 200; }
+      function common(d) {
+        return d.get("owner", null) == uid
+          && d.get("name", null) is string && d.name.size() >= 1 && d.name.size() <= 80
+          && (!("description" in d) || (d.description is string && d.description.size() <= 2000))
+          && d.get("createdAt", null) is string && d.get("updatedAt", null) is string
+          && (!("deletedAt" in d) || d.deletedAt == null || d.deletedAt is string);
+      }
+      function validTemplate(d) {
+        return d.keys().hasOnly(["owner", "name", "description", "apps", "starter", "createdAt", "updatedAt", "deletedAt"])
+          && common(d)
+          && d.get("apps", null) is list && d.apps.size() >= 1 && d.apps.size() <= 40
+          && (!("starter" in d) || d.starter == true);
+      }
+      function validSetup(d) {
+        return d.get("browserMode", null) in ["browser", "focus"]
+          && shortList(d.get("webapps", null)) && shortList(d.get("extensions", null))
+          && shortList(d.get("tools", null)) && shortList(d.get("autostart", null));
+      }
+      function validCustomization(d) {
+        return d.keys().hasOnly(["owner", "name", "description", "templateId", "browserMode", "webapps", "extensions", "tools", "autostart", "createdAt", "updatedAt", "deletedAt"])
+          && common(d) && d.get("templateId", null) is string && layerId(d.templateId) && validSetup(d);
+      }
+      function validBrowser(d) {
+        return d.keys().hasOnly(["owner", "name", "mode", "webapps", "secrets", "createdAt", "updatedAt", "deletedAt"])
+          && common(d) && d.get("mode", null) in ["browser", "focus"]
+          && shortList(d.get("webapps", null)) && d.get("secrets", null) is map;
+      }
+      match /templates/{tid} {
+        allow read: if isOwner(uid) || isOwnersMachine(uid);
+        allow create: if isOwner(uid) && layerId(tid) && validTemplate(request.resource.data);
+        allow update: if isOwner(uid) && validTemplate(request.resource.data) && keeps(["owner", "createdAt"]);
+        allow delete: if isOwner(uid);
+      }
+      match /customizations/{cid} {
+        allow read: if isOwner(uid) || isOwnersMachine(uid);
+        allow create: if isOwner(uid) && layerId(cid) && validCustomization(request.resource.data);
+        allow update: if isOwner(uid) && validCustomization(request.resource.data) && keeps(["owner", "createdAt"]);
+        allow delete: if isOwner(uid);
+      }
+      match /browsers/{bid} {
+        allow read: if isOwner(uid) || isOwnersMachine(uid);
+        allow create: if isOwner(uid) && layerId(bid) && validBrowser(request.resource.data);
+        allow update: if isOwner(uid) && validBrowser(request.resource.data) && keeps(["owner", "createdAt"]);
+        allow delete: if isOwner(uid);
+      }
+
       match /drafts/{draftId} {
         allow read, write: if isOwner(uid);
       }
@@ -142,15 +196,21 @@ service cloud.firestore {
         // Every machine of the owner's reads its siblings (tailnet addresses,
         // the projects mounted there); each writes only its own,
         // with the types the apps read.
+        // images: its layer images (GET /v1/images); signins: its saved
+        // sign-ins' ids, names and kinds, never what they hold; screen: its
+        // logical size, for the Builder's preview.
         function heartbeatTypes(d) {
           return (!("lastSeen" in changed()) || d.lastSeen is timestamp)
             && (!("workspaces" in d) || d.workspaces is list)
             && (!("mountedProjects" in d) || d.mountedProjects is list)
-            && (!("view" in d) || d.view == null || d.view is string);
+            && (!("view" in d) || d.view == null || d.view is string)
+            && (!("images" in d) || d.images is list)
+            && (!("signins" in d) || d.signins is list)
+            && (!("screen" in d) || d.screen == null || d.screen is map);
         }
         allow read: if isOwnersMachine(uid);
         allow update: if isMachine(uid, mid)
-          && onlyChanges(["lastSeen", "hostname", "daemonVersion", "view", "workspaces", "metrics", "installed", "tailnet", "mountedProjects"])
+          && onlyChanges(["lastSeen", "hostname", "daemonVersion", "view", "workspaces", "metrics", "installed", "tailnet", "mountedProjects", "images", "signins", "screen"])
           && heartbeatTypes(request.resource.data);
 
         match /commands/{cmdId} {
@@ -158,7 +218,11 @@ service cloud.firestore {
           allow create: if isOwner(uid)
             && request.resource.data.status == "pending"
             // "launcher" and "navigate" are the Python wadd's; the Rust one says "home".
-            && request.resource.data.type in ["switch", "start", "stop", "restart", "home", "launcher", "navigate", "refresh", "sync-secrets", "projects-sync", "launch"];
+            // build: a layer's image; install: a wadspace on its layer, with the
+            // wallpaper the app drew; launch-run: anything the launcher starts
+            // (wadspaces, throwaway runs, WadBrowser setups, the terminal),
+            // optionally as a focus session; session: a session over ones there.
+            && request.resource.data.type in ["switch", "start", "stop", "restart", "home", "launcher", "navigate", "refresh", "sync-secrets", "projects-sync", "launch", "build", "install", "launch-run", "session"];
           allow read: if isMachine(uid, mid);
           allow update: if isMachine(uid, mid) && onlyChanges(["status", "result", "startedAt", "finishedAt", "progress"]);
         }

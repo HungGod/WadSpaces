@@ -1733,7 +1733,14 @@ impl Hud {
         while let Some(child) = self.switcher_box.first_child() {
             self.switcher_box.remove(&child);
         }
+        let divider = model::divider_at(&c.items);
         for (i, item) in c.items.iter().enumerate() {
+            // The spaces, then what runs on the machine itself.
+            if divider == Some(i) {
+                let line = gtk::Separator::new(gtk::Orientation::Vertical);
+                line.add_css_class("divider");
+                self.switcher_box.append(&line);
+            }
             let cell = gtk::Box::new(gtk::Orientation::Vertical, 0);
             cell.add_css_class("item");
             if i == c.index {
@@ -1763,6 +1770,8 @@ impl Hud {
             cell.append(&name);
             if !item.running {
                 cell.append(&label("not running", "state"));
+            } else if let Some(keys) = item.shortcut() {
+                cell.append(&label(&keys, "state"));
             }
             self.switcher_box.append(&cell);
         }
@@ -1994,17 +2003,36 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
         index: 1,
         items: vec![
             model::CarouselItem {
+                view: "home".into(),
+                name: "WadSpaces".into(),
+                icon: None,
+                running: true,
+                kind: "home".into(),
+                number: None,
+            },
+            model::CarouselItem {
                 view: "workspace:writing".into(),
                 name: "Writing".into(),
                 icon: Some("/v1/workspaces/writing/icon".into()),
                 running: true,
+                kind: "space".into(),
+                number: Some(1),
             },
-            model::CarouselItem { view: "home".into(), name: "WadSpaces".into(), icon: None, running: true },
             model::CarouselItem {
                 view: "workspace:iq-dev".into(),
                 name: "IntelligenceQuest Dev".into(),
                 icon: None,
-                running: false,
+                running: true,
+                kind: "space".into(),
+                number: Some(2),
+            },
+            model::CarouselItem {
+                view: "workspace:terminal".into(),
+                name: "WadTerminal".into(),
+                icon: None,
+                running: true,
+                kind: "app".into(),
+                number: Some(3),
             },
         ],
     });

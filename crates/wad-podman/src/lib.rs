@@ -57,6 +57,47 @@ pub fn demux(b: &[u8]) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// An image as `images_labelled` and `image_info` see it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageInfo {
+    pub id: String,
+    /// Unix seconds.
+    pub created: f64,
+    pub size: u64,
+    pub labels: serde_json::Map<String, Value>,
+    pub tags: Vec<String>,
+}
+
+/// "2026-10-11T19:05:00.123456789Z" (or with an offset) → Unix seconds.
+fn rfc3339_secs(s: &str) -> Option<f64> {
+    let (date, rest) = s.split_once('T')?;
+    let mut d = date.split('-').map(|x| x.parse::<i64>());
+    let (y, m, dd) = (d.next()?.ok()?, d.next()?.ok()?, d.next()?.ok()?);
+    let (time, offset) = match rest.find(['Z', '+', '-']) {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "Z"),
+    };
+    let mut t = time.split(':');
+    let (hh, mm) = (t.next()?.parse::<i64>().ok()?, t.next()?.parse::<i64>().ok()?);
+    let ss: f64 = t.next()?.parse().ok()?;
+    let off = match offset {
+        "Z" | "" => 0,
+        o => {
+            let sign = if o.starts_with('-') { -1 } else { 1 };
+            let (oh, om) = o[1..].split_once(':').unwrap_or((&o[1..], "0"));
+            sign * (oh.parse::<i64>().ok()? * 3600 + om.parse::<i64>().ok()? * 60)
+        }
+    };
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + dd - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some((days * 86400 + hh * 3600 + mm * 60 - off) as f64 + ss)
+}
+
 pub fn segment(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -174,6 +215,78 @@ impl Podman {
         }))
     }
 
+    /// An image's id, when it was made (Unix seconds), its size in bytes and
+    /// its labels; None if it isn't here.
+    pub async fn image_info(&self, image: &str) -> Result<Option<ImageInfo>, Error> {
+        let what = format!("inspect image {image}");
+        Ok(self.get_json(&what, &format!("/images/{}/json", segment(image))).await?.map(|info| ImageInfo {
+            id: info.get("Id").and_then(Value::as_str).unwrap_or_default().to_string(),
+            created: info
+                .get("Created")
+                .and_then(Value::as_str)
+                .and_then(rfc3339_secs)
+                .or_else(|| info.get("Created").and_then(Value::as_f64))
+                .unwrap_or(0.0),
+            size: info.get("Size").and_then(Value::as_u64).unwrap_or(0),
+            labels: info
+                .get("Labels")
+                .or_else(|| info.pointer("/Config/Labels"))
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default(),
+            tags: info
+                .get("RepoTags")
+                .and_then(Value::as_array)
+                .map(|t| t.iter().filter_map(Value::as_str).map(String::from).collect())
+                .unwrap_or_default(),
+        }))
+    }
+
+    /// The images that have a label, with their tags (`podman images --filter label=`).
+    pub async fn images_labelled(&self, label: &str) -> Result<Vec<ImageInfo>, Error> {
+        let filters = serde_json::json!({ "label": [label] }).to_string();
+        let path = format!("/images/json?filters={}", segment(&filters));
+        let list = self.get_json("list images", &path).await?.unwrap_or(Value::Null);
+        Ok(list
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|i| ImageInfo {
+                id: i.get("Id").and_then(Value::as_str).unwrap_or_default().to_string(),
+                created: i.get("Created").and_then(Value::as_f64).unwrap_or(0.0),
+                size: i.get("Size").and_then(Value::as_u64).unwrap_or(0),
+                labels: i.get("Labels").and_then(Value::as_object).cloned().unwrap_or_default(),
+                tags: i
+                    .get("RepoTags")
+                    .or_else(|| i.get("Names"))
+                    .and_then(Value::as_array)
+                    .map(|t| t.iter().filter_map(Value::as_str).map(String::from).collect())
+                    .unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    /// Removes an image by name; when other images are built on it, only
+    /// its name goes (they keep its layers). False if there was none.
+    pub async fn remove_image(&self, image: &str) -> Result<bool, Error> {
+        let res = self.send(Method::DELETE, &format!("/images/{}", segment(image)), None).await?;
+        match res.status() {
+            StatusCode::NOT_FOUND => Ok(false),
+            s if s.is_success() => Ok(true),
+            StatusCode::CONFLICT => {
+                let (repo, tag) = image.rsplit_once(':').unwrap_or((image, "latest"));
+                let path = format!("/images/{}/untag?repo={}&tag={}", segment(image), segment(repo), segment(tag));
+                let res = self.send(Method::POST, &path, None).await?;
+                if res.status().is_success() {
+                    Ok(true)
+                } else {
+                    Err(Self::status_error(&format!("untag {image}"), res).await)
+                }
+            }
+            _ => Err(Self::status_error(&format!("remove {image}"), res).await),
+        }
+    }
+
     pub async fn inspect_container(&self, name: &str) -> Result<Option<Value>, Error> {
         self.get_json(&format!("inspect {name}"), &format!("/containers/{}/json", segment(name))).await
     }
@@ -234,14 +347,18 @@ impl Podman {
         context: Vec<u8>,
         tag: &str,
         buildargs: &serde_json::Map<String, Value>,
+        labels: &serde_json::Map<String, Value>,
         mut on_line: impl FnMut(&str),
     ) -> Result<String, Error> {
         let args = serde_json::to_string(buildargs).expect("json");
-        let path = format!(
+        let mut path = format!(
             "/build?t={}&layers=true&rm=true&forcerm=true&pull=false&buildargs={}",
             segment(tag),
             segment(&args)
         );
+        if !labels.is_empty() {
+            path.push_str(&format!("&labels={}", segment(&serde_json::to_string(labels).expect("json"))));
+        }
         let res = self.send(Method::POST, &path, Some((Bytes::from(context), "application/x-tar"))).await?;
         if !res.status().is_success() {
             return Err(Self::status_error(&format!("build {tag}"), res).await);

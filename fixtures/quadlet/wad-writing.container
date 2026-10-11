@@ -14,6 +14,7 @@ Environment=PUID=1000
 Environment=TZ=Pacific/Fiji
 Secret=github_token
 Volume=wad-writing-obsidian:/config/.config/obsidian:z
+Volume=/var/lib/wadspaces/extra/writing:/run/wadspaces-extra:ro,z
 AddDevice=/dev/dri
 ShmSize=1g
 Pull=missing
