@@ -98,8 +98,8 @@ for l in $LAUNCHERS; do
   app=${l%%=*} desk=${l#*=}
   echo "== $app ($desk)"
   podman exec -u abc "$ctr" sh -c '
-    # The desktop panel's environment: what its launchers start apps with
-    # (labwc's own display, and Xwayland for X11 apps).
+    # The environment of the desktop panel: what its launchers start apps
+    # with (the display of labwc, and Xwayland for X11 apps).
     pid=$(pgrep -u abc -x selkies-desktop | head -1)
     eval "$(tr "\0" "\n" < /proc/$pid/environ | grep -E "^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=" | sed "s/^/export /")"
     cd /config
