@@ -1,4 +1,4 @@
-// Writing to the machines' cloud relay. wadd/cloud.py on each machine writes a
+// Writing to the machines' cloud relay. wadd's cloud.rs on each machine writes a
 // heartbeat to users/{uid}/machines/{mid} every 30 s and runs the commands
 // queued under it; CloudBackend listens to the heartbeats. See firestore.rules
 // for what each side may write.
@@ -6,9 +6,24 @@ import { addDoc, collection, doc, onSnapshot, serverTimestamp, setDoc } from "fi
 import { db } from "./firebase";
 import { newEnrollCode } from "./relayCore";
 
-export { ONLINE_WITHIN_MS, isOnlineNow, newEnrollCode, type RelayWorkspace } from "./relayCore";
+export { ONLINE_WITHIN_MS, isOnlineNow, newEnrollCode, type RelayImage, type RelayScreen, type RelaySignIn, type RelayWorkspace } from "./relayCore";
 
-export type CommandType = "switch" | "start" | "stop" | "restart" | "projects-sync" | "sync-secrets" | "launch";
+/** What the relay runs (wadd's cloud.rs `execute`; firestore.rules lists them).
+ *  The Builder's: build (a layer's image), install (a wadspace on its layer,
+ *  with the wallpaper this app drew), launch-run (anything the launcher
+ *  starts, maybe as a focus session) and session. */
+export type CommandType =
+  | "switch"
+  | "start"
+  | "stop"
+  | "restart"
+  | "projects-sync"
+  | "sync-secrets"
+  | "launch"
+  | "build"
+  | "install"
+  | "launch-run"
+  | "session";
 
 /** Queue a command; the machine picks it up within a few seconds. Its id. */
 export async function sendCommand(

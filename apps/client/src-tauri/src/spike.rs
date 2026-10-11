@@ -71,7 +71,6 @@ const WADD: &str = r#"(async () => {
   await t("missing", () => inv("wadd_request", { method: "GET", path: "/api/workspaces/nope", body: null }));
   await t("secret", () => inv("wadd_request", { method: "PUT", path: "/api/secrets/github_token", body: { value: "x" } }));
   await t("traversal", () => inv("wadd_request", { method: "GET", path: "/api/../etc", body: null }));
-  await t("upload", () => inv("wadd_build_context", new Uint8Array(1024), { headers: { "x-build-id": "nope" } }));
   await t("lastState", async () => (await inv("wadd_last_state"))?.machine);
   window.__report("wadd", r);
 })();"#;

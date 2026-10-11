@@ -12,6 +12,31 @@ export interface RelayWorkspace {
   display?: "host" | "stream";
 }
 
+/** What a heartbeat says for the Builder: the layer images there, the saved
+ *  sign-ins' names (never what they hold), and the screen's logical size. */
+export interface RelayImage {
+  layer: string;
+  ref: string;
+  id: string;
+  dockerfileSha: string;
+  builtAt: number;
+  sizeMb: number;
+  from: string;
+}
+
+export interface RelaySignIn {
+  id: string;
+  name: string;
+  /** Its kind: "web", "obsidian", "steam", "vscode-claude-code", ... */
+  app: string;
+}
+
+export interface RelayScreen {
+  width: number;
+  height: number;
+  scale: number;
+}
+
 // The heartbeat comes every 30 s; a minute and a half of silence means offline.
 export const ONLINE_WITHIN_MS = 90_000;
 

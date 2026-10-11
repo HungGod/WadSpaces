@@ -11,6 +11,7 @@ import type { GithubRepo, Project, ProjectDraft } from "@core/projects";
 import type { WaddSpec } from "@core/spec";
 import { inTauri } from "./shell";
 import type { TailnetStatus } from "./types";
+import type { ImageRow } from "@/data/layers";
 
 export const WADD_URL: string = import.meta.env.VITE_WADD_URL || "http://127.0.0.1:8080";
 
@@ -143,6 +144,8 @@ export interface BuildSummary {
   installed: boolean;
   restartRequired: boolean;
   lineCount: number;
+  /** A layer's build ("template:<id>" / "custom:<id>"); null: a design's. */
+  layer?: string | null;
 }
 
 /** A `build` event, or GET /api/builds/{id}: the job plus log lines from line `from`. */
@@ -295,15 +298,9 @@ export class WaddError extends Error {
 type Method = "GET" | "POST" | "PUT" | "DELETE";
 
 /** Through the app's Rust side; it rejects with { status, message }. */
-async function callApp<T>(method: Method, path: string, body?: unknown, raw?: { data: Uint8Array; type: string }): Promise<T> {
+async function callApp<T>(method: Method, path: string, body?: unknown): Promise<T> {
   const { commands } = await import("@/gen/bindings");
-  const { invoke } = await import("@tauri-apps/api/core");
   try {
-    if (raw) {
-      // Only the build folder goes up raw (PUT /api/builds/{id}/context).
-      const id = decodeURIComponent(path.split("/")[3] ?? "");
-      return await invoke<T>("wadd_build_context", raw.data, { headers: { "x-build-id": id } });
-    }
     return (await commands.waddRequest(method, path, body ?? null)) as T;
   } catch (e) {
     const f = e as { status?: number; message?: string };
@@ -314,14 +311,14 @@ async function callApp<T>(method: Method, path: string, body?: unknown, raw?: { 
   }
 }
 
-async function call<T>(method: Method, path: string, body?: unknown, raw?: { data: Uint8Array; type: string }): Promise<T> {
-  if (inTauri) return callApp<T>(method, path, body, raw);
+async function call<T>(method: Method, path: string, body?: unknown): Promise<T> {
+  if (inTauri) return callApp<T>(method, path, body);
   let r: Response;
   try {
     r = await fetch(`${WADD_URL}${path}`, {
       method,
-      headers: raw ? { "Content-Type": raw.type } : body === undefined ? {} : { "Content-Type": "application/json" },
-      body: raw ? (raw.data as BodyInit) : body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
     const message = `Cannot reach wadd at ${WADD_URL}. Is this a WadSpaces machine?`;
@@ -374,9 +371,6 @@ export const wadd = {
   hudClosed: () => call<{ ok: boolean }>("POST", "/api/hud/closed"),
   // Builds on this machine
   builds: () => call<BuildSummary[]>("GET", "/api/builds"),
-  createBuild: (workspace: WaddSpec, baseImage: string) => call<BuildSummary>("POST", "/api/builds", { workspace, base_image: baseImage }),
-  buildContext: (id: string, tarball: Uint8Array) =>
-    call<BuildSummary>("PUT", `/api/builds/${encodeURIComponent(id)}/context`, undefined, { data: tarball, type: "application/x-tar" }),
   /** The Rust wadd: build from the design (it makes the build folder itself). */
   buildDesign: (req: { design: WadspaceSpec; wallpaper: { fileName: string; data: string }; projects: Project[] }) =>
     call<BuildSummary>("POST", "/api/builds/design", req),
@@ -432,9 +426,23 @@ export const wadd = {
   launch: (id: string, since = 0) => call<LaunchUpdate>("GET", `/api/launches/${encodeURIComponent(id)}?since=${since}`),
   cancelLaunch: (id: string) => call<LaunchSummary>("DELETE", `/api/launches/${encodeURIComponent(id)}`),
   // Wad Creator's library, kept by wadd
-  library: <T,>(collection: "wadspaces" | "drafts") => call<T[]>("GET", `/api/library/${collection}`),
-  libraryPut: <T,>(collection: "wadspaces" | "drafts", id: string, doc: T) => call<T>("PUT", `/api/library/${collection}/${encodeURIComponent(id)}`, doc),
-  libraryDelete: (collection: "wadspaces" | "drafts", id: string) => call("DELETE", `/api/library/${collection}/${encodeURIComponent(id)}`),
+  library: <T,>(collection: LibraryCollection) => call<T[]>("GET", `/api/library/${collection}`),
+  libraryPut: <T,>(collection: LibraryCollection, id: string, doc: T) => call<T>("PUT", `/api/library/${collection}/${encodeURIComponent(id)}`, doc),
+  libraryDelete: (collection: LibraryCollection, id: string) => call("DELETE", `/api/library/${collection}/${encodeURIComponent(id)}`),
+  // The Builder's layers (wadd's /v1, passed through as it is)
+  /** The layer images here. */
+  images: () => call<ImageRow[]>("GET", "/v1/images"),
+  /** Builds a layer's image (its template first when needed). */
+  buildLayer: (req: { layer: string; template: unknown; customization: unknown }) => call<{ id: string }>("POST", "/v1/images/build", req),
+  deleteImage: (layer: string) => call("DELETE", `/v1/images/${encodeURIComponent(layer)}`),
+  /** Installs (or updates) a wadspace as a workspace on its layer's image. */
+  installWadspace: (id: string, body: unknown) => call<{ restartRequired: boolean }>("PUT", `/v1/wadspaces/${encodeURIComponent(id)}`, body),
+  /** The wallpaper a wadspace starts with (drawn here). */
+  putWallpaper: (id: string, up: { ext: "png" | "jpg"; data: string }) => call("PUT", `/v1/workspaces/${encodeURIComponent(id)}/wallpaper`, up),
+  /** The launcher's pick, launched together: the workspaces' ids. */
+  launchBatch: (items: unknown[], focusMinutes: number | null) => call<string[]>("POST", "/v1/launches/batch", { items, focusMinutes }),
+  /** This machine: its name, and its screen's logical size. */
+  machine: () => call<{ name: string; screen: { width: number; height: number; scale: number } | null }>("GET", "/v1/machine"),
   // Load and history
   metrics: () => call<Metrics>("GET", "/api/metrics"),
   runs: (workspace?: string, limit = 200) =>
@@ -454,15 +462,16 @@ export const wadd = {
     const has = (path: string) => get(path).then(() => true, () => false);
     // Tailscale's status too: whether it's installed decides the Tailnet card.
     const tailnet = () => get("/api/tailnet").then((t) => t as TailnetStatus, () => null);
-    const [builds, library, runs, projects, signins, tailnetStatus] = await Promise.all([
+    const [builds, layers, library, runs, projects, signins, tailnetStatus] = await Promise.all([
       has("/api/builds"),
+      has("/v1/images"),
       has("/api/library/drafts"),
       has("/api/runs?limit=1"),
       has("/api/projects"),
       has("/api/signins"),
       tailnet(),
     ]);
-    return { builds, library, runs, projects, signins, tailnet: tailnetStatus };
+    return { builds, layers, library, runs, projects, signins, tailnet: tailnetStatus };
   },
   daemonLog: (lines = 200) => call<{ lines: LogLine[] }>("GET", `/api/logs/daemon?lines=${lines}`),
   unitLog: (unit: string, lines = 200) =>
@@ -470,6 +479,9 @@ export const wadd = {
   workspaceLog: (id: string, lines = 200) =>
     call<{ text: string }>("GET", `/api/logs/workspace/${encodeURIComponent(id)}?lines=${lines}`),
 };
+
+/** The library's collections in wadd (`/v1/library/{collection}`). */
+export type LibraryCollection = "wadspaces" | "templates" | "customizations" | "browsers" | "meta" | "drafts";
 
 /** wadd's event stream (`state`, `build`, `launch`, …): `on(event, data)` for
  *  each one, `onDrop()` when the stream drops (it reconnects by itself).

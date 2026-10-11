@@ -48,9 +48,13 @@ import {
   type WadspacePatch,
 } from "../backend";
 import { ensureProjects, hasRepos, knownProjectIds, migrateRepos, withProjects } from "../projects";
-import { buildRequest, designRequest, toLaunchProgress, toProgress } from "./builds";
+import { designRequest, toLaunchProgress, toProgress } from "./builds";
 import { LocalLibrary, type LibraryEntry } from "./library";
 import { lastSession, onboarded, presetProjectsMade } from "./store";
+import { WaddLayerDocs, WaddMachine } from "./layers";
+import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
+import type { LayerLibrary, LayerPatch } from "../backend";
+import type { RunItem } from "../layers";
 
 export { THIS_MACHINE };
 const LOCAL_USER = "local";
@@ -115,6 +119,9 @@ export class LocalBackend implements Backend {
   private tailnet: TailnetStatus | null = null;
   private tailnetAt = 0;
   private readonly seenAt = new Date().toISOString();
+  /** The Builder's documents (wadd's library) and this machine's layer work. */
+  readonly docs = new WaddLayerDocs(() => LOCAL_USER);
+  readonly machine = new WaddMachine();
 
   constructor() {
     this.firstSnap = new Promise((r) => (this.gotFirstSnap = r));
@@ -126,7 +133,8 @@ export class LocalBackend implements Backend {
   /** Find out what this wadd can do (an older one on a stick predates builds). */
   async init() {
     const f = await wadd.features();
-    this.caps.localBuild = f.builds;
+    // Layer images need the Rust wadd's /v1/images: a machine without it can't build.
+    this.caps.localBuild = f.builds && f.layers;
     this.caps.history = f.runs;
     this.caps.projects = f.projects;
     this.caps.signins = f.signins;
@@ -158,6 +166,93 @@ export class LocalBackend implements Backend {
       this.emit("wadspaces");
       this.emit("drafts");
     }
+  }
+
+  // ---------------------------------------------------- the Builder's layers
+  listTemplates() {
+    return this.docs.templates.list();
+  }
+  saveTemplate(t: Template) {
+    return this.docs.templates.put(t).then((x) => (this.emit("templates"), x));
+  }
+  patchTemplate(id: string, patch: LayerPatch) {
+    return this.docs.templates.patch(id, patch).then((x) => (this.emit("templates"), x));
+  }
+  async deleteTemplate(id: string) {
+    await this.machine.deleteImage(`template:${id}`);
+    await this.docs.templates.remove(id);
+    this.emit("templates");
+    this.emit("images");
+  }
+  listCustomizations() {
+    return this.docs.customizations.list();
+  }
+  saveCustomization(c: Customization) {
+    return this.docs.customizations.put(c).then((x) => (this.emit("customizations"), x));
+  }
+  patchCustomization(id: string, patch: LayerPatch) {
+    return this.docs.customizations.patch(id, patch).then((x) => (this.emit("customizations"), x));
+  }
+  async deleteCustomization(id: string) {
+    await this.machine.deleteImage(`custom:${id}`);
+    await this.docs.customizations.remove(id);
+    this.emit("customizations");
+    this.emit("images");
+  }
+  listWadspacesV2() {
+    return this.docs.wadspaces.list();
+  }
+  /** Kept in the library and installed here. */
+  async saveWadspaceV2(w: WadspaceV2, lib: LayerLibrary) {
+    const saved = await this.docs.wadspaces.put(w);
+    await this.machine.install(saved, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== w.id), saved] });
+    this.emit("wadspaces");
+    return saved;
+  }
+  async patchWadspaceV2(id: string, patch: LayerPatch, lib: LayerLibrary) {
+    const saved = await this.docs.wadspaces.patch(id, patch);
+    // Its old image gone (its layers built): it runs on them from now on.
+    if ("legacyImage" in patch) await this.machine.install(saved, lib);
+    this.emit("wadspaces");
+    return saved;
+  }
+  async deleteWadspaceV2(id: string) {
+    await this.machine.uninstall(id);
+    await this.docs.wadspaces.remove(id);
+    this.emit("wadspaces");
+  }
+  listBrowsers() {
+    return this.docs.browsers.list();
+  }
+  saveBrowser(b: BrowserSetup) {
+    return this.docs.browsers.put(b).then((x) => (this.emit("browsers"), x));
+  }
+  patchBrowser(id: string, patch: LayerPatch) {
+    return this.docs.browsers.patch(id, patch).then((x) => (this.emit("browsers"), x));
+  }
+  async deleteBrowser(id: string) {
+    await this.docs.browsers.remove(id);
+    this.emit("browsers");
+  }
+  listImages() {
+    return this.machine.images();
+  }
+  buildLayer(key: LayerKey, lib: LayerLibrary) {
+    return this.machine.build(key, lib);
+  }
+  deleteImage(key: LayerKey) {
+    return this.machine.deleteImage(key);
+  }
+  launchItems(items: RunItem[], focusMinutes: number | null, lib: LayerLibrary) {
+    return this.machine.launch(items, focusMinutes, lib);
+  }
+  machineScreen() {
+    return this.machine.screen();
+  }
+  async createStarters() {
+    const made = await this.docs.createStarters();
+    if (made.length) this.emit("templates");
+    return made;
   }
 
   // ----------------------------------------------------------- live state
@@ -192,6 +287,11 @@ export class LocalBackend implements Backend {
           case "build": {
             const b = toProgress(data as BuildUpdate);
             this.buildListeners.forEach((fn) => fn(b));
+            // A layer's image built (or not): the Builder's states follow.
+            if (b.layer && b.status !== "building") {
+              this.machine.building.delete(b.layer);
+              this.emit("images");
+            } else if (b.layer) this.machine.building.add(b.layer);
             break;
           }
           case "launch": {
@@ -449,12 +549,9 @@ export class LocalBackend implements Backend {
   /** `design`: the wadspace as the account has it (the machine app), when it isn't designed here. */
   async startBuild(wadspaceId: string, design?: Wadspace) {
     if (!this.caps.localBuild) throw new Unsupported("Building on this machine (it needs a newer wadd)");
+    // The Rust wadd makes the build folder itself (no machine runs the Python one).
     const ws = design ?? (await this.getWadspace(wadspaceId));
-    if ((await wadd.kind()) === "rs") return (await wadd.buildDesign(await designRequest(ws, this.projects))).id;
-    const req = await buildRequest(ws, this.specs.find((s) => s.id === wadspaceId), this.projects);
-    const job = await wadd.createBuild(req.workspace, req.baseImage);
-    await wadd.buildContext(job.id, req.tarball);
-    return job.id;
+    return (await wadd.buildDesign(await designRequest(ws, this.projects))).id;
   }
 
   async cancelBuild(id: string) {

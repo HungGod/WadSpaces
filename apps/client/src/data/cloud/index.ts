@@ -12,7 +12,9 @@
 //                                   is; the clones are on the machines, whose relay syncs this
 //   users/{uid}/github/repos        {login, repos, updatedAt}: your GitHub repositories, shared
 //                                   by your machines (the token stays on them)
-//   users/{uid}/machines/{mid}      the relay heartbeat (wadd/cloud.py) and its commands
+//   users/{uid}/machines/{mid}      the relay heartbeat (wadd's cloud.rs) and its commands
+//   the Builder's layers            see layers.ts (templates, customizations, browsers,
+//                                   wadspaces/{id} with version 2)
 //
 // The UI keys people by username, so docs are translated on the way in and out.
 import {
@@ -56,6 +58,10 @@ import { hasRepos, knownProjectIds, migrateRepos, withProjects } from "../projec
 import { currentAuthUser, onAuthUser, signOut } from "./auth";
 import { auth, db } from "./firebase";
 import { ONLINE_WITHIN_MS, createEnrollCode, sendCommand, type CommandType, type RelayWorkspace } from "./relay";
+import { FirestoreLayerDocs, RelayMachine, toWadspaceV2 } from "./layers";
+import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
+import type { LayerLibrary, LayerPatch } from "../backend";
+import type { RunItem } from "../layers";
 
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
 const iso = (t: unknown) => (t && typeof (t as Timestamp).toDate === "function" ? (t as Timestamp).toDate().toISOString() : new Date().toISOString());
@@ -93,6 +99,12 @@ export class CloudBackend implements Backend {
   private unsubs: Unsubscribe[] = [];
   private uid: string | null = null;
   private loaded: Promise<void> = Promise.resolve();
+  /** The Builder's documents, and the default machine's side of them. */
+  readonly docs = new FirestoreLayerDocs((t) => this.emit(t));
+  readonly relay = new RelayMachine(() => {
+    const mid = this.defaultMachineId();
+    return this.uid && mid ? { uid: this.uid, mid, heartbeat: this.machines.get(mid) } : null;
+  });
 
   /** `thisMachine`: in the machine app, this machine's id in the account.
    *  Its heartbeat is left out: the app shows the machine from wadd instead. */
@@ -151,6 +163,7 @@ export class CloudBackend implements Backend {
     this.github = undefined;
     this.githubError = null;
     this.uid = uid;
+    this.docs.attach(uid);
     this.emit("user");
     if (!uid) return;
 
@@ -175,6 +188,11 @@ export class CloudBackend implements Backend {
             if (topic === "wadspaces") await this.loadProfiles([...into.values()].flatMap((d) => [d.owner, ...(d.sharedWith ?? [])]));
             settle();
             this.emit(topic);
+            // The heartbeats carry the Builder's images.
+            if (topic === "machines") {
+              this.relay.sawHeartbeat();
+              this.emit("images");
+            }
           },
           settle,
         ),
@@ -342,7 +360,8 @@ export class CloudBackend implements Backend {
 
   async listWadspaces() {
     await this.loaded;
-    const all = new Map([...this.shared, ...this.owned]);
+    // Designs from before the layers (version 2 ones are listWadspacesV2's).
+    const all = new Map([...this.shared, ...this.owned].filter(([, d]) => d.version !== 2));
     return [...[...all].map(([id, d]) => this.toWadspace(id, d)), ...this.machineOnly().values()];
   }
 
@@ -492,14 +511,92 @@ export class CloudBackend implements Backend {
     return n;
   }
 
-  // --------------------------------------------------------- saved sign-ins
-  /** They stay on the machine they were made on. */
-  async listSignIns() {
-    return [];
+  // ---------------------------------------------------- the Builder's layers
+  listTemplates() {
+    return this.docs.list<Template>("templates");
+  }
+  saveTemplate(t: Template) {
+    return this.docs.put("templates", t);
+  }
+  patchTemplate(id: string, patch: LayerPatch) {
+    return this.docs.patch<Template>("templates", id, patch);
+  }
+  async deleteTemplate(id: string) {
+    await this.docs.remove("templates", id);
+  }
+  listCustomizations() {
+    return this.docs.list<Customization>("customizations");
+  }
+  saveCustomization(c: Customization) {
+    return this.docs.put("customizations", c);
+  }
+  patchCustomization(id: string, patch: LayerPatch) {
+    return this.docs.patch<Customization>("customizations", id, patch);
+  }
+  async deleteCustomization(id: string) {
+    await this.docs.remove("customizations", id);
+  }
+  async listWadspacesV2() {
+    await this.loaded;
+    return [...this.owned].filter(([, d]) => d.version === 2).map(([id, d]) => toWadspaceV2(id, d));
+  }
+  /** In the account; it reaches a machine when it's launched there. */
+  saveWadspaceV2(w: WadspaceV2) {
+    return this.docs.putWadspace(w);
+  }
+  async patchWadspaceV2(id: string, patch: LayerPatch) {
+    const cur = this.owned.get(id);
+    if (!cur) throw new Error("It's gone.");
+    return this.docs.patchWadspace(id, toWadspaceV2(id, cur), patch);
+  }
+  async deleteWadspaceV2(id: string) {
+    await this.docs.removeWadspace(id);
+  }
+  listBrowsers() {
+    return this.docs.list<BrowserSetup>("browsers");
+  }
+  saveBrowser(b: BrowserSetup) {
+    return this.docs.put("browsers", b);
+  }
+  patchBrowser(id: string, patch: LayerPatch) {
+    return this.docs.patch<BrowserSetup>("browsers", id, patch);
+  }
+  async deleteBrowser(id: string) {
+    await this.docs.remove("browsers", id);
+  }
+  /** The default machine's, from its heartbeat. */
+  async listImages() {
+    await this.loaded;
+    return this.relay.images();
+  }
+  buildLayer(key: LayerKey, lib: LayerLibrary) {
+    return this.relay.build(key, lib);
+  }
+  /** Images stay on the machines: one there goes when it's deleted there. */
+  async deleteImage() {}
+  launchItems(items: RunItem[], focusMinutes: number | null, lib: LayerLibrary) {
+    return this.relay.launch(items, focusMinutes, lib);
+  }
+  async machineScreen() {
+    await this.loaded;
+    return this.relay.screen();
+  }
+  createStarters() {
+    return this.docs.createStarters();
   }
 
-  async createSignIn(): Promise<never> {
-    throw new Unsupported("Saved sign-ins (they're kept on a WadSpaces machine)");
+  // --------------------------------------------------------- saved sign-ins
+  /** They stay on the machines: the default one's names, from its heartbeat. */
+  async listSignIns() {
+    await this.loaded;
+    return this.relay.signIns().map((s) => ({ ...s, paths: [], createdAt: 0, size: 0, changedAt: null, usedBy: [], inUse: [] }));
+  }
+
+  /** A sign-in to make on the machine: an id now, made there when it's first launched. */
+  async createSignIn(input: { name: string; app: string }) {
+    const slug = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "signin";
+    const tail = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+    return { id: `${slug}-${tail}`, name: input.name, app: input.app, paths: [], createdAt: Date.now(), size: 0, changedAt: null, usedBy: [], inUse: [] };
   }
 
   async updateSignIn(): Promise<never> {

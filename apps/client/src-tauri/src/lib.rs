@@ -102,18 +102,15 @@ fn run(kiosk: bool) {
         .manage(github::GithubState::new())
         .manage(wadd::Wadd::new())
         .invoke_handler({
-            // Commands with a raw body aren't in the bindings; the rest are.
             let typed = commands.invoke_handler();
-            let raw: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![wadd::wadd_build_context];
-            move |invoke| match invoke.message.command() {
+            move |invoke| {
                 // Only the app's own window: never a web page (the sign-in window).
-                _ if invoke.message.webview_ref().label() != window::MAIN => {
+                if invoke.message.webview_ref().label() != window::MAIN {
                     tracing::warn!(window = invoke.message.webview_ref().label(), "refused a command");
                     invoke.resolver.reject("not allowed");
-                    true
+                    return true;
                 }
-                "wadd_build_context" => raw(invoke),
-                _ => typed(invoke),
+                typed(invoke)
             }
         })
         .setup(move |app| {

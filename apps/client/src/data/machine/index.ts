@@ -29,6 +29,9 @@ import type {
 import { CloudBackend } from "../cloud";
 import { LocalBackend } from "../local";
 import type { ProjectDraft } from "@core/projects";
+import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
+import type { LayerLibrary, LayerPatch } from "../backend";
+import type { RunItem } from "../layers";
 
 export class MachineBackend implements Backend {
   readonly target = "machine" as const;
@@ -53,6 +56,83 @@ export class MachineBackend implements Backend {
       a();
       b();
     };
+  }
+
+  // ---------------------------------------------------- the Builder's layers
+  // The documents are the account's; images, builds and launches this
+  // machine's (a wadspace saved here is installed here too).
+  listTemplates() {
+    return this.cloud.listTemplates();
+  }
+  saveTemplate(t: Template) {
+    return this.cloud.saveTemplate(t);
+  }
+  patchTemplate(id: string, patch: LayerPatch) {
+    return this.cloud.patchTemplate(id, patch);
+  }
+  async deleteTemplate(id: string) {
+    await this.local.deleteImage(`template:${id}`);
+    await this.cloud.deleteTemplate(id);
+  }
+  listCustomizations() {
+    return this.cloud.listCustomizations();
+  }
+  saveCustomization(c: Customization) {
+    return this.cloud.saveCustomization(c);
+  }
+  patchCustomization(id: string, patch: LayerPatch) {
+    return this.cloud.patchCustomization(id, patch);
+  }
+  async deleteCustomization(id: string) {
+    await this.local.deleteImage(`custom:${id}`);
+    await this.cloud.deleteCustomization(id);
+  }
+  listWadspacesV2() {
+    return this.cloud.listWadspacesV2();
+  }
+  async saveWadspaceV2(w: WadspaceV2, lib: LayerLibrary) {
+    const saved = await this.cloud.saveWadspaceV2(w);
+    await this.local.machine.install(saved, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== w.id), saved] });
+    return saved;
+  }
+  async patchWadspaceV2(id: string, patch: LayerPatch, lib: LayerLibrary) {
+    const saved = await this.cloud.patchWadspaceV2(id, patch);
+    if ("legacyImage" in patch) await this.local.machine.install(saved, lib);
+    return saved;
+  }
+  async deleteWadspaceV2(id: string) {
+    await this.local.machine.uninstall(id);
+    await this.cloud.deleteWadspaceV2(id);
+  }
+  listBrowsers() {
+    return this.cloud.listBrowsers();
+  }
+  saveBrowser(b: BrowserSetup) {
+    return this.cloud.saveBrowser(b);
+  }
+  patchBrowser(id: string, patch: LayerPatch) {
+    return this.cloud.patchBrowser(id, patch);
+  }
+  deleteBrowser(id: string) {
+    return this.cloud.deleteBrowser(id);
+  }
+  listImages() {
+    return this.local.listImages();
+  }
+  buildLayer(key: LayerKey, lib: LayerLibrary) {
+    return this.local.buildLayer(key, lib);
+  }
+  deleteImage(key: LayerKey) {
+    return this.local.deleteImage(key);
+  }
+  launchItems(items: RunItem[], focusMinutes: number | null, lib: LayerLibrary) {
+    return this.local.launchItems(items, focusMinutes, lib);
+  }
+  machineScreen() {
+    return this.local.machineScreen();
+  }
+  createStarters() {
+    return this.cloud.createStarters();
   }
 
   // ---------------------------------------------------------------- people

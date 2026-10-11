@@ -7,6 +7,9 @@ import type { BuildJob } from "./build";
 import type { LaunchJob } from "./launch";
 import { THIS_MACHINE, hasAccount } from "./machine";
 import type { App, Draft, FocusLock, LastSession, Machine, PublicUser, Wadspace } from "./types";
+import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
+import type { LayerLibrary } from "@/data/backend";
+import { byLayer, imageState, type ImageRow, type ImageState } from "@/data/layers";
 
 /** The machine the offline app runs on. */
 export { THIS_MACHINE } from "./machine";
@@ -59,6 +62,15 @@ interface AppState {
   launches: LaunchJob[];
   /** Quiet notices that surface from the profile icon, e.g. "your wadspace is ready". */
   notices: Notice[];
+  // The Builder's layers (deleted ones included: `deletedAt`).
+  templates: Template[];
+  customizations: Customization[];
+  wadspacesV2: WadspaceV2[];
+  browsers: BrowserSetup[];
+  /** The layer images on the launch machine. */
+  images: Partial<Record<LayerKey, ImageRow>>;
+  /** The launch machine's screen, which desktops are laid out at. */
+  machineScreen: { width: number; height: number };
 
   setUser: (u: PublicUser | null) => void;
   setLaunchTarget: (id: string) => void;
@@ -71,6 +83,13 @@ interface AppState {
   loadLastSession: () => Promise<void>;
   loadProjects: () => Promise<void>;
   loadSignIns: () => Promise<void>;
+  /** The Builder's documents (and, the first time, the starter templates). */
+  loadLayers: () => Promise<void>;
+  loadImages: () => Promise<void>;
+  /** Everything the Builder's documents are, as the backend takes them. */
+  layerLib: () => LayerLibrary;
+  /** How a layer's image stands on the launch machine. */
+  imageState: (key: LayerKey) => ImageState;
   patchWadspace: (id: string, patch: WadspacePatch) => Promise<Wadspace>;
   toast: (t: Omit<Toast, "id">) => number;
   updateToast: (id: number, t: Partial<Toast>) => void;
@@ -127,6 +146,12 @@ export const useApp = create<AppState>((set, get) => ({
   signIns: [],
   launches: [],
   notices: [],
+  templates: [],
+  customizations: [],
+  wadspacesV2: [],
+  browsers: [],
+  images: {},
+  machineScreen: { width: 1920, height: 1080 },
 
   setUser: (user) => set({ user }),
   setLaunchTarget: (launchTarget) => set({ launchTarget }),
@@ -137,7 +162,38 @@ export const useApp = create<AppState>((set, get) => ({
     follow();
     backend.listBuilds?.().then((bs) => bs.forEach(get().applyBuild)).catch(() => {});
     backend.listLaunches?.().then((ls) => ls.forEach(get().applyLaunch)).catch(() => {});
-    await Promise.all([get().loadWadspaces(), get().loadMachines(), get().loadDrafts(), get().loadFocus(), get().loadLastSession(), get().loadProjects(), get().loadSignIns()]);
+    await Promise.all([
+      get().loadWadspaces(),
+      get().loadMachines(),
+      get().loadDrafts(),
+      get().loadFocus(),
+      get().loadLastSession(),
+      get().loadProjects(),
+      get().loadSignIns(),
+      get().loadLayers(),
+    ]);
+  },
+  loadLayers: async () => {
+    // A library seen the first time gets the starter templates (once).
+    await backend.createStarters().catch(() => {});
+    const [templates, customizations, wadspacesV2, browsers, machineScreen] = await Promise.all([
+      backend.listTemplates(),
+      backend.listCustomizations(),
+      backend.listWadspacesV2(),
+      backend.listBrowsers(),
+      backend.machineScreen().catch(() => get().machineScreen),
+    ]);
+    set({ templates, customizations, wadspacesV2, browsers, machineScreen });
+    await get().loadImages();
+  },
+  loadImages: async () => set({ images: byLayer(await backend.listImages().catch(() => [])) }),
+  layerLib: () => {
+    const { templates, customizations, wadspacesV2, browsers } = get();
+    return { templates, customizations, wadspaces: wadspacesV2, browsers };
+  },
+  imageState: (key) => {
+    const building = new Set(get().builds.filter((b) => b.status === "building" && b.layer).map((b) => b.layer!));
+    return imageState(key, get().layerLib(), get().images, building);
   },
   loadWadspaces: async () => set(split(await backend.listWadspaces())),
   loadMachines: async () => {
@@ -205,6 +261,7 @@ export const useApp = create<AppState>((set, get) => ({
       lines,
       status: b.status,
       error: b.error ?? undefined,
+      layer: b.layer ?? prev?.layer ?? null,
     };
     set({ builds: prev ? get().builds.map((x) => (x.id === b.id ? job : x)) : [...get().builds, job] });
     if (prev?.status === "building" && b.status !== "building") onBuildFinished(job, !!b.restartRequired);
@@ -243,7 +300,10 @@ function follow() {
   const s = () => useApp.getState();
   const reload: Record<Topic, () => Promise<unknown>> = {
     user: async () => s().setUser(await backend.me().catch(() => null)),
-    wadspaces: () => s().loadWadspaces(),
+    wadspaces: async () => {
+      await s().loadWadspaces();
+      useApp.setState({ wadspacesV2: await backend.listWadspacesV2() });
+    },
     drafts: () => s().loadDrafts(),
     machines: async () => {
       await s().loadMachines();
@@ -256,6 +316,11 @@ function follow() {
     signins: () => s().loadSignIns(),
     // The pages that show the repo list listen for it themselves.
     github: async () => {},
+    // The Builder's.
+    templates: async () => useApp.setState({ templates: await backend.listTemplates() }),
+    customizations: async () => useApp.setState({ customizations: await backend.listCustomizations() }),
+    browsers: async () => useApp.setState({ browsers: await backend.listBrowsers() }),
+    images: () => s().loadImages(),
   };
   backend.subscribe((t) => void reload[t]().catch(() => {}));
   backend.onBuild?.((b) => s().applyBuild(b));

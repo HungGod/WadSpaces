@@ -14,6 +14,8 @@ import { dropFileIcons } from "@core/model";
 import type { GithubRepo, Project, ProjectDraft, ProjectStatus } from "@core/projects";
 import type { App, ContainerRun, Draft, FocusLock, LastSession, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
+import type { BrowserSetup, Customization, LayerKey, Library, Template, WadspaceV2 } from "@core/layers";
+import type { ImageRow, RunItem } from "./layers";
 
 export interface Caps {
   /** Share wadspaces with other users. */
@@ -55,6 +57,8 @@ export interface BuildProgress {
   lines: string[];
   /** A rebuilt wadspace that's running needs a restart to use the new image. */
   restartRequired?: boolean;
+  /** A layer's image ("template:<id>" / "custom:<id>"), for the Builder's states. */
+  layer?: string | null;
 }
 
 /** One thing a launch gets ready before the wadspace starts: its image, or a project's folder. */
@@ -145,11 +149,72 @@ export interface FolderListing {
 }
 
 /** What changed, so the store reloads just that. "github": the repo list (pages listen themselves). */
-export type Topic = "user" | "wadspaces" | "drafts" | "machines" | "focus" | "session" | "projects" | "signins" | "github";
+export type Topic =
+  | "user"
+  | "wadspaces"
+  | "drafts"
+  | "machines"
+  | "focus"
+  | "session"
+  | "projects"
+  | "signins"
+  | "github"
+  | "templates"
+  | "customizations"
+  | "browsers"
+  | "images";
+
+/** A change to a layer document: soft delete (`deletedAt`) or restore (null). */
+export interface LayerPatch {
+  deletedAt?: string | null;
+  /** Migrated from before the layers: null once its layers are built. */
+  legacyImage?: string | null;
+}
+
+/** Everything the Builder's documents are, for the calls that need them all. */
+export interface LayerLibrary extends Library {
+  wadspaces: WadspaceV2[];
+  browsers: BrowserSetup[];
+}
 
 export interface Backend {
   readonly target: "offline" | "online" | "machine";
   readonly caps: Caps;
+
+  // -------------------------------------------------- the Builder's layers
+  // Documents (deleted ones included: `deletedAt`). Saving creates or
+  // replaces by id; deleting is for good (soft delete is a patch).
+  listTemplates(): Promise<Template[]>;
+  saveTemplate(t: Template): Promise<Template>;
+  patchTemplate(id: string, patch: LayerPatch): Promise<Template>;
+  deleteTemplate(id: string): Promise<void>;
+  listCustomizations(): Promise<Customization[]>;
+  saveCustomization(c: Customization): Promise<Customization>;
+  patchCustomization(id: string, patch: LayerPatch): Promise<Customization>;
+  deleteCustomization(id: string): Promise<void>;
+  /** Saved on a machine (offline, the machine app): installed there too. */
+  listWadspacesV2(): Promise<WadspaceV2[]>;
+  saveWadspaceV2(w: WadspaceV2, lib: LayerLibrary): Promise<WadspaceV2>;
+  patchWadspaceV2(id: string, patch: LayerPatch, lib: LayerLibrary): Promise<WadspaceV2>;
+  deleteWadspaceV2(id: string): Promise<void>;
+  listBrowsers(): Promise<BrowserSetup[]>;
+  saveBrowser(b: BrowserSetup): Promise<BrowserSetup>;
+  patchBrowser(id: string, patch: LayerPatch): Promise<BrowserSetup>;
+  deleteBrowser(id: string): Promise<void>;
+  /** The layer images on the launch machine (online: its heartbeat). */
+  listImages(): Promise<ImageRow[]>;
+  /** Builds a layer's image there (a customization's template first when needed): the build's id. */
+  buildLayer(key: LayerKey, lib: LayerLibrary): Promise<string>;
+  /** Removes a layer's image there (a template or customization deleted for good). */
+  deleteImage(key: LayerKey): Promise<void>;
+  /** Starts what the launcher picked, together (a focus session with minutes):
+   *  the workspaces' ids. Their images are built first where they need it. */
+  launchItems(items: RunItem[], focusMinutes: number | null, lib: LayerLibrary): Promise<string[]>;
+  /** The launch machine's screen, which the Builder lays desktops out at. */
+  machineScreen(): Promise<{ width: number; height: number }>;
+  /** On a library's first load: the starter templates (Writing, Dev), made
+   *  once as the user's own. The ones made now. */
+  createStarters(): Promise<Template[]>;
 
   /** Settle what this backend can do before the app renders (e.g. which wadd). */
   init?(): Promise<void>;

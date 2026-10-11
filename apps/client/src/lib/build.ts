@@ -18,6 +18,8 @@ export interface BuildJob {
   lines: string[];
   status: "building" | "done" | "error";
   error?: string;
+  /** A layer's image ("template:<id>" / "custom:<id>"); null: a design's. */
+  layer?: string | null;
 }
 
 /**

@@ -146,7 +146,8 @@ impl Mirror {
 fn build_py(b: &Value) -> Value {
     json!({"id": s(b, "id"), "wsId": s(b, "wsId"), "name": s(b, "name"), "status": s(b, "status"), "progress": s(b, "progress"),
            "error": s(b, "error"), "image": s(b, "image"), "created": s(b, "created"), "started": s(b, "started"), "finished": s(b, "finished"),
-           "installed": s(b, "updated"), "restartRequired": s(b, "restartRequired"), "lineCount": s(b, "lineCount")})
+           "installed": s(b, "updated"), "restartRequired": s(b, "restartRequired"), "lineCount": s(b, "lineCount"),
+           "layer": s(b, "layer")})
 }
 
 fn launch_py(l: &Value) -> Value {
@@ -277,9 +278,13 @@ impl RsWadd {
         self.v1(Method::Put, &format!("/v1/secrets/{name}"), Some(&json!({"value": value}))).await.map(drop)
     }
 
-    /// The UI's call, answered by the Rust wadd.
+    /// The UI's call, answered by the Rust wadd: /v1 as it is, the older
+    /// /api calls in their Python shapes.
     pub async fn request(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value, WaddFailure> {
         use Method::*;
+        if path.starts_with("/v1/") {
+            return self.v1(method, path, body.as_ref().filter(|b| !b.is_null())).await;
+        }
         let (p, q) = query(path);
         let seg: Vec<&str> = p.trim_start_matches('/').split('/').collect();
         let b = body.unwrap_or(Value::Null);

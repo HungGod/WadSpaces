@@ -16,13 +16,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
-use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 const DEFAULT_URL: &str = "http://127.0.0.1:8080";
-/// Python wadd's own limit on a build folder.
-const MAX_CONTEXT: usize = 64 << 20;
 const RECONNECT: Duration = Duration::from_secs(3);
 
 /// A failed call: wadd's status (0 when it couldn't be reached) and its
@@ -122,10 +119,12 @@ impl Wadd {
     }
 }
 
-/// Whether the page may make this call: wadd's API, minus secrets.
+/// Whether the page may make this call: wadd's API (the older /api calls
+/// rswadd translates, and /v1 as it is), minus setting secrets and remote
+/// views (the app's own, never the page's).
 fn allowed(method: Method, path: &str) -> Result<(), WaddFailure> {
     let path_only = path.split('?').next().unwrap_or("");
-    let ok = path.starts_with("/api/")
+    let ok = (path.starts_with("/api/") || path.starts_with("/v1/"))
         && path.len() <= 2048
         && !path_only.split('/').any(|s| s == ".." || s == ".")
         && !path.contains(['#', '\\'])
@@ -133,8 +132,12 @@ fn allowed(method: Method, path: &str) -> Result<(), WaddFailure> {
     if !ok {
         return Err(WaddFailure::new(400, format!("not a wadd API path: {path:?}")));
     }
-    if path_only.starts_with("/api/secrets") && !matches!(method, Method::Get) {
+    let secrets = path_only.starts_with("/api/secrets") || path_only.starts_with("/v1/secrets");
+    if secrets && !matches!(method, Method::Get) {
         return Err(WaddFailure::new(403, "secrets are set by the app, not the page"));
+    }
+    if path_only.starts_with("/v1/remote-views") || path_only.starts_with("/v1/cloud/link") {
+        return Err(WaddFailure::new(403, "the app does that itself, not the page"));
     }
     Ok(())
 }
@@ -179,30 +182,6 @@ pub fn wadd_kind(wadd: State<'_, Wadd>) -> String {
 #[specta::specta]
 pub fn wadd_last_state(wadd: State<'_, Wadd>) -> Option<Json> {
     wadd.last_state.lock().unwrap().clone()
-}
-
-/// Uploads a build folder (a tar) for build `x-build-id`. Called with a raw
-/// body, so it's outside the generated bindings: see `src/lib/wadd.ts`.
-#[tauri::command]
-pub async fn wadd_build_context(wadd: State<'_, Wadd>, request: Request<'_>) -> Result<Json, WaddFailure> {
-    if wadd.rs.is_some() {
-        return Err(WaddFailure::new(409, "this machine's wadd builds from the design"));
-    }
-    let InvokeBody::Raw(tar) = request.body() else {
-        return Err(WaddFailure::new(400, "expected the tar as a raw body"));
-    };
-    if tar.len() > MAX_CONTEXT {
-        return Err(WaddFailure::new(413, "build folder too big (64 MB max)"));
-    }
-    let id = request
-        .headers()
-        .get("x-build-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
-        .ok_or_else(|| WaddFailure::new(400, "missing or bad x-build-id"))?;
-    let url = format!("{}/api/builds/{id}/context", wadd.base);
-    let res = wadd.http.put(url).header("content-type", "application/x-tar").body(tar.clone()).send().await;
-    wadd.finish(res).await
 }
 
 /// Follows wadd's event stream for as long as the app runs, reconnecting
@@ -305,6 +284,12 @@ mod tests {
         assert!(allowed(Method::Post, "/api/workspaces/writing/switch").is_ok());
         assert!(allowed(Method::Get, "/api/secrets").is_ok());
         assert_eq!(allowed(Method::Put, "/api/secrets/github_token").unwrap_err().status, 403);
+        // /v1 as it is (the Builder's routes), minus the app's own.
+        assert!(allowed(Method::Post, "/v1/images/build").is_ok());
+        assert!(allowed(Method::Put, "/v1/workspaces/academy/wallpaper").is_ok());
+        assert_eq!(allowed(Method::Put, "/v1/secrets/github_token").unwrap_err().status, 403);
+        assert_eq!(allowed(Method::Post, "/v1/remote-views").unwrap_err().status, 403);
+        assert_eq!(allowed(Method::Get, "/v1/../etc").unwrap_err().status, 400);
         for bad in ["/", "api/x", "/api/../etc", "/api/./x", "/api/x#y", "/api/a\\b", "/api/a\nb", "http://evil/api/x"]
         {
             assert_eq!(allowed(Method::Get, bad).unwrap_err().status, 400, "{bad:?}");
