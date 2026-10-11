@@ -9,7 +9,13 @@ Electron app). It's three things in one program:
   icon and window class (`wadspaces-webapp-<id>`), no address bar.
 
 Links from other apps (`xdg-open`) open in whichever of the first two the
-workspace's design has on its desktop (`/etc/wadspaces/wadbrowser.conf`).
+wadspace's customization picked (`/etc/wadspaces/wadbrowser.conf`).
+
+On the machine itself, beside the wadspaces, the launcher starts WadBrowser,
+WadBrowser Focus and **WadBrowser setups**: a mode, web apps, and a saved
+sign-in for each (or none), saved to launch again or run once. Each runs as
+an instance of its own (below), so several can be open at once, each set up
+its own way.
 
 ## How it's put together
 
@@ -20,8 +26,9 @@ Tauri's own child webviews can't be laid out on Wayland, and pages never get
 Tauri's IPC this way. Menus and panels are a transparent view in a popup
 surface of their own, which the compositor blends over the page.
 
-- **One process per user** (`ipc.rs`): a later launch hands its request to
-  the running browser over `$XDG_RUNTIME_DIR/wadbrowser/ctl.sock` and exits,
+- **One process per user and instance** (`ipc.rs`, `instance.rs`): a later
+  launch hands its request to the running browser over
+  `$XDG_RUNTIME_DIR/wadbrowser[/<instance>]/ctl.sock` and exits,
   so a link opens in the window already there. Tabs move between windows
   (drag one off the strip, or onto another window's chrome); a moved tab's
   page loads again in its new window, history kept: WebKit ties a view's
@@ -35,7 +42,10 @@ surface of their own, which the compositor blends over the page.
   is the sign-in's folder that wadd mounts at
   `/run/wadspaces-signins/<id>` (listed in
   `/run/wadspaces-extra/signins.json`), shared with every wadspace whose
-  apps use it; its cache stays the wadspace's own.
+  apps use it; its cache stays the wadspace's own. A web app in a setup
+  with no saved sign-in gets an **ephemeral** profile (WebKit's ephemeral
+  data manager): nothing of it reaches the disk, and it's forgotten when its
+  last window closes.
 - **GPU**: on when the container has a usable `/dev/dri` (`gpu.rs`), video
   decoded with VA-API.
 - **What WebKitGTK can't do**: DRM (EME) and video calls (WebRTC). Spotify,
@@ -49,7 +59,17 @@ wadbrowser --no-urlbar [URL...]           WadBrowser Focus
 wadbrowser --default [URL...]             what the workspace chose (links)
 wadbrowser --app <id> --name <name> --url <start> [URL...]
   --new-window  --profile <p>  --gpu auto|on|off  --icon <png>  --config <kalebrowser.json>
+wadbrowser --instance <id> [...]          an instance of its own: socket, session and
+                                          profiles under wadbrowser/instances/<id>
+wadbrowser --instance <id> --setup <file> a setup the launcher wrote: its mode, web apps
+                                          and their sign-ins (each app's window opens)
 ```
+
+wadd writes a setup's file into the sign-ins folder
+(`/var/lib/wadspaces-signins/.wadbrowser/<id>.json`, readable by the screen
+user) and starts it as a transient unit; WadBrowser Focus on the machine is
+the `focus` instance. A setup run once (or with no name) is an ephemeral
+instance: it keeps no session.
 
 Settings: `/etc/wadspaces/wadbrowser.conf`, then
 `~/.config/wadbrowser/wadbrowser.conf` (`default`, `home`, `search`,
@@ -69,6 +89,9 @@ bar), under WadBrowser's logo on the machine's own WadBrowser. `WADBROWSER_DEVTO
   `WADBROWSER_SPIKE_SITES="https://… …"` checks real sites and what WebKit
   supports; `WADBROWSER_SPIKE_HOME=1` checks the home page and its search box.
 - `spike/ipc.sh` checks the hand-off from a second launch, timed.
+- `spike/instances.sh` checks two instances side by side, a setup's
+  ephemeral profile leaving nothing behind, and a saved sign-in's cookie
+  landing in its folder.
 - `apps/wadd/dev/try-build.sh` builds a design with web apps through wadd and
   opens one, and a link, in a real workspace.
 
