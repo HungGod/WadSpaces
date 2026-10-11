@@ -1,6 +1,6 @@
 //! What the HUD shows, worked out from wadd's events (pure, so it's tested
-//! without a screen): `session`, `network` and `carousel` (wad_proto's v1
-//! types, read leniently).
+//! without a screen): `session`, `network`, `carousel`, and `view` and
+//! `workspaces` for WadNotes' notespace (wad_proto's v1 types, read leniently).
 
 use serde::Deserialize;
 
@@ -36,13 +36,64 @@ fn yes() -> bool {
     true
 }
 
-/// What the HUD keeps of wadd's state (its `session` and `network` events).
+/// What the HUD keeps of wadd's state (its `session`, `network`, `view` and
+/// `workspaces` events).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct State {
     #[serde(default)]
     pub session: Option<Session>,
     #[serde(default)]
     pub network: Option<Network>,
+    /// What's on screen: "home" (WadSpaces Client) or a workspace's id.
+    #[serde(default)]
+    pub view: Option<String>,
+    #[serde(default)]
+    pub workspaces: Vec<Space>,
+}
+
+/// A workspace, as WadNotes needs it (wadd's `workspaces` event).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct Space {
+    pub id: String,
+    pub name: String,
+    /// "app": the machine's own (Terminal, WadBrowser); none: a wadspace.
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+impl Space {
+    pub fn is_app(&self) -> bool {
+        self.kind.as_deref() == Some("app")
+    }
+}
+
+/// wadd's `view` event: what's on screen.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ViewState {
+    #[serde(deserialize_with = "view")]
+    pub view: String,
+}
+
+/// WadNotes' notespace for what's on screen: a wadspace's own, or the
+/// machine's ("default") for WadSpaces Client, its apps (Terminal,
+/// WadBrowser) and anything it doesn't know.
+pub fn scope_for(view: Option<&str>, spaces: &[Space]) -> String {
+    match view.and_then(|v| spaces.iter().find(|s| s.id == v)) {
+        Some(s) if !s.is_app() => s.id.clone(),
+        _ => wad_notes::DEFAULT.into(),
+    }
+}
+
+/// The notespaces you can look at: the machine's own, then each wadspace
+/// (enabled, not an app), by name. (id, name).
+pub fn notespaces(spaces: &[Space]) -> Vec<(String, String)> {
+    let mut list: Vec<(String, String)> =
+        spaces.iter().filter(|s| s.enabled && !s.is_app()).map(|s| (s.id.clone(), s.name.clone())).collect();
+    list.sort_by_key(|s| s.1.to_lowercase());
+    list.insert(0, (wad_notes::DEFAULT.into(), "Default".into()));
+    list
 }
 
 /// A focus session whose time isn't up: the buttons give way to the timer.
@@ -278,5 +329,39 @@ mod tests {
         )
         .unwrap();
         assert_eq!((c.items[0].view.as_str(), c.items[1].view.as_str()), ("home", "writing"));
+        let v: ViewState =
+            serde_json::from_str(r#"{"view":{"kind":"workspace","id":"writing"},"pending":null,"nativeDisplay":true}"#)
+                .unwrap();
+        assert_eq!(v.view, "writing");
+        let spaces: Vec<Space> = serde_json::from_str(
+            r#"[{"id":"writing","name":"Writing","image":"i","display":"host","enabled":true},
+                {"id":"terminal","name":"Terminal","kind":"app","exec":["/usr/bin/foot"],"enabled":true}]"#,
+        )
+        .unwrap();
+        assert!(spaces[1].is_app() && !spaces[0].is_app());
+    }
+
+    #[test]
+    fn the_notespace_follows_the_screen() {
+        let space = |id: &str, name: &str, kind: Option<&str>, enabled: bool| Space {
+            id: id.into(),
+            name: name.into(),
+            kind: kind.map(String::from),
+            enabled,
+        };
+        let spaces = [
+            space("writing", "Writing", None, true),
+            space("terminal", "Terminal", Some("app"), true),
+            space("browser", "WadBrowser", Some("app"), true),
+            space("iq-dev", "IQ Dev", None, true),
+            space("old", "Old", None, false),
+        ];
+        assert_eq!(scope_for(Some("writing"), &spaces), "writing");
+        // The Client, the machine's apps and what isn't known: the machine's own.
+        for v in [Some("home"), Some("terminal"), Some("browser"), Some("gone"), None] {
+            assert_eq!(scope_for(v, &spaces), "default", "{v:?}");
+        }
+        let names: Vec<String> = notespaces(&spaces).into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names, ["Default", "IQ Dev", "Writing"]);
     }
 }

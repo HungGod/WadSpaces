@@ -1,0 +1,8 @@
+# WadTerminal: foot, a program on the machine itself (not an image). wadd runs
+# it as the kiosk user in a transient unit, wad-terminal.service, and shows
+# its window full screen like a wadspace's. No hotkey: it's on Super+Tab and
+# in the Manager, not Super+number.
+name = "WadTerminal"
+kind = "app"
+exec = ["/usr/bin/foot"]
+icon = "/usr/share/wadspaces/icons/terminal.png"

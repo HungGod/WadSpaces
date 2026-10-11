@@ -303,7 +303,14 @@ fn workspace_unit(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: 
             None => lines.push(format!("Volume={projects_dir}/{}:/config/Desktop/{mount}:rw,z", js::field(p, "id"))),
         }
     }
-    if !projects.is_empty() {
+    // Saved sign-ins: each its folder on the host (`path`, wadd's), read-write
+    // and shared with the other wadspaces that use it (:z, not :Z).
+    let signins = js::arr(w, "signins");
+    for s in signins.iter().filter(|s| s.get("path").is_some_and(js::truthy)) {
+        let path = js::string(&s["path"]);
+        lines.push(format!("Volume={path}:{}/{}:rw,z", crate::signins::MOUNT_ROOT, js::field(s, "id")));
+    }
+    if !projects.is_empty() || !signins.is_empty() {
         lines.push(format!("Volume={state_dir}/extra/{id}:/run/wadspaces-extra:ro,z"));
     }
     // The kiosk session's sway (uid 1000) is the compositor it draws on.
@@ -486,5 +493,19 @@ mod tests {
         let got =
             super::quadlet(&w, "/home/u/.local/share/wadspaces-projects", "/home/u/.local/state/wadspaces", Some(1000));
         assert_eq!(got, include_str!("../../../fixtures/quadlet/wad-writing-rootless.container"));
+    }
+
+    #[test]
+    fn signins_are_mounted_with_the_extra_folder() {
+        let w = json!({
+            "id": "writing", "name": "Writing", "image": "localhost/wadspaces-writing:latest", "display": "host",
+            "env": {"PUID": "1000"}, "shm_size": "1g",
+            "signins": [
+                {"id": "github-a1b2", "app": "github", "web": true, "path": "/var/lib/wadspaces-signins/github-a1b2"},
+                {"id": "vscode-c3d4", "app": "vscode", "path": "/var/lib/wadspaces-signins/vscode-c3d4"},
+            ],
+        });
+        let got = super::quadlet(&w, super::PROJECTS_DIR, super::STATE_DIR, None);
+        assert_eq!(got, include_str!("../../../fixtures/quadlet/wad-writing-signins.container"));
     }
 }

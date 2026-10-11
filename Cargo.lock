@@ -3659,16 +3659,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulldown-cmark"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+dependencies = [
+ "bitflags 2.13.2",
+ "memchr",
+ "unicase",
+]
+
+[[package]]
 name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
-
-[[package]]
-name = "qrcode"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-error"
@@ -5560,6 +5565,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unicase"
+version = "2.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357cc3acc6a036009fd6c973ed009037c732d60d0b4f6c673e9041497482a28f"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5745,7 +5756,6 @@ dependencies = [
 name = "wad-github"
 version = "0.1.0"
 dependencies = [
- "qrcode",
  "reqwest",
  "serde",
  "serde_json",
@@ -5800,6 +5810,18 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus",
+]
+
+[[package]]
+name = "wad-notes"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 1.1.6+spec-1.1.0",
 ]
 
 [[package]]
@@ -5937,15 +5959,18 @@ name = "wadspaces-hud"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "chrono",
  "gtk4",
  "gtk4-layer-shell",
  "image",
+ "pulldown-cmark",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "wad-clip",
  "wad-config",
+ "wad-notes",
  "wad-proto",
  "wadd",
 ]

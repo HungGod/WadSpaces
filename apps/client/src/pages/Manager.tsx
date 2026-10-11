@@ -4,7 +4,6 @@ import { motion } from "motion/react";
 import {
   Activity,
   Check,
-  CloudDownload,
   Cpu,
   History,
   Keyboard,
@@ -16,46 +15,28 @@ import {
   MonitorSmartphone,
   Play,
   Power,
-  RotateCw,
   Server,
   ShieldCheck,
-  Square,
   Stethoscope,
   Target,
 } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
-import type { ContainerAction } from "@/data/backend";
 import { MachineDiagnostics } from "@/components/MachineDiagnostics";
 import { DraftGrid } from "@/components/DraftGrid";
+import { ContainerControls, ContainerStatus, phaseLabel } from "@/components/manager/ContainerControls";
 import { WadspaceActions } from "@/components/manager/WadspaceActions";
 import { Page } from "@/components/Page";
 import { RunHistory } from "@/components/RunHistory";
 import { SearchBox } from "@/components/SearchBox";
 import { TailnetBadge, TailnetCard } from "@/components/Tailnet";
 import { Thumb } from "@/components/Thumb";
-import { Badge, Button, EmptyState, IconButton, Input, Label, Meter, Modal, PageHeader, Progress, Segmented } from "@/components/ui";
-import { timeAgo, uptime } from "@/lib/format";
+import { Badge, Button, EmptyState, Input, Label, Meter, Modal, PageHeader, Progress, Segmented } from "@/components/ui";
+import { timeAgo } from "@/lib/format";
 import { openWadspace } from "@/lib/launch";
 import { THIS_MACHINE, isLocked, useApp } from "@/lib/store";
-import type { Container, Machine, Wadspace } from "@/lib/types";
-import { hasAccount, isThisMachine } from "@/lib/machine";
-
-const PHASE: Record<string, string> = {
-  idle: "Stopped",
-  pulling: "Downloading",
-  starting: "Starting",
-  waiting: "Waiting for its desktop",
-  ready: "Running",
-  stopping: "Stopping",
-  error: "Error",
-};
-
-function phaseLabel(c: Container) {
-  if (c.onScreen) return "On screen";
-  if (c.phase === "idle" && c.status === "running") return "Running";
-  return PHASE[c.phase ?? (c.status === "running" ? "ready" : "idle")] ?? c.phase ?? c.status;
-}
+import type { Machine, Wadspace } from "@/lib/types";
+import { hasAccount, hasLocal, isThisMachine } from "@/lib/machine";
 
 /** "All": every wadspace, on every machine. */
 const ALL = "all";
@@ -214,27 +195,36 @@ function AllDetail() {
   );
 }
 
-/** A wadspace in All: where it is, and what you can do with it. */
+/** A wadspace in All: where it is, and what you can do with it. On this
+ * machine it gets the machine view's controls; only the copies elsewhere are
+ * just listed (what you can do with those comes with remote viewing). */
 function AllRow({ ws, machines }: { ws: Wadspace; machines: Machine[] }) {
   const build = useApp((s) => s.builds.find((b) => b.wadspaceId === ws.id && b.status === "building"));
   const on = machines.flatMap((m) => m.containers.filter((c) => c.wadspaceId === ws.id).map((c) => ({ m, c })));
+  const local = hasLocal ? on.find(({ m }) => isThisMachine(m.id)) : undefined;
+  const elsewhere = local ? on.filter((x) => x !== local) : on;
   return (
     <div className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-3 last:border-0">
       <Thumb ws={ws} className="!w-28 rounded-xl" />
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{ws.name}</div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-          {on.length ? (
-            on.map(({ m, c }) => (
-              <Badge key={m.id}>
-                <span className={clsx("size-1.5 rounded-full", c.status === "running" ? "bg-accent shadow-[0_0_8px_var(--accent)]" : "bg-faint")} />
-                {m.label} · {phaseLabel(c)}
-              </Badge>
-            ))
-          ) : (
-            <span>Not on a machine yet: build it in the Builder</span>
-          )}
+          {local && <ContainerStatus c={local.c} />}
+          {elsewhere.map(({ m, c }) => (
+            <Badge key={m.id}>
+              <span className={clsx("size-1.5 rounded-full", c.status === "running" ? "bg-accent shadow-[0_0_8px_var(--accent)]" : "bg-faint")} />
+              {m.label} · {phaseLabel(c)}
+            </Badge>
+          ))}
+          {!on.length && <span>Not on a machine yet: build it in the Builder</span>}
         </div>
+        {local?.c.download && (
+          <div className="mt-2 max-w-md">
+            <Progress value={local.c.download.progress ?? 0} />
+            <div className="mt-1 text-xs text-muted">{local.c.download.label}</div>
+          </div>
+        )}
+        {local?.c.phase === "error" && local.c.error && <div className="mt-1 break-words text-xs text-danger">{local.c.error}</div>}
         {build && (
           <div className="mt-2 max-w-md">
             <Progress value={build.progress} />
@@ -242,7 +232,14 @@ function AllRow({ ws, machines }: { ws: Wadspace; machines: Machine[] }) {
           </div>
         )}
       </div>
-      <WadspaceActions ws={ws} />
+      {local ? (
+        <div className="flex items-center gap-0.5">
+          <ContainerControls m={local.m} c={local.c} ws={ws} />
+          <WadspaceActions ws={ws} machineId={local.m.id} download={false} />
+        </div>
+      ) : (
+        <WadspaceActions ws={ws} />
+      )}
     </div>
   );
 }
@@ -328,25 +325,7 @@ function MachineDetail({ m }: { m: Machine }) {
 
 function Containers({ m }: { m: Machine }) {
   const wadspaces = useApp((s) => s.wadspaces);
-  const focus = useApp((s) => s.focus);
-  const toast = useApp((s) => s.toast);
-  const loadMachines = useApp((s) => s.loadMachines);
-  const [busy, setBusy] = useState<string | null>(null);
-  const here = isThisMachine(m.id);
   const up = m.status === "online";
-
-  const act = async (c: Container, action: ContainerAction) => {
-    setBusy(`${c.id}:${action}`);
-    try {
-      await backend.container(m.id, c.id, action);
-      if (!here) toast({ title: "Sent", body: `${action} → ${m.label}` });
-      loadMachines();
-    } catch (e) {
-      toast({ title: "Couldn't do that", body: (e as Error).message, tone: "error" });
-    } finally {
-      setBusy(null);
-    }
-  };
 
   return (
     <div className="overflow-hidden rounded-3xl border border-line bg-surface">
@@ -359,9 +338,6 @@ function Containers({ m }: { m: Machine }) {
       {m.containers.length ? (
         m.containers.map((c) => {
           const ws = wadspaces.find((w) => w.id === c.wadspaceId);
-          const on = c.status === "running";
-          const locked = isLocked(focus, c.wadspaceId);
-          const b = (a: string) => busy === `${c.id}:${a}`;
           return (
             <div key={c.id} className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-3 last:border-0">
               {ws ? <Thumb ws={ws} className="!w-28 rounded-xl" /> : <div className="aspect-video w-28 rounded-xl bg-surface-2" />}
@@ -375,12 +351,8 @@ function Containers({ m }: { m: Machine }) {
                   ) : null}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
-                  <span className="flex items-center gap-1.5">
-                    <span className={clsx("size-1.5 rounded-full", c.phase === "error" ? "bg-danger" : on ? "bg-accent shadow-[0_0_8px_var(--accent)]" : c.phase && c.phase !== "idle" ? "bg-accent-2" : "bg-faint")} />
-                    {phaseLabel(c)}
-                    {on && c.phase !== "error" && ` · up ${uptime(c.startedAt)}`}
-                  </span>
-                  <Badge>{c.mode === "stream" ? "Streamed display" : "On screen"}</Badge>
+                  <ContainerStatus c={c} />
+                  <Badge>{ws?.app ? "App on this machine" : c.mode === "stream" ? "Streamed display" : "On screen"}</Badge>
                 </div>
                 {c.download && (
                   <div className="mt-2 max-w-md">
@@ -391,25 +363,7 @@ function Containers({ m }: { m: Machine }) {
                 {c.phase === "error" && c.error && <div className="mt-1 break-words text-xs text-danger">{c.error}</div>}
               </div>
               <div className="flex items-center gap-0.5">
-                {here && ws?.installed && !ws.local && !c.download && (
-                  <IconButton label="Download" disabled={!up || b("download")} onClick={() => act(c, "download")}>
-                    <CloudDownload className="size-4" />
-                  </IconButton>
-                )}
-                {on ? (
-                  <>
-                    <IconButton label="Restart" disabled={!up || b("restart")} onClick={() => act(c, "restart")}>
-                      {b("restart") ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />}
-                    </IconButton>
-                    <IconButton label="Stop" disabled={!up || b("stop")} onClick={() => act(c, "stop")}>
-                      <Square className="size-3.5 fill-current" />
-                    </IconButton>
-                  </>
-                ) : (
-                  <IconButton label="Start in the background" disabled={!up || locked || b("start")} onClick={() => act(c, "start")}>
-                    <Power className="size-4" />
-                  </IconButton>
-                )}
+                <ContainerControls m={m} c={c} ws={ws} />
                 {ws && <WadspaceActions ws={ws} machineId={m.id} download={false} />}
               </div>
             </div>

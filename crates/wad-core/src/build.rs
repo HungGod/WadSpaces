@@ -58,6 +58,9 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
     let mut layout = Vec::new();
     let mut skipped = Vec::new();
     let mut seen: Vec<String> = Vec::new();
+    // The saved sign-ins its apps use: [{id, app, web?, name}]. (Not Chrome
+    // windows': they aren't WadBrowser's.)
+    let mut signins = Vec::new();
 
     let icons = model::ordered_icons(&model::drop_file_icons(ws.get("layout").unwrap_or(&Value::Null)));
     for icon in &icons {
@@ -71,6 +74,18 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
             continue;
         }
         seen.push(app.clone());
+        if let Some(id) = icon.get("signIn").and_then(Value::as_str).filter(|s| !s.is_empty())
+            && !matches!(recipe, Recipe::Soon { .. } | Recipe::Webapp { chrome: true, .. })
+        {
+            let mut s = Obj::new();
+            s.insert("id".into(), id.into());
+            s.insert("app".into(), app.clone().into());
+            if matches!(recipe, Recipe::Webapp { chrome: false, .. }) {
+                s.insert("web".into(), true.into());
+            }
+            js::put(&mut s, "name", label.as_ref());
+            signins.push(Value::Object(s));
+        }
         let entry = |desktop: Option<String>| {
             let mut e = Obj::new();
             e.insert("app".into(), app.clone().into());
@@ -182,6 +197,9 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
     if !projects.is_empty() {
         spec.insert("projects".into(), Value::Array(projects));
     }
+    if !signins.is_empty() {
+        spec.insert("signins".into(), Value::Array(signins));
+    }
     js::put(&mut spec, "display", adv.get("display"));
     let image = js::present(opts, "image").or_else(|| js::present(&adv, "image")).cloned().unwrap_or_else(|| {
         let prefix = js::present(opts, "imagePrefix").map(js::string).unwrap_or_else(|| DEFAULT_IMAGE_PREFIX.into());
@@ -208,4 +226,32 @@ pub fn to_build_spec(ws: &Value, opts: &Value) -> Value {
 pub fn layout_json(spec: &Value) -> String {
     let icons = js::present(spec, "layout").cloned().unwrap_or(json!([]));
     js::stringify_pretty(&json!({ "version": 1, "icons": icons }), 2) + "\n"
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn apps_bring_their_saved_signins() {
+        let icon = |id: &str, app: &str, sign_in: Option<&str>| {
+            json!({"id": id, "appId": app, "label": app.to_uppercase(), "iconUrl": "", "color": "", "x": 0, "y": 0,
+                   "signIn": sign_in})
+        };
+        let ws = json!({"id": "iq", "name": "IQ", "advanced": {}, "layout": {"icons": [
+            icon("1", "github", Some("github-a1b2")),
+            icon("2", "vscode", Some("vscode-c3d4")),
+            icon("3", "discord", Some("web-x")),
+            icon("4", "obsidian", None),
+        ]}});
+        let spec = super::to_build_spec(&ws, &json!({}))["spec"].clone();
+        assert_eq!(
+            spec["signins"],
+            json!([
+                {"id": "github-a1b2", "app": "github", "web": true, "name": "GITHUB"},
+                {"id": "vscode-c3d4", "app": "vscode", "name": "VSCODE"},
+            ])
+        );
+        assert_eq!(crate::spec::to_wadd_spec(&spec)["signins"], spec["signins"]);
+    }
 }

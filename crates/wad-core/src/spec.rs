@@ -134,6 +134,9 @@ pub fn to_wadd_spec(spec: &Value) -> Value {
     if js::truthy(&g("autostart")) {
         w.insert("autostart".into(), true.into());
     }
+    if !js::arr(spec, "signins").is_empty() {
+        w.insert("signins".into(), g("signins"));
+    }
     Value::Object(w)
 }
 

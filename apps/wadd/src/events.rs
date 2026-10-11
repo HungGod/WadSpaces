@@ -57,9 +57,9 @@ impl Bus {
                 Event::Notice { .. }
                 | Event::Shortcut { .. }
                 | Event::Projects { .. }
+                | Event::SignIns { .. }
                 | Event::Launch(_)
-                | Event::Build(_)
-                | Event::Github(_) => {}
+                | Event::Build(_) => {}
             }
         }
         let _ = self.tx.send(e);

@@ -46,6 +46,8 @@ export interface MachineWorkspace {
   icon: string | null;
   enabled: boolean;
   image: string;
+  /** "app": a program on the machine (Terminal, WadBrowser), not an image. */
+  kind?: "app" | null;
   state: WorkspaceState;
 }
 
@@ -193,6 +195,31 @@ export interface WaddProjectStatus {
   /** False for a folder on another machine, or a drive that isn't plugged in; `reason` says which. */
   available?: boolean;
   reason?: string;
+}
+
+/** A saved sign-in on this machine (wadd's signins): mounted into each
+ *  wadspace whose apps use it, so signing in once covers all of them. */
+export interface WaddSignIn {
+  id: string;
+  name: string;
+  /** "web" (a WadBrowser profile, for any web app) or the app whose files it keeps. */
+  app: string;
+  /** Those files, under the home folder (a folder's ends in /); none for "web". */
+  paths: string[];
+  createdAt: number;
+  /** What's saved, in bytes. */
+  size: number;
+  /** When anything in it last changed (ms); null while it's empty. */
+  changedAt: number | null;
+  /** Wadspaces here that mount it, and those of them running. */
+  usedBy: string[];
+  inUse: string[];
+}
+
+/** A podman secret's name and where it came from (GET /v1/secrets). */
+export interface WaddSecret {
+  name: string;
+  origin: "account" | "local" | "placeholder";
 }
 
 /** GET /api/drives */
@@ -367,6 +394,17 @@ export const wadd = {
   deleteProject: (id: string, purge = false) =>
     call<WaddProject & { purged: boolean }>("DELETE", `/api/projects/${encodeURIComponent(id)}${purge ? "?purge=1" : ""}`),
   projectStatus: (id: string) => call<WaddProjectStatus>("GET", `/api/projects/${encodeURIComponent(id)}/status`),
+  // Saved sign-ins, mounted into the wadspaces that use them
+  signIns: () => call<WaddSignIn[]>("GET", "/api/signins"),
+  createSignIn: (body: { name: string; app: string; paths?: string[] }) => call<WaddSignIn>("POST", "/api/signins", body),
+  patchSignIn: (id: string, body: { name?: string; paths?: string[] }) =>
+    call<WaddSignIn>("PUT", `/api/signins/${encodeURIComponent(id)}`, body),
+  /** 409 while a running wadspace uses it. */
+  signOut: (id: string) => call<WaddSignIn>("POST", `/api/signins/${encodeURIComponent(id)}/signout`),
+  /** 409 while a wadspace here uses it. */
+  deleteSignIn: (id: string) => call("DELETE", `/api/signins/${encodeURIComponent(id)}`),
+  /** The machine's secrets (names and origins; never values). */
+  secretList: () => call<WaddSecret[]>("GET", "/api/secrets/list"),
   // GitHub, with the machine's github_token (wadd/github.py)
   github: () => call<{ token: boolean; login: string | null; error?: string }>("GET", "/api/github"),
   /** 409: no github_token; 502: GitHub said no. */
@@ -416,14 +454,15 @@ export const wadd = {
     const has = (path: string) => get(path).then(() => true, () => false);
     // Tailscale's status too: whether it's installed decides the Tailnet card.
     const tailnet = () => get("/api/tailnet").then((t) => t as TailnetStatus, () => null);
-    const [builds, library, runs, projects, tailnetStatus] = await Promise.all([
+    const [builds, library, runs, projects, signins, tailnetStatus] = await Promise.all([
       has("/api/builds"),
       has("/api/library/drafts"),
       has("/api/runs?limit=1"),
       has("/api/projects"),
+      has("/api/signins"),
       tailnet(),
     ]);
-    return { builds, library, runs, projects, tailnet: tailnetStatus };
+    return { builds, library, runs, projects, signins, tailnet: tailnetStatus };
   },
   daemonLog: (lines = 200) => call<{ lines: LogLine[] }>("GET", `/api/logs/daemon?lines=${lines}`),
   unitLog: (unit: string, lines = 200) =>
@@ -459,7 +498,7 @@ export function waddEvents(on: (event: string, data: unknown) => void, onDrop: (
   let timer: ReturnType<typeof setTimeout> | undefined;
   const open = () => {
     es = new EventSource(`${WADD_URL}/api/events`);
-    for (const name of ["state", "build", "launch", "projects", "tailnet"]) {
+    for (const name of ["state", "build", "launch", "projects", "signins", "tailnet"]) {
       es.addEventListener(name, (e) => on(name, JSON.parse((e as MessageEvent).data)));
     }
     es.onerror = () => {

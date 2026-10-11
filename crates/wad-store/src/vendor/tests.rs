@@ -1,4 +1,4 @@
-use wad_proto::v1::{Display, MountedProject};
+use wad_proto::v1::{Display, Kind, MountedProject};
 
 use super::*;
 
@@ -106,10 +106,15 @@ fn the_images_workspaces_are_valid() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../host/usr/lib/wadspaces/workspaces.d");
     let v = read(&dir).unwrap();
     let ids: Vec<&str> = v.iter().map(|w| w.workspace.id.as_str()).collect();
-    assert_eq!(ids, ["iq-dev", "kale-b", "kale-p", "vanua-academy", "wad-c", "writing"]);
+    assert_eq!(ids, ["browser", "iq-dev", "kale-b", "kale-p", "terminal", "vanua-academy", "wad-c", "writing"]);
     for w in &v {
         let w = &w.workspace;
         assert_eq!(w.display, Display::Host, "{}", w.id);
+        // The apps: no Super+number, and a program to run.
+        if w.kind == Kind::App {
+            assert_eq!(w.hotkey, None, "{}", w.id);
+            assert!(w.exec[0].starts_with('/'), "{}", w.id);
+        }
         let icon = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../host")
             .join(w.icon.as_deref().unwrap().trim_start_matches('/'));

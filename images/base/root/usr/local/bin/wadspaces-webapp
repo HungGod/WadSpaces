@@ -7,8 +7,10 @@
 #
 # Writes /usr/share/applications/wadspaces-webapp-<id>.desktop, which opens
 # the site in a WadBrowser window of its own (app_id wadspaces-webapp-<id>,
-# no address bar), and lists the launcher for the Desktop. All web apps share
-# one browser profile, so one sign-in covers Gmail, Drive, etc. --chrome is
+# no address bar), and lists the launcher for the Desktop. Web apps share
+# one browser profile, so one sign-in covers Gmail, Drive, etc.; one given a
+# saved sign-in uses that instead (WadBrowser finds it in
+# /run/wadspaces-extra/signins.json when it starts, so no launcher changes). --chrome is
 # for the few sites WadBrowser (WebKitGTK) can't run: DRM players, video
 # calls. It opens a Chrome --app window instead (the chrome feature first).
 #

@@ -453,6 +453,8 @@ pub struct State<'a> {
     active: Option<u64>,
     zoom: u32,
     fullscreen: bool,
+    /// "dark" or "light" (theme.rs): the chrome's colours.
+    theme: &'static str,
 }
 
 impl Browser {
@@ -665,6 +667,7 @@ impl Browser {
             active: self.active,
             zoom: self.state_zoom(),
             fullscreen: self.is_fullscreen(),
+            theme: crate::theme::name(),
         }
     }
 
@@ -682,6 +685,19 @@ impl Browser {
         }
         if let Err(e) = self.window.emit_to(self.window.label(), "wb:state", self.state()) {
             tracing::warn!(%e, "can't update the chrome");
+        }
+    }
+
+    /// The theme changed (theme.rs): the chrome's colours, and WadBrowser's
+    /// own pages (the home page, error pages) made again in the new ones.
+    pub fn retheme(&self) {
+        self.push();
+        for t in &self.tabs {
+            if t.url.starts_with("wadbrowser:")
+                && let Some(v) = &t.live
+            {
+                v.reload();
+            }
         }
     }
 

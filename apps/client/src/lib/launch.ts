@@ -39,7 +39,7 @@ function fail(title: string, e: unknown) {
 
 /** Whether opening this wadspace there goes through a launch (with projects). */
 export function opensByLaunch(ws: Wadspace, machineId = useApp.getState().launchTarget) {
-  return backend.caps.projects && isThisMachine(machineId) && !!ws.installed;
+  return backend.caps.projects && isThisMachine(machineId) && !!ws.installed && !ws.app;
 }
 
 /** Open a wadspace on a machine (default: the launch target). */

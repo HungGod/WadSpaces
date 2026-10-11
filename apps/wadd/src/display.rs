@@ -50,8 +50,8 @@ impl Display for NullDisplay {
 pub struct SwayDisplay {
     sway: Sway,
     windows: Arc<Windows>,
-    /// Workspace id -> sway con_id.
-    cons: Mutex<HashMap<String, i64>>,
+    /// Workspace id -> its windows' sway con_ids, the newest (the one shown) last.
+    cons: Mutex<HashMap<String, Vec<i64>>>,
     proc: PathBuf,
     retry: Duration,
 }
@@ -96,37 +96,51 @@ impl SwayDisplay {
         let Some(id) = sink.resolve(owner).await else { return };
         {
             let mut cons = self.cons.lock().unwrap();
-            if cons.get(&id) == Some(&con_id) {
+            let list = cons.entry(id.clone()).or_default();
+            if list.contains(&con_id) {
                 return;
             }
-            // One window per workspace: its desktop. A second one (it
-            // restarted before the old window went) replaces it.
-            cons.insert(id.clone(), con_id);
+            // A workspace's desktop is one window, and a second one (it
+            // restarted before the old window went) takes over; an app (the
+            // browser) can have several. The newest is the one shown.
+            list.push(con_id);
         }
         self.cmd(&format!("[con_id={con_id}] move container to workspace ws-{id}, fullscreen enable")).await;
         tracing::info!("native window for {id} (con {con_id})");
         sink.on_window(&id, true);
     }
 
-    fn drop_con(&self, con_id: i64, sink: &dyn WindowSink) {
-        let gone: Vec<String> = {
+    async fn drop_con(&self, con_id: i64, sink: &dyn WindowSink) {
+        let mut gone = vec![];
+        let mut next = vec![];
+        {
             let mut cons = self.cons.lock().unwrap();
-            let ids: Vec<String> = cons.iter().filter(|(_, c)| **c == con_id).map(|(id, _)| id.clone()).collect();
-            for id in &ids {
-                cons.remove(id);
+            for (id, list) in cons.iter_mut() {
+                if list.contains(&con_id) {
+                    list.retain(|c| *c != con_id);
+                    match list.last() {
+                        Some(c) => next.push(*c),
+                        None => gone.push(id.clone()),
+                    }
+                }
             }
-            ids
-        };
+            cons.retain(|_, list| !list.is_empty());
+        }
+        // Another of its windows is left: that one fills the screen now
+        // (sway only lets one window per workspace be fullscreen).
+        for c in next {
+            self.cmd(&format!("[con_id={c}] fullscreen enable")).await;
+        }
         for id in gone {
             tracing::info!("native window for {id} closed");
             sink.on_window(&id, false);
         }
     }
 
-    fn drop_all(&self, sink: &dyn WindowSink) {
-        let all: Vec<i64> = self.cons.lock().unwrap().values().copied().collect();
+    async fn drop_all(&self, sink: &dyn WindowSink) {
+        let all: Vec<i64> = self.cons.lock().unwrap().values().flatten().copied().collect();
         for con in all {
-            self.drop_con(con, sink);
+            self.drop_con(con, sink).await;
         }
     }
 
@@ -139,7 +153,7 @@ impl SwayDisplay {
                     tracing::info!("lost sway: {e}");
                 }
                 self.windows.set_available(false);
-                self.drop_all(sink.as_ref());
+                self.drop_all(sink.as_ref()).await;
             }
             tokio::time::sleep(self.retry).await;
         }
@@ -167,9 +181,10 @@ impl SwayDisplay {
             seen.extend(con.get("id").and_then(Value::as_i64));
             self.adopt(con, sink).await;
         }
-        let stale: Vec<i64> = self.cons.lock().unwrap().values().copied().filter(|c| !seen.contains(c)).collect();
+        let stale: Vec<i64> =
+            self.cons.lock().unwrap().values().flatten().copied().filter(|c| !seen.contains(c)).collect();
         for con in stale {
-            self.drop_con(con, sink);
+            self.drop_con(con, sink).await;
         }
         loop {
             let (t, ev) = events.next().await?;
@@ -181,7 +196,7 @@ impl SwayDisplay {
                 Some("new") => self.adopt(&con, sink).await,
                 Some("close") => {
                     if let Some(id) = con.get("id").and_then(Value::as_i64) {
-                        self.drop_con(id, sink);
+                        self.drop_con(id, sink).await;
                     }
                 }
                 _ => {}
@@ -197,7 +212,7 @@ impl Display for SwayDisplay {
     }
 
     async fn show_native(&self, id: &str) -> bool {
-        let con = self.cons.lock().unwrap().get(id).copied();
+        let con = self.cons.lock().unwrap().get(id).and_then(|l| l.last()).copied();
         match con {
             Some(c) => self.cmd(&format!("[con_id={c}] focus")).await,
             None => false,

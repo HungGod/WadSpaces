@@ -123,7 +123,7 @@ export class MachineBackend implements Backend {
   async patchWadspace(id: string, patch: WadspacePatch) {
     if (!this.cloud.knows(id)) return this.own(await this.local.patchWadspace(id, patch));
     const saved = await this.cloud.patchWadspace(id, patch);
-    await this.local.mirrorInstalled(id, saved.name, saved.advanced.hotkey ?? null, !saved.deletedAt);
+    await this.local.mirrorInstalled(id, saved.name, saved.advanced.hotkey ?? null, !saved.deletedAt, saved);
     return this.getWadspace(id);
   }
 
@@ -220,6 +220,26 @@ export class MachineBackend implements Backend {
   }
   browseFolders(q: { path?: string; drive?: string }) {
     return this.local.browseFolders(q);
+  }
+
+  // --------------------------------------------------------- saved sign-ins
+  listSignIns() {
+    return this.local.listSignIns();
+  }
+  createSignIn(input: { name: string; app: string; paths?: string[] }) {
+    return this.local.createSignIn(input);
+  }
+  updateSignIn(id: string, patch: { name?: string; paths?: string[] }) {
+    return this.local.updateSignIn(id, patch);
+  }
+  signOutSignIn(id: string) {
+    return this.local.signOutSignIn(id);
+  }
+  deleteSignIn(id: string) {
+    return this.local.deleteSignIn(id);
+  }
+  listSecrets() {
+    return this.local.listSecrets();
   }
 
   // --------------------------------------------------------------- GitHub

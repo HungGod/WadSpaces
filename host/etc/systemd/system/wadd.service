@@ -29,7 +29,7 @@ ProtectHome=read-only
 # uid 1000 there). Podman's volumes: a launch adopts a project an older
 # image cloned into a workspace's /config volume.
 ReadWritePaths=/var/lib/wadspaces /run/containers/systemd
-ReadWritePaths=-/var/lib/wadspaces-projects -/var/lib/containers/storage/volumes
+ReadWritePaths=-/var/lib/wadspaces-projects -/var/lib/wadspaces-signins -/var/lib/containers/storage/volumes
 PrivateTmp=yes
 NoNewPrivileges=yes
 

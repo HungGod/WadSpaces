@@ -95,3 +95,32 @@ fn workspaces_round_trip_through_the_yaml_shape() {
     let e = check_workspaces(vec![one, two]).unwrap_err();
     assert!(e.to_string().contains("port 3100 already used"), "{e}");
 }
+
+#[test]
+fn an_app_is_a_program_not_an_image() {
+    let app = json!({"id": "terminal", "name": "Terminal", "kind": "app", "exec": ["/usr/bin/foot"]});
+    let w = &check_workspaces(vec![app.clone()]).unwrap()[0];
+    assert_eq!(w.kind, wad_proto::v1::Kind::App);
+    assert_eq!(w.exec, ["/usr/bin/foot"]);
+    assert_eq!(w.display, Display::Host);
+    assert_eq!(w.image, "");
+    // Round trip, and a container's shape is unchanged (no kind, no exec).
+    assert_eq!(&check_workspaces(vec![to_yaml(w)]).unwrap()[0], w);
+    let c = &check_workspaces(vec![json!({"id": "c", "name": "C", "image": "i", "display": "host"})]).unwrap()[0];
+    assert!(to_yaml(c).get("kind").is_none());
+    assert!(!serde_json::to_string(c).unwrap().contains("exec"));
+
+    for (bad, why) in [
+        (json!({"id": "t", "name": "T", "kind": "app"}), "missing exec"),
+        (json!({"id": "t", "name": "T", "kind": "app", "exec": []}), "exec must name a program"),
+        (json!({"id": "t", "name": "T", "kind": "app", "exec": ["x"], "image": "i"}), "an app has no image"),
+        (json!({"id": "t", "name": "T", "kind": "app", "exec": ["x"], "volumes": ["a:/b"]}), "an app has no volumes"),
+        (json!({"id": "t", "name": "T", "kind": "app", "exec": ["x"], "display": "stream", "port": 3100}), "display must be 'host'"),
+        (json!({"id": "t", "name": "T", "kind": "vm", "exec": ["x"]}), "kind must be one of"),
+        (json!({"id": "t", "name": "T", "image": "i", "exec": ["x"]}), "only an app has exec"),
+        (json!({"id": "t", "name": "T", "kind": "app", "exec": ["x\ny"]}), "control character"),
+    ] {
+        let e = check_workspaces(vec![bad]).unwrap_err().to_string();
+        assert!(e.contains(why), "{e} (wanted {why})");
+    }
+}

@@ -67,6 +67,7 @@ async fn env() -> Env {
             ready_timeout: Duration::from_secs(10),
             max_parallel_pulls: 3,
             projects_dir: "/p".into(),
+            signins_dir: "/s".into(),
             state_dir: state.clone(),
             rootless_uid: Some(1000),
             poll: Duration::from_millis(10),
@@ -103,16 +104,8 @@ async fn env() -> Env {
         .mount(&gh_server)
         .await;
     let github = wadd::github::GithubService::new(
-        wad_github::Github::with_base(reqwest::Client::new(), &gh_server.uri(), &format!("{}/api", gh_server.uri())),
-        "/nonexistent/github.toml".into(),
-        reqwest::Client::new(),
-        base.clone(),
-        wadd::github::Parts {
-            backend: Arc::new(fake.clone()),
-            secrets: secrets.clone(),
-            projects: projects.clone(),
-            bus: bus.clone(),
-        },
+        wad_github::Github::with_base(reqwest::Client::new(), &format!("{}/api", gh_server.uri())),
+        wadd::github::Parts { backend: Arc::new(fake.clone()), secrets: secrets.clone(), projects: projects.clone() },
     );
     let gh_keep = Arc::new(gh_server);
     let make = {

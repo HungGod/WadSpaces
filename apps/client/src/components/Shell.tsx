@@ -1,17 +1,17 @@
 import { Link, useLocation, useNavigate } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ChevronsLeft, ChevronsRight, FolderGit2, Home, LayoutGrid, Lock, LogOut, Play, Rocket, Server, Wand2 } from "lucide-react";
+import { AppWindow, ChevronsLeft, ChevronsRight, FolderGit2, Home, KeyRound, LayoutGrid, Loader2, Lock, LogOut, Play, Rocket, Server, Square, Wand2 } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
 import { wadd } from "@/lib/wadd";
 import { countdown } from "@/lib/format";
-import { openFocusWindow } from "@/lib/launch";
-import { useApp } from "@/lib/store";
+import { openFocusWindow, openWadspace } from "@/lib/launch";
+import { THIS_MACHINE, isLocked, useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui";
 import { useTour } from "@/lib/tour";
-import type { PublicUser } from "@/lib/types";
-import { LogoMark } from "./Logo";
+import type { PublicUser, Wadspace } from "@/lib/types";
+import { APP_PRODUCTS, LogoMark, ProductMark } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import { Toaster } from "./Toaster";
 import { useFocusPolling, useFocusRemaining } from "./useFocusClock";
@@ -28,6 +28,7 @@ const NAV = [
   { href: "/", label: "Home", icon: Home },
   { href: "/manager", label: "Wadspaces Manager", icon: Server },
   { href: "/projects", label: "Projects", icon: FolderGit2 },
+  { href: "/secrets", label: "Secrets", icon: KeyRound },
   { href: "/launch", label: "Quick Launch", icon: Rocket },
   { href: "/builder", label: "Builder", icon: Wand2 },
 ];
@@ -140,6 +141,7 @@ export function Shell({ user, children }: { user: PublicUser; children: React.Re
               {!narrow && <span className="truncate">Home screen</span>}
             </button>
           )}
+          {backend.target !== "online" && <MachineApps narrow={narrow} />}
           {backend.target !== "online" && <StartButton narrow={narrow} />}
           {narrow ? <div className="flex justify-center"><ThemeToggle compact /></div> : <ThemeToggle />}
 
@@ -182,6 +184,74 @@ export function Shell({ user, children }: { user: PublicUser; children: React.Re
       <BuildLog />
       <Toaster />
       <Tour />
+    </div>
+  );
+}
+
+/** The machine's own apps (Terminal, WadBrowser): ▶ opens one (it starts if
+ *  it isn't running) and ■ stops it while it runs. */
+function MachineApps({ narrow }: { narrow: boolean }) {
+  // The list itself from the store (a selector that made a new array each
+  // time would re-render without end), the apps picked out here.
+  const wadspaces = useApp((s) => s.wadspaces);
+  const apps = useMemo(() => wadspaces.filter((w) => w.app), [wadspaces]);
+  if (!apps.length) return null;
+  return (
+    <div className={clsx("flex flex-col gap-1", narrow && "items-center")}>
+      {!narrow && <div className="px-3 text-[11px] font-semibold uppercase tracking-wider text-faint">Apps</div>}
+      {apps.map((ws) => (
+        <MachineApp key={ws.id} ws={ws} narrow={narrow} />
+      ))}
+    </div>
+  );
+}
+
+function MachineApp({ ws, narrow }: { ws: Wadspace; narrow: boolean }) {
+  const container = useApp((s) => s.machines.find((m) => m.id === THIS_MACHINE)?.containers.find((c) => c.wadspaceId === ws.id));
+  const focus = useApp((s) => s.focus);
+  const loadMachines = useApp((s) => s.loadMachines);
+  const toast = useApp((s) => s.toast);
+  const [stopping, setStopping] = useState(false);
+  const running = container?.status === "running";
+  const starting = !!container?.phase && ["starting", "waiting"].includes(container.phase);
+  const locked = isLocked(focus, ws.id);
+  const product = APP_PRODUCTS[ws.id];
+
+  const stop = async () => {
+    setStopping(true);
+    try {
+      await backend.container(THIS_MACHINE, ws.id, "stop");
+      loadMachines();
+    } catch (e) {
+      toast({ title: `Couldn't stop ${ws.name}`, body: (e as Error).message, tone: "error" });
+    } finally {
+      setStopping(false);
+    }
+  };
+  const button = "grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-40";
+
+  return (
+    <div className={clsx("flex items-center rounded-xl", narrow ? "flex-col gap-0.5" : "h-10 gap-2 pl-3 pr-1 hover:bg-surface-2/60")}>
+      <span className="relative" title={narrow ? ws.name : undefined}>
+        {product ? <ProductMark product={product} className="size-5 shrink-0" /> : <AppWindow className="size-[18px] shrink-0 text-muted" />}
+        {running && <span className="absolute -right-1 -top-1 size-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />}
+      </span>
+      {!narrow && <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted">{ws.name}</span>}
+      <button
+        type="button"
+        className={button}
+        disabled={locked}
+        onClick={() => openWadspace(ws, THIS_MACHINE)}
+        title={locked ? "Focus mode: not one of this session's picks" : running ? `Show ${ws.name}` : `Open ${ws.name}`}
+        aria-label={`Open ${ws.name}`}
+      >
+        {starting ? <Loader2 className="size-4 animate-spin" /> : locked ? <Lock className="size-4" /> : <Play className="size-4 fill-current" />}
+      </button>
+      {running && (
+        <button type="button" className={button} disabled={stopping} onClick={stop} title={`Stop ${ws.name}`} aria-label={`Stop ${ws.name}`}>
+          {stopping ? <Loader2 className="size-4 animate-spin" /> : <Square className="size-3.5 fill-current" />}
+        </button>
+      )}
     </div>
   );
 }

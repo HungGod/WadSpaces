@@ -1,0 +1,165 @@
+//! Saved sign-ins: made, renamed, mounted into the workspaces that use
+//! them, and kept while one runs or uses them.
+
+mod common;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use common::{Fake, ws};
+use wad_proto::ErrorCode;
+use wad_proto::v1::{Display, SignInPatch, SignInRequest, Workspace, WorkspaceSignIn};
+use wadd::events::Bus;
+use wadd::registry::{Registry, Settings};
+use wadd::signins::SignIns;
+
+struct Setup {
+    reg: Arc<Registry>,
+    signins: Arc<SignIns>,
+    dir: tempfile::TempDir,
+}
+
+async fn setup(list: Vec<Workspace>) -> Setup {
+    let dir = tempfile::tempdir().unwrap();
+    let bus = Bus::new(wad_proto::v1::MachineInfo {
+        name: "t".into(),
+        version: "0".into(),
+        profile: wad_proto::v1::Profile::User,
+        started_at: 0,
+    });
+    let reg = Registry::new(
+        Arc::new(Fake::default()),
+        bus.clone(),
+        Settings {
+            ready_timeout: Duration::from_secs(30),
+            max_parallel_pulls: 1,
+            projects_dir: "/p".into(),
+            signins_dir: dir.path().join("signins"),
+            state_dir: dir.path().join("state"),
+            rootless_uid: None,
+            poll: Duration::from_secs(1),
+        },
+    );
+    let signins = SignIns::new(
+        &dir.path().join("state"),
+        dir.path().join("signins"),
+        nix::unistd::getuid().as_raw(),
+        reg.clone(),
+        bus,
+    );
+    let weak = Arc::downgrade(&signins);
+    reg.on_prepare(move |w| weak.upgrade().map_or(Ok(()), |s| s.prepare(w)));
+    reg.load(list).await.unwrap();
+    Setup { reg, signins, dir }
+}
+
+fn web(name: &str) -> SignInRequest {
+    SignInRequest { name: name.into(), app: "web".into(), paths: vec![] }
+}
+
+fn using(id: &str, signins: &[(&str, &str, bool)]) -> Workspace {
+    Workspace {
+        signins: signins
+            .iter()
+            .map(|(s, app, web)| WorkspaceSignIn {
+                id: (*s).into(),
+                app: (*app).into(),
+                web: *web,
+                name: String::new(),
+            })
+            .collect(),
+        ..ws(id, "ghcr.io/o/x:1", Display::Host, None)
+    }
+}
+
+#[tokio::test]
+async fn made_renamed_and_listed() {
+    let s = setup(vec![]).await;
+    let gh = s.signins.create(web("GitHub")).unwrap();
+    assert!(gh.id.starts_with("github-"), "{}", gh.id);
+    assert!(s.dir.path().join("signins").join(&gh.id).is_dir());
+    let code = s.signins.create(SignInRequest { name: "VS Code".into(), app: "vscode".into(), paths: vec![] }).unwrap();
+    assert_eq!(code.paths, [".config/Code/User/globalStorage/"]);
+    // An app the catalog doesn't know names its files.
+    let err = s.signins.create(SignInRequest { name: "Tool".into(), app: "tool".into(), paths: vec![] }).unwrap_err();
+    assert_eq!(err.code, ErrorCode::BadRequest);
+    let tool = s
+        .signins
+        .create(SignInRequest { name: "Tool".into(), app: "tool".into(), paths: vec!["~/.config/tool".into()] })
+        .unwrap();
+    assert_eq!(tool.paths, [".config/tool"]);
+    assert!(
+        s.signins.create(SignInRequest { name: "Bad".into(), app: "tool".into(), paths: vec!["../x".into()] }).is_err()
+    );
+
+    let renamed = s.signins.patch(&gh.id, SignInPatch { name: Some("Work GitHub".into()), paths: None }).unwrap();
+    assert_eq!(renamed.name, "Work GitHub");
+    assert!(s.signins.patch(&gh.id, SignInPatch { name: None, paths: Some(vec![".x".into()]) }).is_err());
+    let names: Vec<String> = s.signins.list().into_iter().map(|x| x.name).collect();
+    assert_eq!(names, ["Tool", "VS Code", "Work GitHub"]);
+}
+
+#[tokio::test]
+async fn mounted_where_used_and_kept_while_in_use() {
+    let s = setup(vec![]).await;
+    let gh = s.signins.create(web("GitHub")).unwrap();
+    let a = using("a", &[(&gh.id, "github", true), (&gh.id, "tailscale", true), ("vscode-zz", "vscode", false)]);
+    s.reg.load(vec![a.clone(), ws("b", "ghcr.io/o/b:1", Display::Host, None)]).await.unwrap();
+
+    let unit = s.reg.unit_text(&a);
+    let host = s.dir.path().join("signins");
+    assert!(
+        unit.contains(&format!("Volume={}/{}:/run/wadspaces-signins/{}:rw,z", host.display(), gh.id, gh.id)),
+        "{unit}"
+    );
+    assert!(unit.contains("/run/wadspaces-extra:ro,z"), "{unit}");
+
+    s.reg.start("a").unwrap();
+    s.reg.settled("a").await;
+    // The one it didn't have yet was made, named after its app.
+    let made = s.signins.get("vscode-zz").unwrap();
+    assert_eq!((made.name.as_str(), made.app.as_str()), ("vscode", "vscode"));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(s.dir.path().join("state/extra/a/signins.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        manifest["signins"],
+        serde_json::json!([
+            {"id": gh.id, "name": "GitHub", "web": true, "apps": ["github", "tailscale"],
+             "dir": format!("/run/wadspaces-signins/{}", gh.id), "paths": []},
+            {"id": "vscode-zz", "name": "vscode", "web": false, "apps": ["vscode"],
+             "dir": "/run/wadspaces-signins/vscode-zz", "paths": [".config/Code/User/globalStorage/"]},
+        ])
+    );
+
+    let now = s.signins.get(&gh.id).unwrap();
+    assert_eq!((now.used_by.as_slice(), now.in_use.as_slice()), (&["a".to_string()][..], &["a".to_string()][..]));
+    // Not signed out or deleted from under a running wadspace.
+    std::fs::write(host.join(&gh.id).join("cookies.sqlite"), "x").unwrap();
+    assert_eq!(s.signins.sign_out(&gh.id).unwrap_err().code, ErrorCode::Conflict);
+    assert_eq!(s.signins.delete(&gh.id).unwrap_err().code, ErrorCode::Conflict);
+    assert_eq!(s.signins.get(&gh.id).unwrap().size, 1);
+
+    s.reg.stop("a").await.unwrap();
+    let out = s.signins.sign_out(&gh.id).unwrap();
+    assert_eq!(out.size, 0);
+    assert!(host.join(&gh.id).is_dir());
+    // Still used by a's design.
+    assert_eq!(s.signins.delete(&gh.id).unwrap_err().code, ErrorCode::Conflict);
+    s.reg.load(vec![ws("a", "ghcr.io/o/x:1", Display::Host, None)]).await.unwrap();
+    s.signins.delete(&gh.id).unwrap();
+    assert!(!host.join(&gh.id).exists());
+    assert_eq!(s.signins.get(&gh.id).unwrap_err().code, ErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn a_rebuild_takes_the_designs_signins() {
+    let old = using("a", &[("github-aa", "github", true)]);
+    let fresh = serde_json::json!({"id": "a", "name": "A", "image": "localhost/wadspaces-a:latest", "display": "host"});
+    let (list, _) = wadd::builds::merged(std::slice::from_ref(&old), &fresh).unwrap();
+    assert!(list[0].signins.is_empty());
+    let mut with = fresh.clone();
+    with["signins"] = serde_json::json!([{"id": "github-bb", "app": "github", "web": true}]);
+    let (list, _) = wadd::builds::merged(&[old], &with).unwrap();
+    assert_eq!(list[0].signins[0].id, "github-bb");
+}

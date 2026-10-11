@@ -82,7 +82,8 @@ impl Menu {
     /// Draws `kind` with `data`, at (x, y) in the window, `width` × `height`.
     pub fn show(&self, x: i32, y: i32, width: i32, height: i32, kind: &str, data: &serde_json::Value) {
         let script = format!(
-            "window.wbPopup && window.wbPopup.show({}, {})",
+            "document.documentElement.dataset.theme = {:?}; window.wbPopup && window.wbPopup.show({}, {})",
+            crate::theme::name(),
             serde_json::to_string(kind).unwrap_or_default(),
             data
         );

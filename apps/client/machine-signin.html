@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Sign in to GitHub</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0a0614; color: #ece8f5; font: 15px/1.5 system-ui, sans-serif; }
+      main { max-width: 380px; padding: 24px; text-align: center; }
+      p { color: #a59fb8; }
+      button { margin-top: 12px; height: 40px; padding: 0 18px; border: 0; border-radius: 12px; background: #c6ff1f; color: #0a0614; font: inherit; font-weight: 600; cursor: pointer; }
+      [hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Signing in with GitHub…</h1>
+      <p id="detail">One moment.</p>
+      <button id="retry" hidden>Try again</button>
+    </main>
+    <script type="module" src="/src/signin/machine-signin.ts"></script>
+  </body>
+</html>

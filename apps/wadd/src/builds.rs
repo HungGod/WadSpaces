@@ -177,6 +177,9 @@ pub fn make(req: &BuildRequest) -> Result<Made, ApiError> {
 /// as a whole. Also: whether it replaced one.
 pub fn merged(current: &[Workspace], fresh: &Value) -> Result<(Vec<Workspace>, bool), String> {
     let id = fresh.get("id").and_then(Value::as_str).unwrap_or_default();
+    if let Some(app) = current.iter().find(|w| w.id == id && w.kind == wad_proto::v1::Kind::App) {
+        return Err(format!("{id:?} is {}, one of this machine's own apps: give the wadspace another id", app.name));
+    }
     let mut list: Vec<Value> = current.iter().map(wad_store::legacy::to_yaml).collect();
     let updated = match list.iter_mut().find(|w| w["id"] == id) {
         Some(old) => {
@@ -193,6 +196,10 @@ pub fn merged(current: &[Workspace], fresh: &Value) -> Result<(Vec<Workspace>, b
             new["volumes"] = volumes.into();
             new["icon"] = old.get("icon").cloned().unwrap_or(Value::Null);
             new["projects"] = old["projects"].clone();
+            // Its sign-ins are the design's: none left means none.
+            if fresh.get("signins").is_none() {
+                new.as_object_mut().expect("an object").remove("signins");
+            }
             if new["icon"].is_null() {
                 new.as_object_mut().expect("an object").remove("icon");
             }

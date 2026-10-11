@@ -124,12 +124,13 @@ async fn env() -> Env {
             ready_timeout: Duration::from_secs(10),
             max_parallel_pulls: 3,
             projects_dir: tmp.join("projects").to_string_lossy().into(),
+            signins_dir: tmp.join("signins"),
             state_dir: state.clone(),
             rootless_uid: Some(1000),
             poll: Duration::from_millis(10),
         },
     );
-    reg.load(vec![a, b]).await.unwrap();
+    reg.load(vec![a, b, common::app("t", "/usr/bin/foot")]).await.unwrap();
     let view = View::new(reg.clone(), Arc::new(fake.clone()), Arc::new(NullDisplay), bus.clone(), state.clone());
     let home = tmp.join("home");
     std::fs::create_dir_all(home.join("Notes")).unwrap();
@@ -187,6 +188,19 @@ async fn a_background_launch_starts_it_without_switching() {
     assert_eq!(e.reg.state("a").unwrap().phase, Phase::Ready);
     assert_eq!(e.view.current(), V::Home);
     assert!(l.lines.iter().any(|x| x.contains("in the background")), "{:?}", l.lines);
+}
+
+#[tokio::test]
+async fn an_app_launches_without_an_image_or_projects() {
+    let e = env().await;
+    let e2 = e.launches.create("t", &["vault".into()], false).unwrap_err();
+    assert_eq!(e2.code, ErrorCode::BadRequest);
+    assert!(e2.message.contains("opens no projects"), "{}", e2.message);
+    let l = launch(&e, "t", &[], false).await;
+    assert_eq!(l.launch.status, LaunchStatus::Done, "{l:?}");
+    assert!(l.launch.parts.is_empty(), "{:?}", l.launch.parts);
+    assert_eq!(e.fake.calls(), ["app wad-t.service /usr/bin/foot"]);
+    assert_eq!(e.view.current(), V::Workspace("t".into()));
 }
 
 fn starts(e: &Env, unit: &str) -> usize {

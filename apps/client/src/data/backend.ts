@@ -13,6 +13,7 @@
 import { dropFileIcons } from "@core/model";
 import type { GithubRepo, Project, ProjectDraft, ProjectStatus } from "@core/projects";
 import type { App, ContainerRun, Draft, FocusLock, LastSession, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
+import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
 
 export interface Caps {
   /** Share wadspaces with other users. */
@@ -25,6 +26,8 @@ export interface Caps {
   projects: boolean;
   /** Machines reach each other over the user's tailnet (Tailscale). */
   tailnet: boolean;
+  /** Saved sign-ins, kept on this machine and mounted into wadspaces. */
+  signins: boolean;
 }
 
 export type WadspaceInput = Pick<Wadspace, "name" | "description" | "visibility" | "layout" | "advanced" | "agent" | "dockerfile" | "templateId"> & {
@@ -142,7 +145,7 @@ export interface FolderListing {
 }
 
 /** What changed, so the store reloads just that. "github": the repo list (pages listen themselves). */
-export type Topic = "user" | "wadspaces" | "drafts" | "machines" | "focus" | "session" | "projects" | "github";
+export type Topic = "user" | "wadspaces" | "drafts" | "machines" | "focus" | "session" | "projects" | "signins" | "github";
 
 export interface Backend {
   readonly target: "offline" | "online" | "machine";
@@ -212,6 +215,20 @@ export interface Backend {
   deleteProject(id: string, opts?: { purge?: boolean }): Promise<{ purged: boolean }>;
   /** Offline: the clone on this machine. Online: null (the files are on the machines). */
   projectStatus(id: string): Promise<ProjectStatus | null>;
+
+  /** Saved sign-ins on this machine (none online: they never leave it). */
+  listSignIns(): Promise<WaddSignIn[]>;
+  /** A new, empty one for "web" (any web app) or an app; `paths` for an app
+   *  the catalog doesn't know. */
+  createSignIn(input: { name: string; app: string; paths?: string[] }): Promise<WaddSignIn>;
+  /** Rename it, or change an unknown app's files. */
+  updateSignIn(id: string, patch: { name?: string; paths?: string[] }): Promise<WaddSignIn>;
+  /** Forget what it saved: every wadspace using it is signed out (not while one runs). */
+  signOutSignIn(id: string): Promise<WaddSignIn>;
+  /** Remove it (not while a wadspace here uses it). */
+  deleteSignIn(id: string): Promise<void>;
+  /** The machine's secrets (names, never values), e.g. github_token. */
+  listSecrets(): Promise<WaddSecret[]>;
 
   /** Is there a GitHub token to list and clone your repositories with. */
   githubStatus(): Promise<GithubStatus>;

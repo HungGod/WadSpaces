@@ -1,7 +1,8 @@
 # WadSpaces host OS: Fedora bootc -> greetd -> sway -> WadSpaces Client (Tauri),
 # plus wadd (the machine daemon: workspaces, projects, the account link;
-# apps/wadd, Rust). No browser: what the machine shows of
-# the web (GitHub's sign-in) opens in WadSpaces Client's own webview windows. Build from the repo root:
+# apps/wadd, Rust). Two apps run on the machine itself, opened and closed by
+# wadd like wadspaces: a terminal (foot) and WadBrowser (apps/wadbrowser); see
+# usr/lib/wadspaces/workspaces.d/{terminal,browser}.toml. Build from the repo root:
 #   host/build.sh image        (or: podman build -f host/Containerfile -t localhost/wadspaces-host .)
 FROM quay.io/fedora/fedora-bootc:43
 
@@ -14,6 +15,7 @@ RUN dnf -y install \
       dbus-daemon dbus-tools wlr-randr NetworkManager-wifi NetworkManager-tui curl \
       gtk4 gtk4-layer-shell \
       git-core \
+      foot \
     && dnf clean all
 
 # Sound: PipeWire in the kiosk session (socket-activated user units). Native
@@ -23,6 +25,11 @@ RUN dnf -y install \
       pipewire pipewire-pulseaudio pipewire-alsa wireplumber alsa-ucm alsa-sof-firmware \
     && dnf clean all \
     && systemctl --global enable pipewire.socket pipewire-pulse.socket wireplumber.service
+
+# WadBrowser's media: GStreamer's common codecs (WebKitGTK plays through it).
+RUN dnf -y install \
+      gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugin-libav \
+    && dnf clean all
 
 # The initramfs again, with the Surface's drivers in it, loaded in order in the
 # first seconds of boot: without them the stock kernel's controller hub fails
@@ -61,18 +68,22 @@ COPY .build/client-app/client /usr/bin/client
 COPY .build/wadd/wadd /usr/bin/wadd
 # The HUD (apps/hud, Rust + GTK4 layer-shell), built by host/build.sh.
 COPY .build/hud/hud /usr/libexec/wadspaces/hud
+# WadBrowser, the machine's own browser app (wadd runs it), built by host/build.sh.
+COPY .build/wadbrowser/wadbrowser /usr/bin/wadbrowser
 # Staged by host/build.sh from host/secrets/: the admin password hash, which
 # wadspaces-admin-password.service applies. (No podman secrets are baked in:
 # a machine gets its GitHub token by signing in, or from the account.)
 COPY .build/secrets/ /usr/lib/wadspaces/secrets/
 COPY .build/ssh/ /usr/share/wadspaces/ssh/
 
-RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd /usr/bin/client && \
+RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd /usr/bin/client /usr/bin/wadbrowser && \
     /usr/bin/client --version && \
+    /usr/bin/wadbrowser --version && \
+    foot --check-config && \
     find /usr/lib/wadspaces/secrets -type d -exec chmod 700 {} + && \
     find /usr/lib/wadspaces/secrets -type f -exec chmod 600 {} + && \
     chmod 644 /usr/share/wadspaces/ssh/* && \
-    for b in dbus-run-session sway curl nmcli skopeo bootc tailscale wpctl; do \
+    for b in dbus-run-session sway curl nmcli skopeo bootc tailscale wpctl foot; do \
       command -v "$b" > /dev/null || { echo "missing $b" >&2; exit 1; }; \
     done && \
     ls /usr/lib/firmware/mrvl/pcie8897_uapsta.bin* /usr/lib64/libgtk4-layer-shell.so.0 > /dev/null && \

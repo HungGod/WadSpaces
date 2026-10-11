@@ -51,6 +51,9 @@ export interface Wadspace extends WadspaceSpec {
   installed?: boolean;
   /** Came with the machine (a preset) rather than from the Builder. */
   preset?: boolean;
+  /** A program on the machine itself (Terminal, WadBrowser), not an image:
+   *  wadd opens and closes it like a wadspace, and there's nothing to edit. */
+  app?: boolean;
   /** Online: built on a machine, not in the account; names the machine. */
   machineOnly?: string;
   /** Offline: the projects its unit mounts now (from its last launch). */

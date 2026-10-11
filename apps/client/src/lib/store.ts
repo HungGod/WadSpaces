@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { backend, type Topic } from "@/data";
 import type { BuildProgress, LaunchProgress, WadspacePatch } from "@/data/backend";
 import type { Project } from "@core/projects";
+import type { WaddSignIn } from "./wadd";
 import type { BuildJob } from "./build";
 import type { LaunchJob } from "./launch";
 import { THIS_MACHINE, hasAccount } from "./machine";
@@ -52,6 +53,8 @@ interface AppState {
   buildLog: string | null;
   /** The user's projects (none deleted), by name. */
   projects: Project[];
+  /** This machine's saved sign-ins, by name. */
+  signIns: WaddSignIn[];
   /** Wadspaces getting their image and projects ready, then starting (offline). */
   launches: LaunchJob[];
   /** Quiet notices that surface from the profile icon, e.g. "your wadspace is ready". */
@@ -67,6 +70,7 @@ interface AppState {
   loadFocus: () => Promise<FocusLock | null>;
   loadLastSession: () => Promise<void>;
   loadProjects: () => Promise<void>;
+  loadSignIns: () => Promise<void>;
   patchWadspace: (id: string, patch: WadspacePatch) => Promise<Wadspace>;
   toast: (t: Omit<Toast, "id">) => number;
   updateToast: (id: number, t: Partial<Toast>) => void;
@@ -120,6 +124,7 @@ export const useApp = create<AppState>((set, get) => ({
   builds: [],
   buildLog: null,
   projects: [],
+  signIns: [],
   launches: [],
   notices: [],
 
@@ -132,7 +137,7 @@ export const useApp = create<AppState>((set, get) => ({
     follow();
     backend.listBuilds?.().then((bs) => bs.forEach(get().applyBuild)).catch(() => {});
     backend.listLaunches?.().then((ls) => ls.forEach(get().applyLaunch)).catch(() => {});
-    await Promise.all([get().loadWadspaces(), get().loadMachines(), get().loadDrafts(), get().loadFocus(), get().loadLastSession(), get().loadProjects()]);
+    await Promise.all([get().loadWadspaces(), get().loadMachines(), get().loadDrafts(), get().loadFocus(), get().loadLastSession(), get().loadProjects(), get().loadSignIns()]);
   },
   loadWadspaces: async () => set(split(await backend.listWadspaces())),
   loadMachines: async () => {
@@ -159,6 +164,10 @@ export const useApp = create<AppState>((set, get) => ({
     if (!backend.caps.projects) return;
     const projects = await backend.listProjects();
     set({ projects: [...projects].sort((a, b) => a.name.localeCompare(b.name)) });
+  },
+  loadSignIns: async () => {
+    if (!backend.caps.signins) return;
+    set({ signIns: await backend.listSignIns() });
   },
   patchWadspace: async (id, patch) => {
     const ws = await backend.patchWadspace(id, patch);
@@ -244,6 +253,7 @@ function follow() {
     focus: () => s().loadFocus(),
     session: () => s().loadLastSession(),
     projects: () => s().loadProjects(),
+    signins: () => s().loadSignIns(),
     // The pages that show the repo list listen for it themselves.
     github: async () => {},
   };

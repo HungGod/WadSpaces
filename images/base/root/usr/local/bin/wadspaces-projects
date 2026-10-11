@@ -16,18 +16,23 @@ For each project it:
   - runs its one-time setup command in the background, once per setupHash
     (the marker is kept in <state-dir>, so a changed command runs again),
   - places an NN-project-<id>.desktop launcher that opens the folder, at the
-    project's place in layout.json ({"project": "<id>"} icons) or after the rest.
+    project's place in layout.json ({"project": "<id>"} icons) or after the rest,
+    when something here opens a folder in a window (VS Code, or a file manager).
+    Without one, wadspaces-open would only start a terminal there, so the
+    project is mounted with no desktop icon and opened from the image's apps.
 Launchers it placed on an earlier start for projects no longer mounted go, and
 so do the empty folders podman left in ~/Desktop as their mount points.
 """
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
 MANIFEST = "/run/wadspaces-extra/projects.json"
 LAYOUT = "/etc/wadspaces/layout.json"
+APPS = "/usr/share/applications"
 ICON = "/usr/share/wadspaces/icons/folder.svg"
 MOUNT_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -87,6 +92,32 @@ def mount_points() -> set[str]:
             for l in lines if len(l.split()) > 4}
 
 
+def opens_folders() -> bool:
+    """Whether a project's launcher would open in a window: wadspaces-open
+    hands a folder to VS Code when it's here, else to whatever handles
+    inode/directory (a file manager), else to a terminal."""
+    if shutil.which("code"):
+        return True
+    try:
+        names = os.listdir(APPS)
+    except OSError:
+        return False
+    for name in names:
+        if not name.endswith(".desktop"):
+            continue
+        try:
+            with open(os.path.join(APPS, name), errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
+        if re.search(r"^(NoDisplay|Hidden)=true", text, re.M | re.I):
+            continue
+        mime = re.search(r"^MimeType=(.*)$", text, re.M)
+        if mime and "inode/directory" in mime.group(1).split(";"):
+            return True
+    return False
+
+
 def as_abc(*cmd: str) -> subprocess.CompletedProcess:
     return subprocess.run(["s6-setuidgid", "abc", *cmd], capture_output=True, text=True)
 
@@ -141,6 +172,9 @@ def main() -> int:
 
     pos = positions()
     mounted = mount_points()
+    icons = opens_folders()
+    if not icons:
+        log("nothing here opens a folder in a window; projects get no desktop icon")
     placed: list[str] = []
     mounts_now: list[str] = []
     extra = 80
@@ -151,6 +185,9 @@ def main() -> int:
             continue
         trust(path)
         setup(p, path, state)
+        mounts_now.append(p["mount"])
+        if not icons:
+            continue
         n = pos.get(p["id"])
         if n is None:
             n, extra = extra, extra + 1
@@ -159,7 +196,6 @@ def main() -> int:
             f.write(launcher(p, path))
         os.chmod(os.path.join(desktop, name), 0o755)
         placed.append(name)
-        mounts_now.append(p["mount"])
 
     for old in before - set(placed):
         if "/" not in old:

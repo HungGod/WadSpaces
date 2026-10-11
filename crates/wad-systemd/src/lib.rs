@@ -2,6 +2,8 @@
 //! wad-<id>.service): the system manager on a machine, your user manager on
 //! a laptop (`wadd serve --user`). Each operation waits for its job to finish
 //! (JobRemoved) and says how it ended, instead of shelling out to systemctl.
+//! Apps on the machine itself (the terminal, WadBrowser) run in transient
+//! units of the same name, made on the spot ([`Systemd::start_transient`]).
 
 use std::time::Duration;
 
@@ -9,7 +11,7 @@ mod power;
 pub use power::Power;
 
 use futures_util::StreamExt;
-use zbus::zvariant::OwnedObjectPath;
+use zbus::zvariant::{OwnedObjectPath, Value};
 
 #[zbus::proxy(
     interface = "org.freedesktop.systemd1.Manager",
@@ -23,6 +25,13 @@ trait Manager {
     fn reload(&self) -> zbus::Result<()>;
     fn subscribe(&self) -> zbus::Result<()>;
     fn load_unit(&self, name: &str) -> zbus::Result<OwnedObjectPath>;
+    fn start_transient_unit(
+        &self,
+        name: &str,
+        mode: &str,
+        properties: &[(&str, Value<'_>)],
+        aux: &[(&str, &[(&str, Value<'_>)])],
+    ) -> zbus::Result<OwnedObjectPath>;
     #[zbus(signal)]
     fn job_removed(&self, id: u32, job: OwnedObjectPath, unit: String, result: String) -> zbus::Result<()>;
 }
@@ -46,22 +55,65 @@ pub enum Error {
     Timeout { op: &'static str, unit: String, secs: u64 },
 }
 
+/// A transient service: a program run as a unit without a unit file. It is
+/// gone once it stops (CollectMode=inactive-or-failed), so a later start
+/// makes it afresh.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TransientSpec {
+    pub description: String,
+    /// The program (an absolute path) and its arguments.
+    pub exec: Vec<String>,
+    /// Who it runs as (the system manager only; a user manager runs it as you).
+    pub user: Option<String>,
+    pub group: Option<String>,
+    pub working_directory: Option<String>,
+    /// NAME=value
+    pub environment: Vec<String>,
+}
+
+impl TransientSpec {
+    fn properties(&self) -> Vec<(&'static str, Value<'_>)> {
+        let program = self.exec.first().cloned().unwrap_or_default();
+        let exec_start = vec![(program, self.exec.clone(), false)];
+        let mut p: Vec<(&'static str, Value<'_>)> = vec![
+            ("Description", Value::from(self.description.as_str())),
+            // "exec": the start fails when the program can't be run, rather
+            // than the unit dying a moment later.
+            ("Type", Value::from("exec")),
+            ("ExecStart", Value::new(exec_start)),
+            ("CollectMode", Value::from("inactive-or-failed")),
+            ("Environment", Value::new(self.environment.clone())),
+        ];
+        if let Some(u) = &self.user {
+            p.push(("User", Value::from(u.as_str())));
+        }
+        if let Some(g) = &self.group {
+            p.push(("Group", Value::from(g.as_str())));
+        }
+        if let Some(d) = &self.working_directory {
+            p.push(("WorkingDirectory", Value::from(d.as_str())));
+        }
+        p
+    }
+}
+
 #[derive(Clone)]
 pub struct Systemd {
     conn: zbus::Connection,
 }
 
 #[derive(Clone, Copy)]
-enum Op {
+enum Op<'a> {
     Start,
     Stop,
     Restart,
+    Transient(&'a TransientSpec),
 }
 
-impl Op {
+impl Op<'_> {
     fn name(self) -> &'static str {
         match self {
-            Op::Start => "start",
+            Op::Start | Op::Transient(_) => "start",
             Op::Stop => "stop",
             Op::Restart => "restart",
         }
@@ -101,6 +153,12 @@ impl Systemd {
         self.job(Op::Restart, unit, timeout).await
     }
 
+    /// Makes the transient unit `unit` and starts it. Refused while a unit
+    /// of that name is still loaded (running, or stopping).
+    pub async fn start_transient(&self, unit: &str, spec: &TransientSpec, timeout: Duration) -> Result<(), Error> {
+        self.job(Op::Transient(spec), unit, timeout).await
+    }
+
     /// "active", "inactive", "failed", "activating", ...
     pub async fn active_state(&self, unit: &str) -> Result<String, Error> {
         let path = self.manager().await?.load_unit(unit).await?;
@@ -108,7 +166,7 @@ impl Systemd {
         Ok(u.active_state().await?)
     }
 
-    async fn job(&self, op: Op, unit: &str, timeout: Duration) -> Result<(), Error> {
+    async fn job(&self, op: Op<'_>, unit: &str, timeout: Duration) -> Result<(), Error> {
         let m = self.manager().await?;
         m.subscribe().await.ok(); // already subscribed is fine
         // Listen before asking, so a quick job's end isn't missed.
@@ -117,6 +175,7 @@ impl Systemd {
             Op::Start => m.start_unit(unit, "replace").await?,
             Op::Stop => m.stop_unit(unit, "replace").await?,
             Op::Restart => m.restart_unit(unit, "replace").await?,
+            Op::Transient(spec) => m.start_transient_unit(unit, "fail", &spec.properties(), &[]).await?,
         };
         let wait = async {
             while let Some(sig) = removed.next().await {
@@ -165,5 +224,23 @@ mod tests {
         std::fs::remove_file(dir.join(unit)).unwrap();
         std::fs::remove_file(dir.join(fail)).unwrap();
         s.reload().await.unwrap();
+
+        // A transient unit: made, running, then gone once stopped.
+        let app = "wadd-systemd-test-app.service";
+        let spec = TransientSpec {
+            description: "wad-systemd test".into(),
+            exec: vec!["/usr/bin/sleep".into(), "60".into()],
+            environment: vec!["A=1".into()],
+            ..Default::default()
+        };
+        s.start_transient(app, &spec, t).await.unwrap();
+        assert_eq!(s.active_state(app).await.unwrap(), "active");
+        assert!(s.start_transient(app, &spec, t).await.is_err(), "a second one while it runs");
+        s.stop(app, t).await.unwrap();
+        assert_eq!(s.active_state(app).await.unwrap(), "inactive");
+        s.start_transient(app, &spec, t).await.unwrap();
+        s.stop(app, t).await.unwrap();
+        let missing = TransientSpec { exec: vec!["/nonexistent/program".into()], ..spec };
+        assert!(s.start_transient(app, &missing, t).await.is_err());
     }
 }

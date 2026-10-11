@@ -82,6 +82,64 @@ pub fn find_socket(runtime_dir: &Path) -> Option<PathBuf> {
     best.map(|(_, p)| p)
 }
 
+/// (uid, pid) from sway's IPC socket's name (sway-ipc.<uid>.<pid>.sock).
+fn socket_ids(socket: &Path) -> Option<(u32, u32)> {
+    let name = socket.file_name()?.to_str()?;
+    let (uid, pid) = name.strip_prefix("sway-ipc.")?.strip_suffix(".sock")?.split_once('.')?;
+    Some((uid.parse().ok()?, pid.parse().ok()?))
+}
+
+/// A /proc/<pid>/environ (NUL-separated NAME=value), as pairs.
+pub fn parse_environ(environ: &[u8]) -> Vec<(String, String)> {
+    environ
+        .split(|b| *b == 0)
+        .filter_map(|kv| std::str::from_utf8(kv).ok()?.split_once('=').map(|(k, v)| (k.to_owned(), v.to_owned())))
+        .collect()
+}
+
+/// What sway passes on to what it runs, and a program it didn't start should
+/// get too: its bus, language and cursor (not PATH, HOME or the rest).
+const PASSED_ON: &[&str] = &[
+    "DBUS_SESSION_BUS_ADDRESS",
+    "LANG",
+    "LANGUAGE",
+    "XCURSOR_THEME",
+    "XCURSOR_SIZE",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_DESKTOP",
+    "XDG_SESSION_TYPE",
+    "SWAYSOCK",
+];
+
+/// The newest wayland-<n> socket in a runtime dir.
+fn newest_wayland_socket(dir: &Path) -> Option<String> {
+    use std::os::unix::fs::FileTypeExt;
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.strip_prefix("wayland-").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+                && e.file_type().is_ok_and(|t| t.is_socket())
+        })
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.file_name().to_string_lossy().into_owned())))
+        .max()
+        .map(|(_, name)| name)
+}
+
+/// What a program needs to draw on sway's screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Session {
+    /// Whose sway it is (the kiosk user on a machine).
+    pub uid: u32,
+    /// sway's runtime dir (XDG_RUNTIME_DIR): its sockets are there.
+    pub runtime_dir: PathBuf,
+    /// The Wayland socket's name in it (WAYLAND_DISPLAY).
+    pub wayland_display: String,
+    /// The rest of sway's environment worth passing on (PASSED_ON, LC_*).
+    pub env: Vec<(String, String)>,
+}
+
 /// Where to reach sway: a fixed socket, or the newest live one in a runtime dir.
 #[derive(Debug, Clone)]
 pub enum Locate {
@@ -116,6 +174,35 @@ impl Sway {
             Locate::Socket(p) => Ok(p.clone()),
             Locate::RuntimeDir(d) => find_socket(d).ok_or_else(|| Error::NoSway(d.clone())),
         }
+    }
+
+    /// The running sway's session: whose it is, its runtime dir, the
+    /// WAYLAND_DISPLAY it set for its own children and what else of its
+    /// environment to pass on (read from /proc; root can). "wayland-1" when
+    /// that can't be read (sway's usual one).
+    pub fn session(&self) -> Result<Session, Error> {
+        let socket = self.path()?;
+        let runtime_dir = socket.parent().map(Path::to_path_buf).unwrap_or_default();
+        let ids = socket_ids(&socket);
+        let environ = ids
+            .and_then(|(_, pid)| std::fs::read(format!("/proc/{pid}/environ")).ok())
+            .map(|e| parse_environ(&e))
+            .unwrap_or_default();
+        // sway sets WAYLAND_DISPLAY for its children after it starts, which
+        // /proc doesn't show: then the newest Wayland socket beside its own.
+        let wayland_display = environ
+            .iter()
+            .find(|(k, _)| k == "WAYLAND_DISPLAY")
+            .map(|(_, v)| v.clone())
+            .filter(|d| !d.is_empty() && !d.contains('/'))
+            .or_else(|| newest_wayland_socket(&runtime_dir))
+            .unwrap_or_else(|| "wayland-1".into());
+        let env = environ
+            .into_iter()
+            .filter(|(k, _)| PASSED_ON.contains(&k.as_str()) || k.starts_with("LC_"))
+            .collect();
+        let uid = ids.map(|(uid, _)| uid).ok_or_else(|| Error::NoSway(socket.clone()))?;
+        Ok(Session { uid, runtime_dir, wayland_display, env })
     }
 
     async fn open(&self) -> Result<UnixStream, Error> {

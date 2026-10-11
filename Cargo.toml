@@ -22,6 +22,7 @@ wad-input = { path = "crates/wad-input" }
 wad-git = { path = "crates/wad-git" }
 wad-net = { path = "crates/wad-net" }
 wad-icons = { path = "crates/wad-icons" }
+wad-notes = { path = "crates/wad-notes" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -30,7 +31,6 @@ thiserror = "2"
 toml = { version = "1", features = ["preserve_order"] }
 serde_norway = "0.9"
 sha2 = "0.10"
-qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "signal", "io-util", "fs"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "form", "query", "rustls"] }
 tracing = "0.1"

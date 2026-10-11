@@ -1,7 +1,8 @@
 //! The WadSpaces Client on a machine: the React UI (`apps/client/src`) in a Tauri
 //! window, running as the kiosk user. The UI calls into Rust through typed
 //! commands (generated into `src/gen/bindings.ts`); Rust talks to wadd, GitHub
-//! and Firestore, so values like the GitHub token never reach JavaScript.
+//! and Firestore. The GitHub token reaches JavaScript once, at sign-in, for
+//! Firebase (github.rs); wadd keeps it after that.
 
 mod github;
 mod rswadd;
@@ -27,15 +28,24 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").into()
 }
 
+/// This boot's id (the kernel's, new on every boot): the UI forgets the
+/// account sign-in when it changes, so every boot starts at sign-in.
+#[tauri::command]
+#[specta::specta]
+fn boot_id() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
+}
+
 fn commands() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new()
         .error_handling(ErrorHandlingMode::Throw)
         .commands(collect_commands![
             app_version,
-            github::github_device_start,
-            github::github_device_wait,
-            github::github_device_cancel,
-            github::github_open_browser,
+            boot_id,
+            github::github_sign_in,
+            github::github_sign_in_cancel,
+            github::github_pending,
+            github::github_save_token,
             theme::set_theme,
             wadd::wadd_request,
             wadd::wadd_last_state,
@@ -93,7 +103,7 @@ fn run(kiosk: bool) {
             let typed = commands.invoke_handler();
             let raw: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![wadd::wadd_build_context];
             move |invoke| match invoke.message.command() {
-                // Only the app's own window: never a web page (the GitHub window).
+                // Only the app's own window: never a web page (the sign-in window).
                 _ if invoke.message.webview_ref().label() != window::MAIN => {
                     tracing::warn!(window = invoke.message.webview_ref().label(), "refused a command");
                     invoke.resolver.reject("not allowed");

@@ -32,6 +32,10 @@ tempfile.workspace = true
 
 [features]
 default = ["custom-protocol"]
+# The machine's own WadBrowser (host/build.sh): WadBrowser's logo on its home
+# page, light or dark as WadSpaces is. Without it (inside wadspaces) it's
+# dark, with no logo: its own look, nothing of the machine's.
+host = []
 # The chrome is static files in ui/, embedded in the binary: there is no dev server.
 custom-protocol = ["tauri/custom-protocol"]
 # A scripted run that checks the window layout, app ids and moving tabs between

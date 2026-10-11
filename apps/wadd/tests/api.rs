@@ -46,6 +46,8 @@ fn workspace(id: &str) -> Workspace {
     Workspace {
         id: id.into(),
         name: "Writing".into(),
+        kind: Default::default(),
+        exec: vec![],
         image: "ghcr.io/o/writing:1".into(),
         display: Display::Host,
         port: None,
@@ -61,6 +63,7 @@ fn workspace(id: &str) -> Workspace {
         devices: vec![],
         shm_size: None,
         projects: vec![],
+        signins: vec![],
     }
 }
 
@@ -309,10 +312,6 @@ async fn github_without_a_token() {
     assert!(body.contains(r#""token":false"#), "{body}");
     let (status, body) = get(&sock, "/v1/github/repos").await;
     assert_eq!(status, 409, "{body}");
-    // No app settings in tests: the sign-in says why it can't start.
-    let (status, body) = request(&sock, "POST", "/v1/github/device").await;
-    assert_eq!(status, 500, "{body}");
-    assert!(body.contains("GitHub app settings"), "{body}");
     let _ = stop.send(());
 }
 

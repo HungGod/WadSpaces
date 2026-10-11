@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use serde_json::{Map, Value};
-use wad_proto::v1::{Display, MountedProject, Workspace};
+use wad_proto::v1::{Display, Kind, MountedProject, Workspace, WorkspaceSignIn};
 
 use crate::Error;
 
@@ -32,6 +32,9 @@ const WORKSPACE_KEYS: &[&str] = &[
     "autostart",
     "display",
     "projects",
+    "kind",
+    "exec",
+    "signins",
 ];
 const DAEMON_KEYS: &[&str] = &[
     "bind",
@@ -239,12 +242,37 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
         if let Some(key) = control_chars(&Value::Object(raw.clone())) {
             return Err(err(format!("{where_}: {key} has a line break or another control character")));
         }
-        for req in ["id", "name", "image"] {
-            if !raw.contains_key(req) {
+        let kind = match raw.get("kind").map(py_str).as_deref() {
+            None | Some("container") => Kind::Container,
+            Some("app") => Kind::App,
+            Some(_) => return Err(err(format!("{where_}: kind must be one of ('container', 'app')"))),
+        };
+        let required: &[&str] = if kind == Kind::App { &["id", "name", "exec"] } else { &["id", "name", "image"] };
+        for req in required {
+            if !raw.contains_key(*req) {
                 return Err(err(format!("{where_}: missing {req}")));
             }
         }
-        let display = raw.get("display").map(py_str).unwrap_or_else(|| "stream".into());
+        let exec = strings(raw.get("exec"));
+        if kind == Kind::App {
+            // A program on the machine, drawing on its screen: nothing of a
+            // container's applies to it.
+            if exec.first().is_none_or(|p| p.is_empty()) {
+                return Err(err(format!("{where_}: exec must name a program")));
+            }
+            if raw.get("display").is_some_and(|d| py_str(d) != "host") {
+                return Err(err(format!("{where_}: an app is shown on this screen (display must be 'host')")));
+            }
+            for key in ["image", "port", "secrets", "volumes", "devices", "projects", "signins"] {
+                if raw.get(key).is_some_and(crate::state::truthy) {
+                    return Err(err(format!("{where_}: an app has no {key}")));
+                }
+            }
+        } else if !exec.is_empty() {
+            return Err(err(format!("{where_}: only an app has exec")));
+        }
+        let default_display = if kind == Kind::App { "host" } else { "stream" };
+        let display = raw.get("display").map(py_str).unwrap_or_else(|| default_display.into());
         let display = match display.as_str() {
             "host" => Display::Host,
             "stream" => Display::Stream,
@@ -277,6 +305,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
             return Err(err(format!("{where_}: duplicate container_name")));
         }
         let projects = check_projects(raw.get("projects"), &where_)?;
+        let signins = check_signins(raw.get("signins"), &where_)?;
         let enabled = raw.get("enabled").and_then(Value::as_bool).unwrap_or(true);
         let hotkey = int(raw.get("hotkey").filter(|h| !h.is_null()));
         if let Some(h) = hotkey {
@@ -305,7 +334,9 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
         workspaces.push(Workspace {
             id,
             name: py_str(&raw["name"]),
-            image: py_str(&raw["image"]),
+            kind,
+            exec,
+            image: raw.get("image").map(py_str).unwrap_or_default(),
             display,
             port: port.map(|p| p as u16),
             hotkey: hotkey.map(|h| h as u8),
@@ -320,6 +351,7 @@ pub fn parse(data: &Value) -> Result<LegacyConfig, Error> {
             devices: strings(raw.get("devices")),
             shm_size,
             projects,
+            signins,
         });
     }
     Ok(LegacyConfig { machine_name, daemon, cloud, workspaces })
@@ -365,12 +397,53 @@ fn check_projects(v: Option<&Value>, where_: &str) -> Result<Vec<MountedProject>
     Ok(out)
 }
 
+/// `[{id, app, web?, name?}]`: one sign-in per app, ids and apps as ids are.
+fn check_signins(v: Option<&Value>, where_: &str) -> Result<Vec<WorkspaceSignIn>, Error> {
+    let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(vec![]) };
+    let list = v.as_array().ok_or_else(|| err(format!("{where_}: signins must be a list")))?;
+    let mut out: Vec<WorkspaceSignIn> = Vec::new();
+    for s in list {
+        let o = s.as_object();
+        let shape_ok = o.is_some_and(|o| {
+            o.contains_key("id")
+                && o.contains_key("app")
+                && o.iter().all(|(k, v)| match k.as_str() {
+                    "id" | "app" | "name" => v.is_string(),
+                    "web" => v.is_boolean(),
+                    _ => false,
+                })
+        });
+        if !shape_ok {
+            return Err(err(format!("{where_}: each sign-in is {{id, app, web?, name?}}, not {s}")));
+        }
+        let o = o.unwrap();
+        let (id, app) = (py_str(&o["id"]), py_str(&o["app"]));
+        let name = o.get("name").map(py_str).unwrap_or_default();
+        let web = o.get("web").and_then(Value::as_bool).unwrap_or(false);
+        if !wad_core::spec::is_id(&id) || !wad_core::spec::is_id(&app) {
+            return Err(err(format!(
+                "{where_}: sign-in {id:?} for {app:?}: both must match ^[a-z0-9][a-z0-9-]{{0,62}}$"
+            )));
+        }
+        if out.iter().any(|x| x.app == app) {
+            return Err(err(format!("{where_}: {app} has two sign-ins")));
+        }
+        out.push(WorkspaceSignIn { id, app, web, name });
+    }
+    Ok(out)
+}
+
 /// A workspace in workspaces.yaml's shape: what parse() reads back.
 pub fn to_yaml(w: &Workspace) -> Value {
     let mut o = Map::new();
     o.insert("id".into(), w.id.clone().into());
     o.insert("name".into(), w.name.clone().into());
-    o.insert("image".into(), w.image.clone().into());
+    if w.kind == Kind::App {
+        o.insert("kind".into(), "app".into());
+        o.insert("exec".into(), w.exec.clone().into());
+    } else {
+        o.insert("image".into(), w.image.clone().into());
+    }
     o.insert("display".into(), if w.display == Display::Host { "host" } else { "stream" }.into());
     if let Some(p) = w.port {
         o.insert("port".into(), p.into());
@@ -405,6 +478,25 @@ pub fn to_yaml(w: &Workspace) -> Value {
         })
         .collect();
     o.insert("projects".into(), projects.into());
+    if !w.signins.is_empty() {
+        let signins: Vec<Value> = w
+            .signins
+            .iter()
+            .map(|s| {
+                let mut m = Map::new();
+                m.insert("id".into(), s.id.clone().into());
+                m.insert("app".into(), s.app.clone().into());
+                if s.web {
+                    m.insert("web".into(), true.into());
+                }
+                if !s.name.is_empty() {
+                    m.insert("name".into(), s.name.clone().into());
+                }
+                Value::Object(m)
+            })
+            .collect();
+        o.insert("signins".into(), signins.into());
+    }
     Value::Object(o)
 }
 

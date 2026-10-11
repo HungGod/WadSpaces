@@ -37,6 +37,7 @@ mod session;
 #[cfg(feature = "spike")]
 mod spike;
 mod tab;
+mod theme;
 mod urlbar;
 #[cfg(feature = "spike")]
 mod vpointer;
@@ -116,6 +117,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            theme::follow();
             #[cfg(feature = "spike")]
             if spike::start(&handle) {
                 return Ok(());
@@ -169,7 +171,7 @@ fn route(app: &AppHandle, req: Request) {
             name: req.name.clone(),
             start: req.start.as_deref().map(urlbar::normalize),
             icon: req.icon.clone(),
-            profile: req.profile.clone(),
+            profile: req.profile.clone().or_else(|| profile::for_app(app_id)),
         };
         open(app, opts, urls);
         return;

@@ -8,7 +8,7 @@
  * @typedef {{ id: number, title: string, url: string, favicon: string | null, loading: boolean,
  *             progress: number, canBack: boolean, canForward: boolean, audio: boolean,
  *             muted: boolean, sleeping: boolean }} TabState
- * @typedef {{ mode: "full" | "focus" | "app", name: string | null, appIcon: string | null,
+ * @typedef {{ mode: "full" | "focus" | "app", theme: "dark" | "light", name: string | null, appIcon: string | null,
  *             homeHost: string | null, canNewTab: boolean, tabs: TabState[], active: number | null,
  *             zoom: number, fullscreen: boolean }} State
  * @typedef {{ id: number, name: string, received: number, total: number,
@@ -51,6 +51,7 @@ const act = (action) => invoke("act", { action });
 /** @param {State} s */
 function render(s) {
   state = s;
+  document.documentElement.dataset.theme = s.theme;
   const body = document.body;
   body.classList.remove("mode-full", "mode-focus", "mode-app");
   body.classList.add(`mode-${s.mode}`);

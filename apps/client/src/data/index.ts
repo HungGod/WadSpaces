@@ -14,6 +14,8 @@ export async function initBackend(): Promise<Backend> {
     const { CloudBackend } = await import("./cloud");
     backend = new CloudBackend();
   } else if (import.meta.env.VITE_TARGET === "machine") {
+    // Before Firebase loads: a new boot starts signed out.
+    await (await import("./machine/boot")).forgetSignInAfterReboot();
     const { MachineBackend } = await import("./machine");
     backend = new MachineBackend();
   } else {

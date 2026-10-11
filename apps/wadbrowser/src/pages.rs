@@ -37,11 +37,30 @@ pub fn serve(req: &webkit2gtk::URISchemeRequest) {
     req.finish(&gio::MemoryInputStream::from_bytes(&bytes), len, Some("text/html"));
 }
 
-const LOGO: &str = include_str!("../icons/hicolor/scalable/apps/wadbrowser.svg");
+/// WadBrowser's logo, each theme's (apps/client/public/brand), on the
+/// machine's own WadBrowser only (the `host` feature); the page shows the
+/// one for the theme (`prefers-color-scheme`, theme.rs).
+#[cfg(feature = "host")]
+fn logo() -> String {
+    fn svg(s: &str) -> &str {
+        s.find("<svg").map_or(s, |i| &s[i..])
+    }
+    format!(
+        r#"<div class="dark">{}</div><div class="light">{}</div>"#,
+        svg(include_str!("../../client/public/brand/wadbrowser-logo-dark.svg")),
+        svg(include_str!("../../client/public/brand/wadbrowser-logo-light.svg"))
+    )
+}
+
+/// Inside a wadspace: no logo, the search box alone.
+#[cfg(not(feature = "host"))]
+fn logo() -> String {
+    String::new()
+}
 
 /// The home page, with or without its search box.
 pub fn home_html(search: bool) -> String {
-    let logo = LOGO.find("<svg").map_or(LOGO, |i| &LOGO[i..]);
+    let logo = logo();
     let search = if search {
         format!(
             r#"<form id="search" autocomplete="off"><input id="q" type="text" spellcheck="false" aria-label="Search or type an address" placeholder="{}"></form>"#,
@@ -50,7 +69,7 @@ pub fn home_html(search: bool) -> String {
     } else {
         String::new()
     };
-    include_str!("../ui/home.html").replace("{logo}", logo).replace("{search}", &search)
+    crate::theme::html(include_str!("../ui/home.html")).replace("{logo}", &logo).replace("{search}", &search)
 }
 
 /// "DuckDuckGo" for https://duckduckgo.com/?q=%s, else the search's host.
@@ -156,7 +175,7 @@ fn show(view: &WebView, uri: &str, title: &str, body: &str, buttons: &[(&str, &s
         .iter()
         .map(|(label, act)| format!(r#"<a class=btn href="{ACTION_SCHEME}:{act}">{}</a>"#, esc(label)))
         .collect();
-    let html = PAGE.replace("{title}", &esc(title)).replace("{body}", body).replace("{buttons}", &buttons);
+    let html = crate::theme::html(PAGE).replace("{title}", &esc(title)).replace("{body}", body).replace("{buttons}", &buttons);
     view.load_alternate_html(&html, uri, None);
 }
 
@@ -184,8 +203,8 @@ fn esc(s: &str) -> String {
 }
 
 const PAGE: &str = r#"<!doctype html><html><head><meta charset=utf-8><title>{title}</title><style>
-:root { color-scheme: light dark; --bg: #f6f6f7; --fg: #202124; --muted: #5f6368; --btn: #202124; --btnfg: #fff; }
-@media (prefers-color-scheme: dark) { :root { --bg: #202124; --fg: #e8eaed; --muted: #9aa0a6; --btn: #d4ff3d; --btnfg: #111; } }
+:root { color-scheme: dark; --bg: #0a0614; --fg: #f5f2fa; --muted: rgba(245, 242, 250, 0.62); --btn: #c6ff1f; --btnfg: #0a0614; }
+:root[data-theme="light"] { color-scheme: light; --bg: #f4f4f4; --fg: #0a0614; --muted: #5f5f5f; --btn: #0a0614; --btnfg: #fff; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
 main { max-width: 520px; margin: 18vh auto 0; padding: 0 24px; }
 h1 { font-size: 24px; margin: 0 0 12px; }

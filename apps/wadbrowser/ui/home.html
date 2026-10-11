@@ -8,22 +8,30 @@
     <meta name="color-scheme" content="dark light" />
     <style>
       :root {
-        --bg: #202124;
-        --field: #2a2b2e;
-        --text: #e8eaed;
-        --muted: #9aa0a6;
-        --ring: rgba(255, 255, 255, 0.12);
-        --accent: #d4ff3d;
+        --bg: #0a0614;
+        --field: #140d22;
+        --text: #f5f2fa;
+        --muted: rgba(245, 242, 250, 0.62);
+        --ring: rgba(240, 234, 250, 0.12);
+        --accent: #c6ff1f;
       }
-      @media (prefers-color-scheme: light) {
-        :root {
-          --bg: #f6f6f7;
-          --field: #ffffff;
-          --text: #202124;
-          --muted: #5f6368;
-          --ring: rgba(0, 0, 0, 0.14);
-          --accent: #202124;
-        }
+      .logo .light {
+        display: none;
+      }
+      /* Light (WadSpaces' greyscale), when theme.rs says so: data-theme on the page. */
+      :root[data-theme="light"] {
+        --bg: #f4f4f4;
+        --field: #ffffff;
+        --text: #0a0614;
+        --muted: #5f5f5f;
+        --ring: rgba(10, 6, 20, 0.14);
+        --accent: #0a0614;
+      }
+      :root[data-theme="light"] .logo .dark {
+        display: none;
+      }
+      :root[data-theme="light"] .logo .light {
+        display: block;
       }
       html,
       body {
@@ -45,8 +53,8 @@
       }
       .logo svg {
         display: block;
-        width: 132px;
-        height: 132px;
+        width: 330px;
+        height: auto;
         user-select: none;
         -webkit-user-select: none;
       }

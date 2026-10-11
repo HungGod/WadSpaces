@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use wad_proto::v1::{Display, Workspace};
+use wad_proto::v1::{Display, Kind, Workspace};
 use wadd::backend::{Backend, OnLine};
 
 #[derive(Default)]
@@ -41,6 +41,10 @@ pub struct Machine {
     pub build_slow: bool,
     /// podman's secrets: name -> value.
     pub secrets: HashMap<String, Vec<u8>>,
+    /// Apps' transient units that are up: unit -> its command line.
+    pub apps: HashMap<String, Vec<String>>,
+    /// This app's unit goes away just as it's stopped (it exited by itself).
+    pub app_gone_at_stop: Option<String>,
 }
 
 pub const TOKEN: &str = "ghp_TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT";
@@ -97,11 +101,37 @@ impl Backend for Fake {
         Ok(())
     }
     async fn stop(&self, unit: &str) -> Result<(), String> {
+        if self.0.lock().unwrap().app_gone_at_stop.as_deref() == Some(unit) {
+            // It ended by itself just now: systemd collected its unit.
+            self.with(|m| {
+                m.apps.remove(unit);
+                m.app_gone_at_stop = None;
+            });
+            return Err(format!("Unit {unit} not loaded."));
+        }
         self.with(|m| {
             m.calls.push(format!("stop {unit}"));
             m.containers.remove(unit.trim_end_matches(".service"));
+            m.apps.remove(unit);
         });
         Ok(())
+    }
+    async fn start_app(&self, unit: &str, ws: &Workspace) -> Result<(), String> {
+        let fail = self.0.lock().unwrap().start_fails.clone();
+        self.with(|m| m.calls.push(format!("app {unit} {}", ws.exec.join(" "))));
+        if let Some(e) = fail {
+            return Err(e);
+        }
+        if self.0.lock().unwrap().apps.contains_key(unit) {
+            return Err(format!("Unit {unit} was already loaded")); // as systemd says
+        }
+        self.with(|m| {
+            m.apps.insert(unit.into(), ws.exec.clone());
+        });
+        Ok(())
+    }
+    async fn unit_state(&self, unit: &str) -> Result<String, String> {
+        Ok(if self.0.lock().unwrap().apps.contains_key(unit) { "active" } else { "inactive" }.into())
     }
     async fn restart(&self, unit: &str) -> Result<(), String> {
         self.with(|m| {
@@ -184,10 +214,23 @@ impl Backend for Fake {
     }
 }
 
+/// An app (a program on the machine): `exec` and nothing of a container's.
+pub fn app(id: &str, exec: &str) -> Workspace {
+    Workspace {
+        kind: Kind::App,
+        exec: vec![exec.into()],
+        image: String::new(),
+        env: vec![],
+        ..ws(id, "", Display::Host, None)
+    }
+}
+
 pub fn ws(id: &str, image: &str, display: Display, port: Option<u16>) -> Workspace {
     Workspace {
         id: id.into(),
         name: id.to_uppercase(),
+        kind: Kind::Container,
+        exec: vec![],
         image: image.into(),
         display,
         port,
@@ -203,5 +246,6 @@ pub fn ws(id: &str, image: &str, display: Display, port: Option<u16>) -> Workspa
         devices: vec![],
         shm_size: Some("1g".into()),
         projects: vec![],
+        signins: vec![],
     }
 }

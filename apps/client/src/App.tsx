@@ -9,13 +9,13 @@ import Home from "@/pages/Home";
 import Launch from "@/pages/Launch";
 import Manager from "@/pages/Manager";
 import Projects from "@/pages/Projects";
+import Secrets from "@/pages/Secrets";
 
 // Account pages load Firebase Auth: the web portal and the machine app have
 // them, the offline build never includes them. The target check is inline so
 // the bundler can drop these chunks offline.
 const account = import.meta.env.VITE_TARGET === "online" || import.meta.env.VITE_TARGET === "machine";
 const Login = account ? lazy(() => import("@/pages/Login")) : null;
-const Signup = account ? lazy(() => import("@/pages/Signup")) : null;
 const Welcome = account ? lazy(() => import("@/pages/Welcome")) : null;
 // The machine app's first-run setup and its overlays for wadd (Wi-Fi, power, the switcher).
 const MachineGate = import.meta.env.VITE_TARGET === "machine" ? lazy(() => import("@/components/machine/MachineGate")) : null;
@@ -84,10 +84,9 @@ function EditBuilder() {
 export default function App() {
   const routes = (
     <Routes>
-      {Login && Signup && Welcome && (
+      {Login && Welcome && (
         <>
           <Route path="login" element={<Login />} />
-          <Route path="signup" element={<Signup />} />
           <Route path="welcome" element={<Welcome />} />
         </>
       )}
@@ -96,6 +95,7 @@ export default function App() {
         {/* The Wadspaces page is the Wadspaces Manager's first tab now. */}
         <Route path="wadspaces" element={<Navigate to="/manager" replace />} />
         <Route path="projects" element={<Projects />} />
+        <Route path="secrets" element={<Secrets />} />
         <Route path="launch" element={<Launch />} />
         <Route path="manager" element={<Manager />} />
         <Route path="builder" element={<NewBuilder />} />

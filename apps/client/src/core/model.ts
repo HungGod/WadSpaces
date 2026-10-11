@@ -30,6 +30,9 @@ export interface LayoutIcon {
   launcher?: "chrome" | "kale";
   /** Custom (non-catalog) web apps: the site to open. */
   url?: string;
+  /** A saved sign-in's id (wadd's, on this machine): mounted into the
+   *  wadspace so the app shares it with every other wadspace using it. */
+  signIn?: string;
 }
 
 export interface Layout {

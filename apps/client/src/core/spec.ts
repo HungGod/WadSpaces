@@ -123,6 +123,8 @@ export interface CreatorSpec {
   layout?: LayoutEntry[];
   /** Projects it opens with by default; mounted at launch, listed in the README. */
   projects?: SpecProject[];
+  /** The saved sign-ins its apps use; mounted when it starts (no rebuild). */
+  signins?: WaddSignIn[];
   // run
   display?: Display; // absent on specs saved before it existed: "stream"
   image: string;
@@ -141,6 +143,10 @@ export interface CreatorSpec {
 export interface WaddSpec {
   id: string;
   name: string;
+  /** "app": a program on the machine itself (Terminal, WadBrowser), from the
+   *  image only; it has `exec` instead of an image (`image` is empty). */
+  kind?: "app";
+  exec?: string[];
   image: string;
   port?: number;
   display?: Display;
@@ -158,6 +164,16 @@ export interface WaddSpec {
   /** Set by wadd when it launches with projects (wadd/launches.py), never by the app.
    *  `path`: a folder or drive project, mounted where it is. */
   projects?: { id: string; mount: string; path?: string }[];
+  /** The saved sign-ins its apps use (from its design): `app` is the app's
+   *  id, `web` a web app's (a WadBrowser profile). */
+  signins?: WaddSignIn[];
+}
+
+export interface WaddSignIn {
+  id: string;
+  app: string;
+  web?: boolean;
+  name?: string;
 }
 
 export const DEFAULT_BASE_IMAGE = "localhost/wadspaces-base:trixie";

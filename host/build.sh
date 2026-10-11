@@ -37,13 +37,15 @@
 # wadd (apps/wadd, the machine daemon) and the HUD (apps/hud: the bar, power
 # and Wi-Fi menus and the switcher above every window) are built here too,
 # into /usr/bin/wadd and /usr/libexec/wadspaces/hud. The HUD needs gtk4-devel
-# and gtk4-layer-shell-devel.
+# and gtk4-layer-shell-devel. So is WadBrowser (apps/wadbrowser), the machine's
+# own browser app, into /usr/bin/wadbrowser (the same WebKitGTK dev packages as
+# the client).
 #
 # Baked-in secrets come from host/secrets/ (gitignored, never in the build
 # context directly):
 #   admin_password_hash    crypt hash for `admin` (default: the one in bib-config.toml)
-# No GitHub token is baked in any more: each machine signs in to GitHub from
-# WadSpaces Client (device sign-in), and gets the token from the account.
+# No GitHub token is baked in any more: a machine gets its token when you sign
+# in to WadSpaces Client with GitHub, or from the account.
 # ADMIN_SSH_KEY (default: the key in bib-config.toml) is admin's SSH key.
 set -euo pipefail
 
@@ -132,6 +134,17 @@ stage_hud() {
     echo ">> building the HUD (apps/hud)"
     (cd "${ROOT}" && cargo build --release --quiet -p wadspaces-hud)
     install -m 755 "${ROOT}/target/release/wadspaces-hud" "${out}/hud"
+}
+
+# WadBrowser for the machine itself (an app wadd runs, like the terminal:
+# host/usr/lib/wadspaces/workspaces.d/browser.toml). Built here for the same
+# reason as the client; the wadspace images get theirs from images/build.sh.
+stage_wadbrowser() {
+    local out="${ROOT}/.build/wadbrowser"
+    rm -rf "${out}" && mkdir -p "${out}"
+    echo ">> building WadBrowser (apps/wadbrowser)"
+    (cd "${ROOT}" && cargo build --profile wadbrowser --quiet -p wadbrowser --features host)
+    install -m 755 "${ROOT}/target/wadbrowser/wadbrowser" "${out}/wadbrowser"
 }
 
 # admin's password hash or SSH key from bib-config.toml ("password" / "key").
@@ -325,6 +338,7 @@ esac
 stage_client
 stage_wadd
 stage_hud
+stage_wadbrowser
 stage_secrets
 echo ">> building ${IMAGE}"
 podman build -f "${ROOT}/host/Containerfile" -t "${IMAGE}" "${ROOT}"

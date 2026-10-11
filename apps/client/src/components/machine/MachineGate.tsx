@@ -1,6 +1,6 @@
 // The machine app's first run (setup.ts has the order): Wi-Fi until the
-// machine is online, then the sign-in pages, then linking the machine to the
-// account and signing it in to GitHub. After that (and on every later start)
+// machine is online, then signing in with GitHub, then linking the machine to
+// the account, which puts the sign-in's GitHub token in place. After that (and on every later start)
 // it's the app, with MachineChrome over it.
 import { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router";
@@ -10,7 +10,7 @@ import type { MachineBackend } from "@/data/machine";
 import { onAuthUser } from "@/data/cloud/auth";
 import { AuthCard } from "../AuthCard";
 import { Button } from "../ui";
-import { GithubSignIn } from "./GithubSignIn";
+import { GithubSignIn, savePendingGithub } from "./GithubSignIn";
 import { MachineChrome } from "./MachineChrome";
 import { nextSetupStep, type SetupStep } from "./setup";
 import { isOnline, useWaddState } from "./useWadd";
@@ -113,7 +113,7 @@ export default function MachineGate({ children }: { children: React.ReactNode })
   const [skipped, setSkipped] = useState(false);
   const [waited, setWaited] = useState(false);
 
-  // Who's signed in (Firebase remembers them across reboots, offline too).
+  // Who's signed in (Firebase remembers them until the next boot: machine/boot.ts).
   useEffect(
     () =>
       onAuthUser((u) => {
@@ -133,13 +133,28 @@ export default function MachineGate({ children }: { children: React.ReactNode })
   // Whether this machine has a working GitHub token, once it's this user's. A
   // refused one (revoked, like the old baked-in token) counts as none; one
   // that can't be checked offline counts as fine.
-  const checkGithub = useCallback(() => {
-    backend.githubStatus().then((s) => setGithub(s.token && !refused(s.error)), () => setGithub(false));
-  }, []);
+  const checkGithub = useCallback(
+    () => backend.githubStatus().then((s) => setGithub(s.token && !refused(s.error)), () => setGithub(false)),
+    [],
+  );
   useEffect(() => {
     if (linked) checkGithub();
     return backend.subscribe((t) => t === "github" && linked && checkGithub());
   }, [linked, checkGithub]);
+
+  // The sign-in's GitHub token goes to wadd once the machine is this user's
+  // (linking to a new owner clears the old one's). A wadd without cloud
+  // settings (a dev laptop) is anyone's.
+  const mine = !!uid && (snap?.cloud_enabled === false || snap?.owner_uid === uid);
+  const [savingGithub, setSavingGithub] = useState(false);
+  useEffect(() => {
+    if (!mine) return;
+    setSavingGithub(true);
+    savePendingGithub()
+      .catch((e) => console.warn("GitHub token not saved:", e))
+      .then(() => (linked ? checkGithub() : undefined))
+      .finally(() => setSavingGithub(false));
+  }, [mine, linked, checkGithub]);
 
   // Without wadd there's nothing to set up here: don't hold the app hostage.
   useEffect(() => {
@@ -163,7 +178,7 @@ export default function MachineGate({ children }: { children: React.ReactNode })
       uid: uid ?? null,
       // A wadd without cloud settings (a dev laptop) can't be linked: take it as yours.
       ownerUid: snap.cloud_enabled === false ? (uid ?? null) : (snap.owner_uid ?? null),
-      github: github ?? true, // unknown yet: don't flash the step
+      github: savingGithub || (github ?? true), // unknown yet: don't flash the step
       githubSkipped: skipped,
     });
   }
@@ -183,7 +198,7 @@ export default function MachineGate({ children }: { children: React.ReactNode })
         return <LinkStep online={isOnline(snap)} machineName={snap?.machine ?? "WadSpaces machine"} relink={step === "relink"} />;
       case "github":
         return (
-          <Card title="Sign in to GitHub" subtitle="Your projects are GitHub repositories: this lets the machine clone, pull and push them." wide>
+          <Card title="Sign in to GitHub again" subtitle="This machine has no GitHub access yet. Your projects are GitHub repositories: this lets it clone, pull and push them.">
             <GithubSignIn />
             <div className="mt-6 flex justify-end">
               <Button

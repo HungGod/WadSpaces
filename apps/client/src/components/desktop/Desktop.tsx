@@ -5,6 +5,10 @@ import type { Layout, LayoutIcon } from "@/lib/types";
 import { favicon } from "@/lib/favicon";
 import { DesktopIcon } from "./DesktopIcon";
 import { IconEditor } from "./IconEditor";
+import { SignInPicker } from "./SignInPicker";
+import { signInKind } from "@core/signins";
+import { backend } from "@/data";
+import { useApp } from "@/lib/store";
 import { Taskbar } from "./Taskbar";
 import { Window } from "./Window";
 import { activeWin, useWindows } from "./useWindows";
@@ -75,6 +79,8 @@ export function Desktop({ layout, onChange, editable, title = "Wadspace", onWall
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState<string | null>(null);
+  const signIns = useApp((s) => s.signIns);
   const [menu, setMenu] = useState<Menu>(null);
   const [dragIcon, setDragIcon] = useState<{ id: string; x: number; y: number } | null>(null);
   const [dropHover, setDropHover] = useState(false);
@@ -184,7 +190,7 @@ export function Desktop({ layout, onChange, editable, title = "Wadspace", onWall
   const arrange = () => onChange?.(arrangeLayout(layout, area));
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (renaming || editing || (e.target as HTMLElement).tagName === "INPUT") return;
+    if (renaming || editing || signingIn || (e.target as HTMLElement).tagName === "INPUT") return;
     const icon = layout.icons.find((i) => i.id === selected);
     if (!icon) return;
     if (e.key === "Enter") openIcon(icon);
@@ -218,6 +224,7 @@ export function Desktop({ layout, onChange, editable, title = "Wadspace", onWall
 
   const menuIcon = layout.icons.find((i) => i.id === menu?.iconId);
   const editingIcon = layout.icons.find((i) => i.id === editing);
+  const signingInIcon = layout.icons.find((i) => i.id === signingIn);
   const previewPx = preview && area.w ? toPx(snapRect(preview), area) : null;
 
   return (
@@ -334,6 +341,14 @@ export function Desktop({ layout, onChange, editable, title = "Wadspace", onWall
                     <MenuItem onClick={() => updateIcon({ ...menuIcon, autostart: !menuIcon.autostart })} hint={menuIcon.autostart ? "On" : "Off"}>
                       Open on startup
                     </MenuItem>
+                    {backend.caps.signins && signInKind(menuIcon) && (
+                      <MenuItem
+                        onClick={() => setSigningIn(menuIcon.id)}
+                        hint={menuIcon.signIn ? (signIns.find((x) => x.id === menuIcon.signIn)?.name ?? "Saved") : "Own"}
+                      >
+                        Sign-in…
+                      </MenuItem>
+                    )}
                     <div className="my-1 h-px bg-white/10" />
                     <MenuItem danger onClick={() => removeIcon(menuIcon.id)} hint="Del">Remove from desktop</MenuItem>
                   </>
@@ -355,6 +370,17 @@ export function Desktop({ layout, onChange, editable, title = "Wadspace", onWall
           </motion.div>
         )}
       </AnimatePresence>
+
+      {signingInIcon && (
+        <SignInPicker
+          icon={signingInIcon}
+          onCancel={() => setSigningIn(null)}
+          onSave={(icon) => {
+            updateIcon(icon);
+            setSigningIn(null);
+          }}
+        />
+      )}
 
       {editingIcon && (
         <IconEditor

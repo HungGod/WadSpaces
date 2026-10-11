@@ -23,6 +23,8 @@ fn workspace(id: &str, display: Display, port: Option<u16>, hotkey: u8) -> Works
     Workspace {
         id: id.into(),
         name: id.to_uppercase(),
+        kind: Default::default(),
+        exec: vec![],
         image: format!("ghcr.io/o/{id}:1"),
         display,
         port,
@@ -38,6 +40,7 @@ fn workspace(id: &str, display: Display, port: Option<u16>, hotkey: u8) -> Works
         devices: vec![],
         shm_size: Some("1g".into()),
         projects: vec![],
+        signins: vec![],
     }
 }
 

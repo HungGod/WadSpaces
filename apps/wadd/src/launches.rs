@@ -171,6 +171,10 @@ impl Launches {
         if self.jobs.lock().unwrap().iter().any(busy) {
             return Err(ApiError::new(ErrorCode::Conflict, format!("{} is already launching", ws.name)));
         }
+        let app = ws.kind == wad_proto::v1::Kind::App;
+        if app && !project_ids.is_empty() {
+            return Err(ApiError::new(ErrorCode::BadRequest, format!("{} is an app: it opens no projects", ws.name)));
+        }
         let mut ids: Vec<String> = vec![];
         for p in project_ids {
             if !ids.contains(p) {
@@ -203,14 +207,19 @@ impl Launches {
                 format!("{} is running with other projects; pass restart to restart it", ws.name),
             ));
         }
-        let mut parts = vec![LaunchPart {
-            key: "image".into(),
-            kind: "image".into(),
-            name: ws.image.clone(),
-            state: PartState::Waiting,
-            progress: None,
-            message: None,
-        }];
+        // An app has no image to get: it just starts.
+        let mut parts = if app {
+            vec![]
+        } else {
+            vec![LaunchPart {
+                key: "image".into(),
+                kind: "image".into(),
+                name: ws.image.clone(),
+                state: PartState::Waiting,
+                progress: None,
+                message: None,
+            }]
+        };
         for (pid, name) in ids.iter().zip(&names) {
             parts.push(LaunchPart {
                 key: pid.clone(),
@@ -419,7 +428,10 @@ impl Launches {
             }
         }
         let paths: Mutex<HashMap<String, String>> = Mutex::default();
-        let mut step1: Vec<BoxFuture<'_, Result<(), String>>> = vec![self.image(id, &ws, !docs.is_empty()).boxed()];
+        let mut step1: Vec<BoxFuture<'_, Result<(), String>>> = vec![];
+        if ws.kind == wad_proto::v1::Kind::Container {
+            step1.push(self.image(id, &ws, !docs.is_empty()).boxed());
+        }
         for d in &docs {
             step1.push(self.project(id, &ws, d, &paths).boxed());
         }

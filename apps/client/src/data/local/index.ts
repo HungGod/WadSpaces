@@ -96,6 +96,7 @@ export class LocalBackend implements Backend {
     history: false, // set by init() when this wadd keeps run history
     projects: false, // set by init() when this wadd has projects
     tailnet: false, // set by init() when Tailscale is installed here
+    signins: false, // set by init() when this wadd keeps saved sign-ins
   };
 
   private snap: Snapshot | null = null;
@@ -128,6 +129,7 @@ export class LocalBackend implements Backend {
     this.caps.localBuild = f.builds;
     this.caps.history = f.runs;
     this.caps.projects = f.projects;
+    this.caps.signins = f.signins;
     this.tailnet = f.tailnet;
     this.tailnetAt = Date.now();
     this.caps.tailnet = !!f.tailnet?.installed;
@@ -203,6 +205,10 @@ export class LocalBackend implements Backend {
               this.emit("projects");
               this.emit("wadspaces");
             });
+            break;
+          // A saved sign-in was made, renamed, signed out or deleted.
+          case "signins":
+            this.emit("signins");
             break;
           // Tailscale's state changed (signed in, out, online): ask for the
           // whole status.
@@ -300,6 +306,7 @@ export class LocalBackend implements Backend {
       updatedAt: entry?.updatedAt ?? this.seenAt,
       templateId: entry?.templateId,
       preset: !entry && !!preset,
+      ...(installed?.kind === "app" && { app: true }),
       ...(installed?.projects && { mountedProjects: installed.projects.map((p) => p.id) }),
       ...(entry?.deletedAt && { deletedAt: entry.deletedAt }),
     };
@@ -367,25 +374,29 @@ export class LocalBackend implements Backend {
     if (patch.deletedAt) next.deletedAt = patch.deletedAt;
     else if (patch.deletedAt === null) delete next.deletedAt;
     await this.lib.put(next);
-    await this.mirrorInstalled(id, spec.name, spec.advanced.hotkey ?? null, !next.deletedAt);
+    await this.mirrorInstalled(id, spec.name, spec.advanced.hotkey ?? null, !next.deletedAt, spec);
     this.emit("wadspaces");
     return this.getWadspace(id);
   }
 
-  /** The machine's own copy of an edited wadspace: its name and hotkey change
-   *  now; the rest (apps, wallpaper, run settings) when the image is rebuilt.
-   *  A deleted one (not for good) is disabled: wadd leaves it out of the HUD's
-   *  switcher and frees its Super+number. */
-  async mirrorInstalled(id: string, name: string, hotkey: number | null, enabled = true) {
+  /** The machine's own copy of an edited wadspace: its name, hotkey and
+   *  apps' saved sign-ins (from `design`) change now, the sign-ins at its
+   *  next start; the rest (apps, wallpaper, run settings) when the image is
+   *  rebuilt. A deleted one (not for good) is disabled: wadd leaves it out of
+   *  the HUD's switcher and frees its Super+number. */
+  async mirrorInstalled(id: string, name: string, hotkey: number | null, enabled = true, design?: WadspaceSpec) {
     const installed = this.specs.find((s) => s.id === id);
     if (!installed) return;
-    if (installed.name === name && (installed.hotkey ?? null) === hotkey && (installed.enabled !== false) === enabled) return;
+    const signins = design ? (toBuildSpec(design, {}).spec.signins ?? []) : (installed.signins ?? []);
+    const sameSignIns = JSON.stringify(signins) === JSON.stringify(installed.signins ?? []);
+    if (installed.name === name && (installed.hotkey ?? null) === hotkey && (installed.enabled !== false) === enabled && sameSignIns) return;
+    const next = { ...installed, name, hotkey, enabled, signins: signins.length ? signins : undefined };
     try {
-      await wadd.update(id, { ...installed, name, hotkey, enabled });
+      await wadd.update(id, next);
     } catch (e) {
       // Restored after another took its Super+number: back without one.
       if (!(enabled && hotkey != null && e instanceof WaddError && /hotkey/.test(e.message))) throw e;
-      await wadd.update(id, { ...installed, name, hotkey: null, enabled });
+      await wadd.update(id, { ...next, hotkey: null });
     }
     await this.refreshSpecs();
   }
@@ -465,6 +476,40 @@ export class LocalBackend implements Backend {
   // ------------------------------------------------------------- projects
   private needProjects() {
     if (!this.caps.projects) throw new Unsupported("Projects on this machine (it needs a system update)");
+  }
+
+  // --------------------------------------------------------- saved sign-ins
+  async listSignIns() {
+    if (!this.caps.signins) return [];
+    return wadd.signIns();
+  }
+
+  async createSignIn(input: { name: string; app: string; paths?: string[] }) {
+    if (!this.caps.signins) throw new Unsupported("Saved sign-ins (this machine needs a system update)");
+    const s = await wadd.createSignIn(input);
+    this.emit("signins");
+    return s;
+  }
+
+  async updateSignIn(id: string, patch: { name?: string; paths?: string[] }) {
+    const s = await wadd.patchSignIn(id, patch);
+    this.emit("signins");
+    return s;
+  }
+
+  async signOutSignIn(id: string) {
+    const s = await wadd.signOut(id);
+    this.emit("signins");
+    return s;
+  }
+
+  async deleteSignIn(id: string) {
+    await wadd.deleteSignIn(id);
+    this.emit("signins");
+  }
+
+  async listSecrets() {
+    return this.caps.signins ? wadd.secretList() : [];
   }
 
   async listProjects() {

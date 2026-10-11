@@ -114,8 +114,12 @@ pub fn restore(app: &AppHandle) -> bool {
     };
     let mut any = false;
     for w in saved.windows {
-        let opts =
-            Opts { mode: w.mode, app_id: w.app_id, name: w.name, start: w.start, icon: w.icon, profile: w.profile };
+        // A web app's sign-in is whatever this wadspace gives it now.
+        let profile = match w.app_id.as_deref().and_then(crate::profile::for_app) {
+            Some(p) => Some(p),
+            None => w.profile.filter(|p| !crate::profile::is_signin(p)),
+        };
+        let opts = Opts { mode: w.mode, app_id: w.app_id, name: w.name, start: w.start, icon: w.icon, profile };
         let tabs: Vec<Tab> = w
             .tabs
             .into_iter()

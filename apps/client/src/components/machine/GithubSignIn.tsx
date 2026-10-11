@@ -1,20 +1,19 @@
-// Signing this machine in to GitHub: the device flow, run by the app's Rust
-// side (src-tauri/src/github.rs). The page shows the code; the token never
-// comes here. Once it's in, this machine's git and `gh` work, the repo list
-// loads, and your other machines fetch the same token from your account.
+// This machine's GitHub token. Signing in to WadSpaces is signing in with
+// GitHub (data/cloud/auth.ts signInGithub), and the token from that waits in
+// the app's Rust side (src-tauri/src/github.rs) until the machine is yours:
+// then it goes to wadd (git, `gh`, packages, the repo list) and to your
+// account, where your other machines fetch it. This is for signing in again:
+// a token that was revoked, or a sign-in from before the machine was linked.
 import { useEffect, useRef, useState } from "react";
-import { Check, ClipboardCheck, FolderGit2, Loader2, Monitor, RefreshCw } from "lucide-react";
+import { Check, FolderGit2, Loader2 } from "lucide-react";
 import { backend } from "@/data";
 import type { MachineBackend } from "@/data/machine";
-import { commands, type DevicePrompt } from "@/gen/bindings";
-import { copyText } from "@/lib/clipboard";
-import { Button, Modal } from "../ui";
+import { githubIdNow } from "@/data/cloud/auth";
+import { commands } from "@/gen/bindings";
+import { GithubButton } from "../AuthCard";
+import { Modal } from "../ui";
 
-type State =
-  | { kind: "starting" }
-  | { kind: "code"; prompt: DevicePrompt; expiresAt: number }
-  | { kind: "done"; login: string; savedToAccount: boolean }
-  | { kind: "error"; message: string };
+type State = { kind: "idle" } | { kind: "busy"; window: boolean } | { kind: "done"; login: string; savedToAccount: boolean } | { kind: "error"; message: string };
 
 /** The signed-in user, for saving the token to their account (Firestore rules apply). */
 async function accountRef() {
@@ -25,65 +24,68 @@ async function accountRef() {
   return { uid: u.uid, idToken: await u.getIdToken(), projectId };
 }
 
-const errorText = (e: unknown) => (e as { message?: string })?.message ?? String(e);
+/** Puts the last sign-in's token in place, if it's the signed-in user's
+ *  GitHub account. Call once the machine is theirs. */
+export async function savePendingGithub() {
+  const p = await commands.githubPending();
+  if (!p || !p.githubId || p.githubId !== githubIdNow()) return null;
+  const done = await commands.githubSaveToken(await accountRef());
+  (backend as MachineBackend).githubSignedIn?.();
+  return done;
+}
+
+const errorText = (e: unknown) => {
+  const err = e as { code?: string; message?: string };
+  return err.code === "cancelled" ? "Sign-in was cancelled." : (err.message ?? String(e));
+};
 
 export function GithubSignIn({ onDone }: { onDone?: (login: string) => void }) {
-  const [state, setState] = useState<State>({ kind: "starting" });
-  const [now, setNow] = useState(Date.now());
-  const [here, setHere] = useState<"idle" | "open" | { error: string }>("idle");
+  const [state, setState] = useState<State>({ kind: "busy", window: false });
   const run = useRef(0);
+  const windowOpen = useRef(false);
 
-  const start = async () => {
-    const mine = ++run.current;
-    setState({ kind: "starting" });
-    try {
-      const prompt = await commands.githubDeviceStart();
-      if (mine !== run.current) return;
-      setState({ kind: "code", prompt, expiresAt: Date.now() + prompt.code.expiresIn * 1000 });
-      const done = await commands.githubDeviceWait(await accountRef());
-      if (mine !== run.current) return;
-      (backend as MachineBackend).githubSignedIn?.();
-      setState({ kind: "done", login: done.account.login, savedToAccount: done.savedToAccount });
-      onDone?.(done.account.login);
-    } catch (e) {
-      if (mine !== run.current) return;
-      const err = e as { code?: string };
-      setState({ kind: "error", message: err.code === "cancelled" ? "The code expired or the sign-in was cancelled." : errorText(e) });
-    }
+  const finish = (done: { account: { login: string }; savedToAccount: boolean }) => {
+    setState({ kind: "done", login: done.account.login, savedToAccount: done.savedToAccount });
+    onDone?.(done.account.login);
   };
 
+  // A sign-in's token may be waiting already.
   useEffect(() => {
-    start();
+    const mine = ++run.current;
+    savePendingGithub().then(
+      (done) => mine === run.current && (done ? finish(done) : setState({ kind: "idle" })),
+      (e) => mine === run.current && setState({ kind: "error", message: errorText(e) }),
+    );
     return () => {
       run.current++;
-      commands.githubDeviceCancel().catch(() => {});
+      // Closing the dialog closes GitHub's page too.
+      if (windowOpen.current) commands.githubSignInCancel().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (state.kind !== "code") return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [state.kind]);
+  const signIn = async () => {
+    const mine = ++run.current;
+    setState({ kind: "busy", window: true });
+    try {
+      const { app } = await import("@/data/cloud/firebase");
+      windowOpen.current = true;
+      const c = await commands.githubSignIn(app.options.authDomain ?? "").finally(() => (windowOpen.current = false));
+      if (mine !== run.current) return;
+      const want = githubIdNow();
+      if (c.githubId !== want) {
+        setState({ kind: "error", message: `That's ${c.account.login}: sign in with the GitHub account you use for WadSpaces.` });
+        return;
+      }
+      const done = await savePendingGithub();
+      if (mine !== run.current) return;
+      if (done) finish(done);
+      else setState({ kind: "error", message: "The sign-in finished, but its token wasn't there to save. Try again." });
+    } catch (e) {
+      if (mine === run.current) setState({ kind: "error", message: errorText(e) });
+    }
+  };
 
-  if (state.kind === "starting") {
-    return (
-      <div className="grid place-items-center py-10 text-muted">
-        <Loader2 className="size-6 animate-spin" />
-      </div>
-    );
-  }
-  if (state.kind === "error") {
-    return (
-      <div className="space-y-4">
-        <p className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger ring-1 ring-danger/30">{state.message}</p>
-        <Button onClick={start}>
-          <RefreshCw className="size-4" /> Try again
-        </Button>
-      </div>
-    );
-  }
   if (state.kind === "done") {
     return (
       <div className="flex items-start gap-3 rounded-2xl bg-accent-soft px-4 py-3 ring-1 ring-accent/30">
@@ -97,42 +99,16 @@ export function GithubSignIn({ onDone }: { onDone?: (login: string) => void }) {
       </div>
     );
   }
-
-  const { code, qrSvg } = state.prompt;
-  const left = Math.max(0, Math.round((state.expiresAt - now) / 1000));
-  // GitHub's page in a window over the app; the code goes on the clipboard
-  // first (during the click, as WebKit wants) to paste there.
-  const signInHere = async () => {
-    try {
-      await copyText(code.userCode).catch(() => {});
-      await commands.githubOpenBrowser();
-      setHere("open");
-    } catch (e) {
-      setHere({ error: errorText(e) });
-    }
-  };
   return (
-    <div className="grid items-center gap-6 sm:grid-cols-[1fr_auto]">
-      <div className="space-y-4">
-        <Button variant="primary" className="w-full" onClick={signInHere}>
-          <Monitor className="size-4" /> Sign in on this machine
-        </Button>
-        {here === "open" && (
-          <p className="flex items-start gap-2 text-sm text-muted">
-            <ClipboardCheck className="mt-0.5 size-4 shrink-0 text-accent" />
-            <span>The code is copied. On GitHub's page, paste it with Ctrl+V, then sign in. The page closes when you're done (or close it with Ctrl+W).</span>
-          </p>
-        )}
-        {typeof here === "object" && <p className="text-sm text-danger">{here.error}</p>}
-        <p className="text-sm text-muted">
-          Or on your phone or computer: go to <span className="font-mono text-fg">{code.verificationUri.replace(/^https:\/\//, "")}</span> (or scan the code) and enter:
+    <div className="space-y-4">
+      {state.kind === "error" && <p className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger ring-1 ring-danger/30">{state.message}</p>}
+      <GithubButton disabled={state.kind === "busy"} onClick={signIn} label={state.kind === "error" ? "Try again" : "Sign in with GitHub"} />
+      {state.kind === "busy" && (
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <Loader2 className="size-4 shrink-0 animate-spin" />
+          {state.window ? "Finish signing in on GitHub's page. Close it (Ctrl+W) to cancel." : "One moment…"}
         </p>
-        <div className="select-all rounded-2xl bg-surface-2 px-5 py-4 text-center font-mono text-4xl font-bold tracking-[0.2em] ring-1 ring-line-strong">{code.userCode}</div>
-        <p className="flex items-center gap-2 text-xs text-faint">
-          <Loader2 className="size-3.5 animate-spin" /> Waiting for GitHub · {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")} left
-        </p>
-      </div>
-      {qrSvg && <img src={`data:image/svg+xml;utf8,${encodeURIComponent(qrSvg)}`} alt="QR code of the GitHub address" className="size-44 rounded-xl bg-white p-2" />}
+      )}
     </div>
   );
 }
@@ -142,13 +118,13 @@ export function GithubSignInDialog({ open, onClose }: { open: boolean; onClose: 
     <Modal
       open={open}
       onClose={onClose}
-      width={600}
+      width={480}
       title={
         <span className="flex items-center gap-2">
           <FolderGit2 className="size-5" /> Sign in to GitHub
         </span>
       }
-      subtitle="So this machine can clone, pull and push your repositories."
+      subtitle="So this machine can clone, pull and push your repositories and packages."
     >
       {open && <GithubSignIn />}
     </Modal>

@@ -77,6 +77,7 @@ export class CloudBackend implements Backend {
     history: false,
     projects: true,
     tailnet: false,
+    signins: false,
   };
 
   private listeners = new Set<(t: Topic) => void>();
@@ -491,6 +492,32 @@ export class CloudBackend implements Backend {
     return n;
   }
 
+  // --------------------------------------------------------- saved sign-ins
+  /** They stay on the machine they were made on. */
+  async listSignIns() {
+    return [];
+  }
+
+  async createSignIn(): Promise<never> {
+    throw new Unsupported("Saved sign-ins (they're kept on a WadSpaces machine)");
+  }
+
+  async updateSignIn(): Promise<never> {
+    throw new Unsupported("Saved sign-ins (they're kept on a WadSpaces machine)");
+  }
+
+  async signOutSignIn(): Promise<never> {
+    throw new Unsupported("Saved sign-ins (they're kept on a WadSpaces machine)");
+  }
+
+  async deleteSignIn(): Promise<never> {
+    throw new Unsupported("Saved sign-ins (they're kept on a WadSpaces machine)");
+  }
+
+  async listSecrets() {
+    return [];
+  }
+
   // --------------------------------------------------------------- GitHub
   /** Online there's no token here: a machine having shared the list means it has one. */
   async githubStatus() {
@@ -655,7 +682,7 @@ export class CloudBackend implements Backend {
   }
 }
 
-/** Signed in, but no username picked yet (first Google sign-in). */
+/** Signed in, but no username picked yet (the GitHub login wasn't free). */
 export class NeedsUsername extends Error {
   constructor() {
     super("Pick a username to finish setting up your account.");

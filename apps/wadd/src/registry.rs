@@ -18,7 +18,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use wad_config::Prefetch;
-use wad_proto::v1::{Display, Event, Phase, Workspace, WorkspaceState};
+use wad_proto::v1::{Display, Event, Kind, Phase, Workspace, WorkspaceState};
 use wad_proto::{ApiError, ErrorCode};
 use wad_store::runs::RunLog;
 
@@ -35,6 +35,8 @@ pub struct Settings {
     pub ready_timeout: Duration,
     pub max_parallel_pulls: usize,
     pub projects_dir: String,
+    /// Saved sign-ins' folders (`<signins_dir>/<id>`).
+    pub signins_dir: PathBuf,
     pub state_dir: PathBuf,
     /// Rootless podman: the uid inside a container the host user maps to.
     pub rootless_uid: Option<u32>,
@@ -61,11 +63,14 @@ pub struct Registry {
     /// Told when a bring-up finishes (the view shows a pending switch).
     on_ready: Mutex<Option<ReadyHook>>,
     on_list: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    /// Gets what a container mounts ready, just before it starts.
+    on_prepare: Mutex<Option<PrepareHook>>,
     /// Itself, for the tasks it starts.
     me: std::sync::Weak<Registry>,
 }
 
 type ReadyHook = Box<dyn Fn(&str) + Send + Sync>;
+type PrepareHook = Box<dyn Fn(&Workspace) -> Result<(), String> + Send + Sync>;
 
 /// Which native workspaces have a window on screen, and whether there's a
 /// compositor to have one in at all.
@@ -107,8 +112,9 @@ fn not_found(id: &str) -> ApiError {
     ApiError::new(ErrorCode::NotFound, format!("no workspace {id:?}"))
 }
 
-/// A workspace as wad-core's unit renderer takes it (wadd's YAML shape).
-pub fn wadd_spec(ws: &Workspace) -> Value {
+/// A workspace as wad-core's unit renderer takes it (wadd's YAML shape), its
+/// sign-ins at their folders in `signins_dir`.
+pub fn wadd_spec(ws: &Workspace, signins_dir: &std::path::Path) -> Value {
     let env: serde_json::Map<String, Value> =
         ws.env.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect();
     let projects: Vec<Value> = ws
@@ -119,12 +125,17 @@ pub fn wadd_spec(ws: &Workspace) -> Value {
             None => json!({"id": p.id, "mount": p.mount}),
         })
         .collect();
+    let signins: Vec<Value> = ws
+        .signins
+        .iter()
+        .map(|s| json!({"id": s.id, "app": s.app, "path": signins_dir.join(&s.id).to_string_lossy()}))
+        .collect();
     json!({
         "id": ws.id, "name": ws.name, "image": ws.image,
         "display": if ws.display == Display::Host { "host" } else { "stream" },
         "port": ws.port, "container_name": ws.container_name, "container_port": ws.container_port,
         "env": env, "secrets": ws.secrets, "volumes": ws.volumes, "devices": ws.devices,
-        "shm_size": ws.shm_size, "projects": projects,
+        "shm_size": ws.shm_size, "projects": projects, "signins": signins,
     })
 }
 
@@ -157,22 +168,37 @@ impl Registry {
             windows: Arc::default(),
             on_ready: Mutex::new(None),
             on_list: Mutex::new(None),
+            on_prepare: Mutex::new(None),
         })
     }
 
     /// The unit wadd writes for a workspace.
     pub fn unit_text(&self, ws: &Workspace) -> String {
         wad_core::generator::quadlet(
-            &wadd_spec(ws),
+            &wadd_spec(ws, &self.settings.signins_dir),
             &self.settings.projects_dir,
             &self.settings.state_dir.to_string_lossy(),
             self.settings.rootless_uid,
         )
     }
 
-    /// The units for these workspaces: one each.
+    /// The units for these workspaces: one per container (an app's unit is
+    /// made when it starts).
     fn units(&self, list: &[Workspace]) -> Vec<(String, String)> {
-        list.iter().map(|w| (format!("wad-{}.container", w.id), self.unit_text(w))).collect()
+        list.iter()
+            .filter(|w| w.kind == Kind::Container)
+            .map(|w| (format!("wad-{}.container", w.id), self.unit_text(w)))
+            .collect()
+    }
+
+    /// An app's status, in a container's words: "running" while its unit
+    /// is up, "exited" once it's gone.
+    async fn app_status(&self, ws: &Workspace) -> String {
+        match self.backend.unit_state(&unit_name(ws)).await.as_deref() {
+            Ok("active" | "activating" | "reloading" | "deactivating") => RUNNING.into(),
+            Ok(_) => "exited".into(),
+            Err(_) => "unknown".into(),
+        }
     }
 
     /// Takes on a list of workspaces: writes their units (and reloads systemd
@@ -190,7 +216,8 @@ impl Registry {
                     progress: None,
                     message: None,
                     error: None,
-                    image_present: None,
+                    // An app has nothing to download.
+                    image_present: (w.kind == Kind::App).then_some(true),
                     download: None,
                     since: wall(),
                 });
@@ -259,6 +286,12 @@ impl Registry {
             return Err(not_found(id));
         }
         self.set_workspaces(list).await.map_err(|e| ApiError::new(ErrorCode::Internal, e))
+    }
+
+    /// Calls `f` before a container starts, to get what it mounts ready (its
+    /// sign-ins). An error stops the start.
+    pub fn on_prepare(&self, f: impl Fn(&Workspace) -> Result<(), String> + Send + Sync + 'static) {
+        *self.on_prepare.lock().unwrap() = Some(Box::new(f));
     }
 
     /// Calls `f` whenever set_workspaces changes the list (hotkeys follow it).
@@ -428,6 +461,13 @@ impl Registry {
         });
     }
 
+    /// An app's program ended: its window is as good as gone, though sway
+    /// may say so a moment later. So a new start waits for a new window
+    /// rather than taking the closing one for it.
+    fn forget_window(&self, id: &str) {
+        self.windows.set(id, false);
+    }
+
     /// A native workspace is ready when its desktop's window appears.
     async fn wait_window(&self, ws: &Workspace) -> Result<(), String> {
         if !self.windows.available() {
@@ -447,8 +487,14 @@ impl Registry {
     }
 
     async fn bring_up_locked(&self, ws: &Workspace) -> Result<(), String> {
+        if ws.kind == Kind::App {
+            return self.bring_up_app(ws).await;
+        }
         self.pull(ws).await?;
         if self.backend.container(&ws.container_name).await.unwrap_or_default() != RUNNING {
+            if let Some(f) = self.on_prepare.lock().unwrap().as_ref() {
+                f(ws)?;
+            }
             self.update(ws, |st| {
                 st.phase = Phase::Starting;
                 st.message = Some("starting container".into());
@@ -465,6 +511,27 @@ impl Registry {
             None if ws.display == Display::Host => self.wait_window(ws).await?,
             None => {}
         }
+        self.update(ws, |st| st.phase = Phase::Ready);
+        tracing::info!("{} ready", ws.id);
+        Ok(())
+    }
+
+    /// An app: its transient unit started (unless it's up), then ready when
+    /// its window shows.
+    async fn bring_up_app(&self, ws: &Workspace) -> Result<(), String> {
+        if self.app_status(ws).await != RUNNING {
+            self.update(ws, |st| {
+                st.phase = Phase::Starting;
+                st.message = Some(format!("starting {}", ws.name));
+            });
+            self.backend.start_app(&unit_name(ws), ws).await?;
+        }
+        self.update(ws, |st| {
+            st.phase = Phase::Waiting;
+            st.container = RUNNING.into();
+            st.message = Some("waiting for its window".into());
+        });
+        self.wait_window(ws).await?;
         self.update(ws, |st| st.phase = Phase::Ready);
         tracing::info!("{} ready", ws.id);
         Ok(())
@@ -608,9 +675,24 @@ impl Registry {
             st.phase = Phase::Stopping;
             st.message = Some("stopping".into());
         });
-        match self.backend.stop(&unit_name(&ws)).await {
+        // An app that already ended has no unit left to stop.
+        let gone = ws.kind == Kind::App && self.app_status(&ws).await != RUNNING;
+        let mut stopped = if gone { Ok(()) } else { self.backend.stop(&unit_name(&ws)).await };
+        // It ended (and its unit went) between the look and the stop.
+        if ws.kind == Kind::App && stopped.is_err() && self.app_status(&ws).await != RUNNING {
+            stopped = Ok(());
+        }
+        if ws.kind == Kind::App {
+            self.forget_window(&ws.id);
+        }
+        match stopped {
             Ok(()) => {
-                let container = self.backend.container(&ws.container_name).await.unwrap_or_else(|_| "unknown".into());
+                let container = match ws.kind {
+                    Kind::App => self.app_status(&ws).await,
+                    Kind::Container => {
+                        self.backend.container(&ws.container_name).await.unwrap_or_else(|_| "unknown".into())
+                    }
+                };
                 self.update(&ws, |st| {
                     st.phase = Phase::Idle;
                     st.container = container;
@@ -636,7 +718,20 @@ impl Registry {
                 st.phase = Phase::Starting;
                 st.message = Some("restarting".into());
             });
-            if let Err(e) = self.backend.restart(&unit_name(&ws)).await {
+            // An app's unit is gone once stopped, so it's stopped here and
+            // made afresh by start below.
+            let restarted = match ws.kind {
+                Kind::App => {
+                    let r = match self.app_status(&ws).await.as_str() {
+                        RUNNING => self.backend.stop(&unit_name(&ws)).await,
+                        _ => Ok(()),
+                    };
+                    self.forget_window(&ws.id);
+                    r
+                }
+                Kind::Container => self.backend.restart(&unit_name(&ws)).await,
+            };
+            if let Err(e) = restarted {
                 self.update(&ws, |st| {
                     st.phase = Phase::Error;
                     st.error = Some(e.clone());
@@ -651,6 +746,9 @@ impl Registry {
     /// Downloads a workspace's image without starting it.
     pub async fn download(self: &Arc<Self>, id: &str) -> Result<(), ApiError> {
         let ws = self.workspace(id)?;
+        if ws.kind == Kind::App {
+            return Ok(()); // nothing to download
+        }
         self.settled(id).await;
         if self.state(id).is_some_and(|s| s.container == RUNNING) {
             return Ok(());
@@ -683,6 +781,17 @@ impl Registry {
         for ws in self.workspaces().into_iter().filter(|w| w.enabled) {
             let lock = self.lock_for(&ws.id);
             let Ok(_held) = lock.try_lock() else { continue }; // busy: it knows
+            if ws.kind == Kind::App {
+                // Its unit says, podman or not.
+                let container = self.app_status(&ws).await;
+                self.update(&ws, |st| {
+                    if container != RUNNING && matches!(st.phase, Phase::Ready | Phase::Waiting) {
+                        st.phase = Phase::Idle;
+                    }
+                    st.container = container;
+                });
+                continue;
+            }
             let container = if up {
                 self.backend.container(&ws.container_name).await.unwrap_or_else(|_| "unknown".into())
             } else {

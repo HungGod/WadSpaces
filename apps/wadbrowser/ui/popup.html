@@ -6,6 +6,32 @@
          view of their own (menu.rs). Talks back through the "wb" script
          message handler. -->
     <style>
+      /* WadSpaces' colours, dark or light as WadSpaces is (theme.rs). */
+      :root {
+        --text: #f5f2fa;
+        --muted: rgba(245, 242, 250, 0.62);
+        --box: #140d22;
+        --line: rgba(240, 234, 250, 0.12);
+        --shadow: rgba(3, 2, 8, 0.6);
+        --hover: rgba(240, 234, 250, 0.08);
+        --hover-soft: rgba(240, 234, 250, 0.04);
+        --sep: rgba(240, 234, 250, 0.1);
+        --accent: #c6ff1f;
+        --danger: #ff3d81;
+      }
+      /* Light (WadSpaces' greyscale), when theme.rs says so: data-theme on the page. */
+      :root[data-theme="light"] {
+        --text: #0a0614;
+        --muted: #5f5f5f;
+        --box: #ffffff;
+        --line: rgba(10, 6, 20, 0.12);
+        --shadow: rgba(10, 6, 20, 0.2);
+        --hover: rgba(10, 6, 20, 0.06);
+        --hover-soft: rgba(10, 6, 20, 0.03);
+        --sep: rgba(10, 6, 20, 0.1);
+        --accent: #0a0614;
+        --danger: #3a3a3a;
+      }
       html,
       body {
         margin: 0;
@@ -13,7 +39,7 @@
         background: transparent;
         overflow: hidden;
         font: 13px system-ui, sans-serif;
-        color: #e8eaed;
+        color: var(--text);
         user-select: none;
         -webkit-user-select: none;
         /* No color-scheme here: a dark one paints the canvas, and this view
@@ -22,10 +48,10 @@
       #box {
         position: absolute;
         inset: 0 8px 8px 0;
-        background: #2a2b2e;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: var(--box);
+        border: 1px solid var(--line);
         border-radius: 10px;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+        box-shadow: 0 6px 18px var(--shadow);
         padding: 6px;
         overflow: hidden;
       }
@@ -40,19 +66,19 @@
       }
       .item:hover,
       .item:focus {
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--hover);
       }
       .item .label {
         flex: 1;
       }
       .key {
-        color: #9aa0a6;
+        color: var(--muted);
         font-size: 12px;
       }
       .sep {
         height: 1px;
         margin: 4px 6px;
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--sep);
       }
       .zoom {
         display: flex;
@@ -76,7 +102,7 @@
       }
       .zoom button:hover,
       .dl button:hover {
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--hover);
       }
       .zoom .value {
         min-width: 48px;
@@ -101,7 +127,7 @@
         border-radius: 6px;
       }
       .dl:hover {
-        background: rgba(255, 255, 255, 0.04);
+        background: var(--hover-soft);
       }
       .dl .name {
         overflow: hidden;
@@ -109,23 +135,23 @@
         text-overflow: ellipsis;
       }
       .dl .status {
-        color: #9aa0a6;
+        color: var(--muted);
         font-size: 12px;
       }
       .dl .bar {
         height: 3px;
         margin-top: 4px;
         border-radius: 2px;
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--sep);
         overflow: hidden;
       }
       .dl .bar span {
         display: block;
         height: 100%;
-        background: #d4ff3d;
+        background: var(--accent);
       }
       .dl.failed .status {
-        color: #ff6b5e;
+        color: var(--danger);
       }
       #list {
         max-height: calc(100% - 32px);
@@ -133,7 +159,7 @@
       }
       .empty {
         padding: 18px 10px;
-        color: #9aa0a6;
+        color: var(--muted);
       }
     </style>
   </head>

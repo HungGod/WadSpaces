@@ -285,30 +285,29 @@ impl View {
     }
 
     // ---------------------------------------------------------- switcher
-    /// What Super+Tab offers. In a focus session, its picks alone (Wad
-    /// Creator joins once the time is up); in a free one, its picks and Wad
-    /// Creator; with no session, WadSpaces Client and every workspace that runs.
-    /// Most recently used first, the current view leading, stopped ones last.
+    /// What Super+Tab offers: only what runs (a stopped wadspace, terminal or
+    /// browser drops out). During a focus session that's the running picks
+    /// alone (WadSpaces Client joins once the time is up); otherwise
+    /// WadSpaces Client and everything that runs, picked or not.
+    /// Most recently used first, the current view leading.
     pub fn carousel_items(&self) -> Vec<CarouselItem> {
         let (session, mru, current) = {
             let i = self.inner.lock().unwrap();
             (i.session.clone(), i.mru.clone(), i.view.clone())
         };
+        let locked = self.locked();
         let mut entries: Vec<CarouselItem> = vec![];
-        if !self.locked() {
+        if !locked {
             entries.push(CarouselItem { view: V::Home, name: "WadSpaces".into(), icon: None, running: true });
         }
         for ws in self.registry.workspaces().into_iter().filter(|w| w.enabled) {
-            let picked = match &session {
-                Some(s) => s.workspaces.contains(&ws.id),
-                None => self.running(&ws.id),
-            };
-            if picked {
+            let allowed = !locked || session.as_ref().is_some_and(|s| s.workspaces.contains(&ws.id));
+            if allowed && self.running(&ws.id) {
                 entries.push(CarouselItem {
                     view: V::Workspace(ws.id.clone()),
                     name: ws.name.clone(),
                     icon: ws.icon.as_ref().map(|_| format!("/v1/workspaces/{}/icon", ws.id)),
-                    running: self.running(&ws.id),
+                    running: true,
                 });
             }
         }
@@ -318,12 +317,7 @@ impl View {
             order.retain(|v| *v != current);
             order.insert(0, current);
         }
-        let mut items: Vec<CarouselItem> =
-            order.iter().filter_map(|v| entries.iter().find(|e| e.view == *v).cloned()).collect();
-        if items.len() > 1 {
-            items.sort_by_key(|i| !i.running); // stable: running first
-        }
-        items
+        order.iter().filter_map(|v| entries.iter().find(|e| e.view == *v).cloned()).collect()
     }
 
     fn publish_carousel(&self) {
@@ -691,9 +685,24 @@ impl WindowSink for View {
     }
 
     fn on_window(&self, id: &str, present: bool) {
+        // Only an app that was up: while it starts, stops or restarts, its
+        // window coming and going is already in hand.
+        let was_ready = self.registry.state(id).is_some_and(|s| s.phase == Phase::Ready);
         self.registry.window(id, present);
         if present && self.current() == V::Workspace(id.into()) {
             self.spawn_place(V::Workspace(id.into())); // it restarted while on screen
+        }
+        // An app whose last window closed (`exit` in the terminal) is done:
+        // stopped, and off the screen if it was on it (a workspace's desktop
+        // may come back, an app's doesn't).
+        let app = self.registry.workspace(id).is_ok_and(|w| w.kind == wad_proto::v1::Kind::App);
+        if !present && app && was_ready {
+            let (me, id) = (self.me(), id.to_string());
+            tokio::spawn(async move {
+                if let Err(e) = me.stop(&id).await {
+                    tracing::warn!("stopping {id} after its window closed: {e}");
+                }
+            });
         }
         self.publish_view();
     }

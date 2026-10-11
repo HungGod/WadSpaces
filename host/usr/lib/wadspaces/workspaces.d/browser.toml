@@ -1,0 +1,7 @@
+# WadBrowser on the machine itself (apps/wadbrowser, built for the host by
+# host/build.sh), run like the terminal (terminal.toml says how). One
+# process: every window it opens lands on this wadspace.
+name = "WadBrowser"
+kind = "app"
+exec = ["/usr/bin/wadbrowser"]
+icon = "/usr/share/wadspaces/icons/browser.png"

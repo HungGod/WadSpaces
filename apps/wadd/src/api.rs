@@ -21,7 +21,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use wad_proto::v1::{
     Browse, Build, BuildLog, BuildRequest, CloudLink, Drive, Event, Health, IconPrefetch, IconSource, KeysStatus,
     Launch, LaunchLog, LaunchRequest, LogLine, MachineInfo, Project, ProjectDeleted, ProjectStatus, Run, Session,
-    SessionRequest, ViewState, WebappIcon, Workspace, WorkspaceState,
+    SessionRequest, SignIn, SignInPatch, SignInRequest, ViewState, WebappIcon, Workspace, WorkspaceState,
 };
 use wad_proto::{ApiError, ErrorCode};
 
@@ -39,6 +39,7 @@ pub struct AppState {
     pub launches: Arc<crate::launches::Launches>,
     pub builds: Arc<crate::builds::Builds>,
     pub secrets: Arc<crate::secrets::Secrets>,
+    pub signins: Arc<crate::signins::SignIns>,
     pub github: Arc<crate::github::GithubService>,
     pub network: Arc<crate::network::Network>,
     /// The machine the registry manages (podman), for diagnostics.
@@ -135,6 +136,9 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/projects", get(projects).post(project_create))
         .route("/v1/projects/{id}", get(project).put(project_put).delete(project_delete))
         .route("/v1/projects/{id}/status", get(project_status))
+        .route("/v1/signins", get(signins).post(signin_create))
+        .route("/v1/signins/{id}", get(signin).put(signin_put).delete(signin_delete))
+        .route("/v1/signins/{id}/signout", post(signin_sign_out))
         .route("/v1/drives", get(drives))
         .route("/v1/browse", get(browse))
         .route("/v1/launches", get(launches).post(launch_create))
@@ -153,7 +157,6 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/cloud", get(cloud).delete(cloud_unlink))
         .route("/v1/cloud/link", post(cloud_link))
         .route("/v1/github", get(github).delete(github_sign_out))
-        .route("/v1/github/device", post(github_device).delete(github_device_cancel))
         .route("/v1/github/repos", get(github_repos).post(github_repo_create))
         .route("/v1/network", get(network))
         .route("/v1/network/wifi", get(wifi))
@@ -204,15 +207,36 @@ async fn workspace(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> 
 pub const IMAGE_ICONS: &str = "/usr/share/wadspaces/icons";
 const ICON_MAX: u64 = 8 << 20;
 
+#[derive(Deserialize)]
+struct IconQuery {
+    /// "dark" or "light": the icon's variant for that theme, when there is
+    /// one beside it (`browser-dark.png` for `browser.png`).
+    theme: Option<String>,
+}
+
 /// A workspace's icon, as a picture. Only from the icon folders (an icon is
 /// a path anyone who may edit workspaces can set, so not any file).
-async fn workspace_icon(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Response, Failure> {
+async fn workspace_icon(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(q): Query<IconQuery>,
+) -> Result<Response, Failure> {
     let ws = app.registry.workspaces().into_iter().find(|w| w.id == id).ok_or_else(|| no_workspace(&id))?;
     let none = || Failure(ApiError::new(ErrorCode::NotFound, format!("workspace {id:?} has no icon")));
-    let path = ws.icon.ok_or_else(none)?;
-    let (mime, bytes) = icon_file(std::path::Path::new(&path), &app.store.dir.join("icons")).ok_or_else(none)?;
+    let path = std::path::PathBuf::from(ws.icon.ok_or_else(none)?);
+    let own = app.store.dir.join("icons");
+    let themed = q.theme.as_deref().filter(|t| matches!(*t, "dark" | "light")).and_then(|t| themed_icon(&path, t));
+    let (mime, bytes) =
+        themed.and_then(|p| icon_file(&p, &own)).or_else(|| icon_file(&path, &own)).ok_or_else(none)?;
     Ok(([(axum::http::header::CONTENT_TYPE, mime), (axum::http::header::CACHE_CONTROL, "max-age=3600")], bytes)
         .into_response())
+}
+
+/// `dir/name-<theme>.ext` for `dir/name.ext`.
+pub fn themed_icon(path: &std::path::Path, theme: &str) -> Option<std::path::PathBuf> {
+    let stem = path.file_stem()?.to_str()?;
+    let ext = path.extension()?.to_str()?;
+    Some(path.with_file_name(format!("{stem}-{theme}.{ext}")))
 }
 
 /// The icon at `path` (its type and bytes), if it's a picture in an icon folder.
@@ -381,6 +405,40 @@ async fn project_status(
     Path(id): Path<String>,
 ) -> Result<Json<ProjectStatus>, Failure> {
     Ok(Json(app.projects.status(&id).await?))
+}
+
+async fn signins(State(app): State<Arc<AppState>>) -> Json<Vec<SignIn>> {
+    Json(app.signins.list())
+}
+
+async fn signin(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<SignIn>, Failure> {
+    Ok(Json(app.signins.get(&id)?))
+}
+
+async fn signin_create(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<SignInRequest>,
+) -> Result<(StatusCode, Json<SignIn>), Failure> {
+    Ok((StatusCode::CREATED, Json(app.signins.create(req)?)))
+}
+
+/// A new name, or (an app the catalog doesn't know) new files.
+async fn signin_put(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(patch): Json<SignInPatch>,
+) -> Result<Json<SignIn>, Failure> {
+    Ok(Json(app.signins.patch(&id, patch)?))
+}
+
+/// Forgets what it saved: each wadspace using it is signed out.
+async fn signin_sign_out(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<SignIn>, Failure> {
+    Ok(Json(app.signins.sign_out(&id)?))
+}
+
+async fn signin_delete(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, Failure> {
+    app.signins.delete(&id)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn drive_failure(e: crate::drives::DriveError) -> Failure {
@@ -614,33 +672,6 @@ async fn github(State(app): State<Arc<AppState>>) -> Json<wad_proto::github::Git
 async fn github_sign_out(State(app): State<Arc<AppState>>) -> Result<StatusCode, Failure> {
     app.github.sign_out().await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct DeviceBody {
-    #[serde(default)]
-    account: Option<wad_proto::github::AccountRef>,
-}
-
-/// Starts a GitHub device sign-in: the code to show. How it ends arrives
-/// as github events (and in GET /v1/github).
-async fn github_device(
-    State(app): State<Arc<AppState>>,
-    body: axum::body::Bytes,
-) -> Result<Json<wad_proto::github::SignIn>, Failure> {
-    // The body is optional: {"account": ...} saves the token to that account too.
-    let b: DeviceBody = if body.iter().all(u8::is_ascii_whitespace) {
-        DeviceBody::default()
-    } else {
-        serde_json::from_slice(&body).map_err(|e| Failure(ApiError::new(ErrorCode::BadRequest, e.to_string())))?
-    };
-    Ok(Json(app.github.start(b.account).await?))
-}
-
-async fn github_device_cancel(State(app): State<Arc<AppState>>) -> StatusCode {
-    app.github.cancel();
-    StatusCode::NO_CONTENT
 }
 
 #[derive(Deserialize)]

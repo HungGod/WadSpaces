@@ -3,15 +3,14 @@ import { useState } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { AuthCard, FormError } from "@/components/AuthCard";
 import { Button, Input, Label } from "@/components/ui";
-import { USERNAME_RE, claimUsername, signOut } from "@/data/cloud/auth";
+import { USERNAME_RE, claimUsername, signOut, suggestedUsername } from "@/data/cloud/auth";
 import { auth } from "@/data/cloud/firebase";
 
-/** First sign-in with Google: pick the username the account is known by. */
+/** First sign-in, when the GitHub login can't be the username: pick one. */
 export default function WelcomePage() {
   const navigate = useNavigate();
   const u = auth.currentUser;
-  const suggestion = (u?.email ?? "").split("@")[0].toLowerCase().replace(/[^a-z0-9_.-]/g, "").slice(0, 24);
-  const [username, setUsername] = useState(suggestion);
+  const [username, setUsername] = useState(suggestedUsername);
   const [displayName, setDisplayName] = useState(u?.displayName ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -50,7 +49,7 @@ export default function WelcomePage() {
           {busy ? <Loader2 className="size-4 animate-spin" /> : <>Continue <ArrowRight className="size-4" /></>}
         </Button>
         <p className="mt-5 text-center text-sm text-muted">
-          Signed in as {u?.email}.{" "}
+          Signed in as {u?.displayName ?? u?.email ?? "your GitHub account"}.{" "}
           <button type="button" className="font-medium hover:text-fg" onClick={() => signOut().then(() => navigate("/login", { replace: true }))}>
             Not you?
           </button>

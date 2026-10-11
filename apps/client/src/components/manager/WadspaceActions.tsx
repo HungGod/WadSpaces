@@ -22,8 +22,10 @@ export function WadspaceActions({ ws, machineId, download = true }: { ws: Wadspa
   const downloading = useApp((s) => s.downloads.some((d) => d.wadspaceId === ws.id));
   const { openDetails, openEdit, openStart } = useUi();
   const locked = isLocked(focus, ws.id);
-  // Online, one only a machine has (not in the account) can't be changed from here.
-  const editable = ws.owner === user?.username && !ws.machineOnly;
+  // Online, one only a machine has (not in the account) can't be changed from
+  // here; an app (Terminal, WadBrowser) is the machine's own, with no design.
+  const editable = ws.owner === user?.username && !ws.machineOnly && !ws.app;
+  const design = !ws.app;
 
   return (
     <div className="flex items-center gap-0.5">
@@ -47,14 +49,14 @@ export function WadspaceActions({ ws, machineId, download = true }: { ws: Wadspa
           </IconButton>
         )}
         items={[
-          { label: "Details & sharing", icon: <Info />, onClick: () => openDetails(ws.id) },
+          { label: "Details & sharing", icon: <Info />, hidden: !design, onClick: () => openDetails(ws.id) },
           { label: "Edit", icon: <Pencil />, hidden: !editable, onClick: () => openEdit(ws.id) },
           { label: "Edit in Builder", icon: <Wand2 />, hidden: !editable, onClick: () => navigate(`/builder/${ws.id}`) },
-          { label: "Duplicate in Builder", icon: <Wand2 />, hidden: editable, onClick: () => navigate(`/builder/${ws.id}?duplicate=1`) },
-          { label: "Clone", icon: <Copy />, onClick: () => cloneWadspace(ws) },
+          { label: "Duplicate in Builder", icon: <Wand2 />, hidden: editable || !design, onClick: () => navigate(`/builder/${ws.id}?duplicate=1`) },
+          { label: "Clone", icon: <Copy />, hidden: !design, onClick: () => cloneWadspace(ws) },
           { label: "Start a focus session", icon: <Timer />, hidden: !hasLocal || !ws.installed, disabled: !!focus, onClick: () => openStart([ws.id], { focus: true }) },
           { label: "Download to this machine", icon: <CloudDownload />, hidden: !download || !hasLocal || !ws.installed || ws.local || downloading, onClick: () => startDownload(ws) },
-          "divider",
+          ...(editable ? ["divider" as const] : []),
           { label: "Delete", icon: <Trash2 />, danger: true, hidden: !editable, onClick: () => trashWadspace(ws) },
         ]}
       />

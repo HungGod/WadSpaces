@@ -3,25 +3,31 @@
 //! and file drops go to the page (the Builder's drag and drop) rather than
 //! being opened.
 //!
-//! One other window may open over it: GitHub's sign-in page (open_github),
-//! for signing in without a phone. It's private (nothing is kept), https
-//! only, and can't call the app's commands (lib.rs answers the main window
-//! alone).
+//! One other window may open over it: the sign-in window (open_sign_in),
+//! where Firebase runs GitHub's sign-in on the web portal's page. It's private
+//! (nothing is kept), https only, and can't call the app's commands (lib.rs
+//! answers the main window alone). Its result comes back as an address that's
+//! never loaded (github::REPLY_HOST).
 
+use std::sync::Arc;
 use tauri::webview::{NewWindowResponse, WebviewWindowBuilder};
+
 use tauri::window::Color;
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow};
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WindowEvent};
 
 pub const MAIN: &str = "main";
-pub const GITHUB: &str = "github";
-/// The GitHub window's title (sway floats it by this: host/etc/sway).
-pub const GITHUB_TITLE: &str = "Sign in to GitHub";
-/// Where the GitHub window's Ctrl+W goes: never loaded, it closes the window.
+pub const SIGN_IN: &str = "sign-in";
+/// What the sign-in window reports: the page's reply address, or None once
+/// the window is gone.
+pub type OnReply = Arc<dyn Fn(Option<&Url>) + Send + Sync>;
+/// The sign-in window's title (sway floats it by this: host/etc/sway).
+pub const SIGN_IN_TITLE: &str = "Sign in to GitHub";
+/// Where the sign-in window's Ctrl+W goes: never loaded, it closes the window.
 const CLOSE_URL: &str = "https://close.client.invalid/";
 
-/// Runs in GitHub's page: no popups, and Ctrl+W closes the window (as it did
-/// in a browser).
-const GITHUB_SCRIPT: &str = r#"(() => {
+/// Runs in the sign-in pages: no popups, and Ctrl+W closes the window (as it
+/// does in a browser).
+const SIGN_IN_SCRIPT: &str = r#"(() => {
   window.open = () => null;
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "w") {
@@ -90,30 +96,36 @@ pub fn open_main(app: &AppHandle, kiosk: bool) -> tauri::Result<WebviewWindow> {
     Ok(window)
 }
 
-/// Whether the GitHub window may go to `url`: https pages (GitHub's sign-in
-/// may pass through its own hosts), nothing else.
-fn github_allowed(url: &Url) -> bool {
-    url.scheme() == "https" && url.as_str() != CLOSE_URL
+/// Whether the sign-in window may go to `url`: https pages (GitHub's sign-in
+/// passes through its own hosts and Firebase's), nothing else.
+fn sign_in_allowed(url: &Url) -> bool {
+    url.scheme() == "https" && url.as_str() != CLOSE_URL && url.host_str() != Some(crate::github::REPLY_HOST)
 }
 
-/// GitHub's page at `url`, in a window of its own over the app (a new one
+/// The sign-in page at `url`, in a window of its own over the app (a new one
 /// replaces an old one).
-pub fn open_github(app: &AppHandle, url: Url) -> tauri::Result<WebviewWindow> {
-    close_github(app);
+pub fn open_sign_in(app: &AppHandle, url: Url, on_reply: OnReply) -> tauri::Result<WebviewWindow> {
+    close_sign_in(app);
     let handle = app.clone();
-    WebviewWindowBuilder::new(app, GITHUB, WebviewUrl::External(url))
-        .title(GITHUB_TITLE)
+    let reply = on_reply.clone();
+    let window = WebviewWindowBuilder::new(app, SIGN_IN, WebviewUrl::External(url))
+        .title(SIGN_IN_TITLE)
         .inner_size(900.0, 720.0)
         .incognito(true)
-        .initialization_script(GITHUB_SCRIPT.replace("__CLOSE__", CLOSE_URL))
+        .initialization_script(SIGN_IN_SCRIPT.replace("__CLOSE__", CLOSE_URL))
         .on_navigation(move |url| {
-            if url.as_str() == CLOSE_URL {
-                close_github(&handle);
+            if url.host_str() == Some(crate::github::REPLY_HOST) {
+                reply(Some(url));
+                close_sign_in(&handle);
                 return false;
             }
-            let ok = github_allowed(url);
+            if url.as_str() == CLOSE_URL {
+                close_sign_in(&handle);
+                return false;
+            }
+            let ok = sign_in_allowed(url);
             if !ok {
-                tracing::warn!(%url, "blocked navigation in the GitHub window");
+                tracing::warn!(%url, "blocked navigation in the sign-in window");
             }
             ok
         })
@@ -121,12 +133,18 @@ pub fn open_github(app: &AppHandle, url: Url) -> tauri::Result<WebviewWindow> {
             tracing::warn!(%url, "blocked new window");
             NewWindowResponse::Deny
         })
-        .build()
+        .build()?;
+    window.on_window_event(move |e| {
+        if let WindowEvent::Destroyed = e {
+            on_reply(None);
+        }
+    });
+    Ok(window)
 }
 
-/// Closes the GitHub window, if it's open.
-pub fn close_github(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(GITHUB) {
+/// Closes the sign-in window, if it's open.
+pub fn close_sign_in(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(SIGN_IN) {
         // Not from inside the window's own callbacks: on the next turn.
         tauri::async_runtime::spawn(async move {
             let _ = w.destroy();
@@ -151,10 +169,13 @@ mod tests {
     }
 
     #[test]
-    fn the_github_window_stays_on_https() {
-        let ok = |s: &str| github_allowed(&Url::parse(s).unwrap());
-        assert!(ok("https://github.com/login/device") && ok("https://github.com/sessions/two-factor/app"));
+    fn the_sign_in_window_stays_on_https() {
+        let ok = |s: &str| sign_in_allowed(&Url::parse(s).unwrap());
+        assert!(
+            ok("https://wad-spaces.firebaseapp.com/__/auth/handler")
+                && ok("https://github.com/sessions/two-factor/app")
+        );
         assert!(!ok("http://github.com/login") && !ok("tauri://localhost/") && !ok("file:///etc/passwd"));
-        assert!(!ok(CLOSE_URL));
+        assert!(!ok(CLOSE_URL) && !ok("https://signed-in.client.invalid/?n=x&token=y"));
     }
 }

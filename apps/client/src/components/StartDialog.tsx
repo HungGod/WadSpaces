@@ -89,22 +89,26 @@ function Flow({ preselect, focus: focusFirst, onClose }: { preselect: string[]; 
   };
   const anyClash = picks.some((w) => clashIn(w));
 
+  // Apps (Terminal, WadBrowser) open no projects: no projects step for them.
+  const projectPicks = picks.filter((ws) => !ws.app);
+  const askProjects = withProjects && projectPicks.length > 0;
+
   const go = async () => {
     setBusy(true);
     setStep("starting");
     const ids = await startWadspaces(
-      picks.map((ws) => ({ ws, projectIds: withProjects ? projectsOf(ws).filter(available) : [] })),
+      picks.map((ws) => ({ ws, projectIds: withProjects && !ws.app ? projectsOf(ws).filter(available) : [] })),
       focus ? minutes : null,
       onClose,
     );
     setBusy(false);
-    if (!ids) setStep("projects");
+    if (!ids) setStep(askProjects ? "projects" : "time");
     else setLaunchIds(ids);
   };
 
   const next = () => setStep(step === "pick" ? "time" : "projects");
   const back = () => setStep(step === "projects" ? "time" : "pick");
-  const lastStep = step === "projects" || (step === "time" && !withProjects);
+  const lastStep = step === "projects" || (step === "time" && !askProjects);
 
   if (focusOn && step !== "starting") {
     return (
@@ -121,7 +125,7 @@ function Flow({ preselect, focus: focusFirst, onClose }: { preselect: string[]; 
 
   return (
     <div className="space-y-5">
-      {step !== "starting" && <Steps step={step} withProjects={withProjects} />}
+      {step !== "starting" && <Steps step={step} withProjects={askProjects} />}
 
       {step === "pick" && (
         <div>
@@ -163,7 +167,7 @@ function Flow({ preselect, focus: focusFirst, onClose }: { preselect: string[]; 
       {step === "projects" && (
         <div className="space-y-2.5">
           <Label>The projects on each one&apos;s Desktop</Label>
-          {picks.map((ws) => (
+          {projectPicks.map((ws) => (
             <ProjectsRow
               key={ws.id}
               ws={ws}

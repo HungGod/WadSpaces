@@ -18,6 +18,7 @@ pub mod model;
 pub mod presets;
 pub mod projects;
 pub mod recipes;
+pub mod signins;
 pub mod spec;
 pub mod tar;
 mod url;
@@ -133,6 +134,9 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
         "isDriveUuid" => projects::is_drive_uuid(s(0)).into(),
         "isRepoName" => projects::is_repo_name(s(0)).into(),
         "isId" => spec::is_id(s(0)).into(),
+        // saved sign-ins
+        "signInPaths" => signins::paths_for(s(0)).map(|p| json!(p)).unwrap_or(Value::Null),
+        "isSignInPath" => signins::is_path(s(0)).into(),
         // tar
         "tar" => {
             let owned: Vec<(String, Vec<u8>)> = list(0)

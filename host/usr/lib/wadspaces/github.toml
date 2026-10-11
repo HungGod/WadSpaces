@@ -1,8 +1,9 @@
-# The WadSpaces OAuth App on GitHub (Settings → Developer settings → OAuth Apps),
-# with Device Flow enabled. Machines sign in to GitHub with the device flow, so
-# there's no client secret; the client ID isn't secret.
-client_id = "Ov23lia8qVymk05q5E4i"
+# The WadSpaces OAuth App on GitHub (Settings → Developer settings → OAuth
+# Apps), client ID Ov23lia8qVymk05q5E4i. Firebase Auth runs its sign-in (the
+# app's client ID and secret are in the Firebase console; its redirect URI is
+# Firebase's /__/auth/handler); the WadSpaces Client asks it for these scopes.
 # What the token may do: clone, pull and push repos (private ones too), push
-# changes to .github/workflows, and read the account's orgs for
-# `gh repo list <org>`.
-scopes = ["repo", "workflow", "read:org"]
+# changes to .github/workflows, read the account's orgs for
+# `gh repo list <org>`, push and pull packages (ghcr.io and the other
+# registries), and read the account's email for Firebase.
+scopes = ["repo", "workflow", "read:org", "write:packages", "user:email"]

@@ -1,6 +1,6 @@
 [package]
 name = "wad-github"
-description = "GitHub for WadSpaces machines: device-flow sign-in and the REST calls wadd makes"
+description = "GitHub for WadSpaces machines: the REST calls wadd makes, and the OAuth App's scopes"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,6 @@ publish.workspace = true
 [dependencies]
 wad-proto.workspace = true
 reqwest.workspace = true
-qrcode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -25,6 +25,7 @@ pub mod pull;
 pub mod registry;
 pub mod screen;
 pub mod secrets;
+pub mod signins;
 pub mod systemd;
 pub mod view;
 
@@ -112,6 +113,14 @@ fn cloud_settings(config: &Config) -> Option<(cloud::Settings, cloud::Endpoints)
         state_dir: config.daemon.state_dir.clone(),
     };
     Some((settings, ends))
+}
+
+/// Where sway is: the configured socket, else the newest live one.
+pub fn sway_locate(display: &wad_config::Display) -> wad_sway::Locate {
+    match &display.socket {
+        Some(s) => wad_sway::Locate::Socket(s.clone()),
+        None => wad_sway::Locate::RuntimeDir(display.runtime_dir.clone()),
+    }
 }
 
 /// The machine's own list: `workspaces.json` in the state directory if there
@@ -224,6 +233,7 @@ impl Server {
                 ready_timeout: Duration::from_secs(d.ready_timeout_s),
                 max_parallel_pulls: d.max_parallel_pulls,
                 projects_dir: d.projects_dir.to_string_lossy().into_owned(),
+                signins_dir: d.signins_dir.clone(),
                 state_dir: d.state_dir.clone(),
                 // Rootless podman maps you to this uid inside (PUID 1000).
                 rootless_uid: (uid != 0).then_some(uid),
@@ -234,13 +244,10 @@ impl Server {
             tracing::error!("no workspaces: {e}");
             vec![]
         });
-        let sway = config.display.enabled.then(|| {
-            let at = match &config.display.socket {
-                Some(s) => wad_sway::Locate::Socket(s.clone()),
-                None => wad_sway::Locate::RuntimeDir(config.display.runtime_dir.clone()),
-            };
-            Arc::new(SwayDisplay::new(wad_sway::Sway::new(at), registry.windows()))
-        });
+        let sway = config
+            .display
+            .enabled
+            .then(|| Arc::new(SwayDisplay::new(wad_sway::Sway::new(sway_locate(&config.display)), registry.windows())));
         let display: Arc<dyn Display> = match &sway {
             Some(s) => s.clone(),
             None => Arc::new(NullDisplay),
@@ -279,17 +286,17 @@ impl Server {
         let builds =
             builds::Builds::new(registry.clone(), backend.clone(), bus.clone(), &d.state_dir, d.build_min_free_gb);
         let secrets = Arc::new(secrets::Secrets::new(backend.clone(), &d.state_dir));
+        let signins =
+            signins::SignIns::new(&d.state_dir, d.signins_dir.clone(), d.projects_uid, registry.clone(), bus.clone());
+        {
+            let signins = Arc::downgrade(&signins);
+            registry.on_prepare(move |ws| signins.upgrade().map_or(Ok(()), |s| s.prepare(ws)));
+        }
         let registry_backend = backend.clone();
         let cloud_cfg = cloud_settings(config);
         let github = github::GithubService::new(
             wad_github::Github::new(reqwest::Client::new()),
-            config.github.app.clone(),
-            reqwest::Client::new(),
-            cloud_cfg
-                .as_ref()
-                .map(|(_, e)| e.firestore_base.clone())
-                .unwrap_or_else(|| "https://firestore.googleapis.com".into()),
-            github::Parts { backend, secrets: secrets.clone(), projects: projects.clone(), bus: bus.clone() },
+            github::Parts { backend, secrets: secrets.clone(), projects: projects.clone() },
         );
         let cloud = cloud_cfg.map(|(cs, ends)| {
             cloud::CloudRelay::new(
@@ -315,6 +322,7 @@ impl Server {
             backlight: screen::Backlight::default(),
             github,
             secrets,
+            signins,
             cloud,
             bus,
             registry,

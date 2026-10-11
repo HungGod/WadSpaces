@@ -1,19 +1,44 @@
 :root {
-  --bg: #202124;
-  --tab: #2a2b2e;
-  --tab-hover: #2f3034;
-  --tab-active: #35363a;
-  --field: #2a2b2e;
-  --text: #e8eaed;
-  --muted: #9aa0a6;
-  --border: rgba(255, 255, 255, 0.1);
-  --hover: rgba(255, 255, 255, 0.08);
-  --danger: rgba(255, 69, 58, 0.3);
-  --accent: #d4ff3d;
+  /* WadSpaces' dark colours (apps/client/src/styles/globals.css): its
+     night, lime (primary) and pink (secondary). Light below: its greyscale.
+     Which one: theme.rs, from WadSpaces' own setting. */
+  --bg: #0a0614;
+  --tab: #140d22;
+  --tab-hover: #1b132d;
+  --tab-active: #241a39;
+  --field: #140d22;
+  --field-focus: #0e0919;
+  --text: #f5f2fa;
+  --muted: rgba(245, 242, 250, 0.62);
+  --border: rgba(240, 234, 250, 0.1);
+  --hover: rgba(240, 234, 250, 0.08);
+  --danger: rgba(255, 61, 129, 0.3);
+  --danger-line: #ff3d81;
+  --accent: #c6ff1f;
+  --accent-fg: #0a0614;
+  --accent-2: #ff3d81;
   --row: 38px;
   color-scheme: dark;
 }
-
+/* Light (WadSpaces' greyscale), when theme.rs says so: data-theme on the page. */
+:root[data-theme="light"] {
+  --bg: #f4f4f4;
+  --tab: #ebebeb;
+  --tab-hover: #e2e2e2;
+  --tab-active: #ffffff;
+  --field: #ffffff;
+  --field-focus: #ffffff;
+  --text: #0a0614;
+  --muted: #5f5f5f;
+  --border: rgba(10, 6, 20, 0.12);
+  --hover: rgba(10, 6, 20, 0.06);
+  --danger: rgba(10, 6, 20, 0.12);
+  --danger-line: #3a3a3a;
+  --accent: #0a0614;
+  --accent-fg: #ffffff;
+  --accent-2: #9a9a9a;
+  color-scheme: light;
+}
 * {
   box-sizing: border-box;
 }
@@ -129,7 +154,7 @@ body.loading #reload .stop {
 .text.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #111;
+  color: var(--accent-fg);
 }
 
 /* ---- the app's own name (app windows) ---- */
@@ -200,6 +225,7 @@ body.offsite #offsite {
 }
 .tab.active {
   background: var(--tab-active);
+  box-shadow: inset 0 2px 0 var(--accent-2);
   color: var(--text);
 }
 .tab.sleeping .title,
@@ -331,7 +357,7 @@ body.offsite #offsite {
 }
 #url:focus {
   border-color: var(--accent);
-  background: #1b1c1f;
+  background: var(--field-focus);
 }
 #zoom {
   position: absolute;
@@ -387,7 +413,7 @@ body.loading #progress {
   border-color: var(--accent);
 }
 #findtext.none {
-  border-color: #ff6b5e;
+  border-color: var(--danger-line);
 }
 #findcount {
   min-width: 60px;

@@ -8,25 +8,34 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
 	/**  The app's version, for Settings and support. */
 	appVersion: () => __TAURI_INVOKE<string>("app_version"),
-	/**  Starts a sign-in: the code for the user to enter at github.com/login/device. */
-	githubDeviceStart: () => __TAURI_INVOKE<DevicePrompt>("github_device_start"),
 	/**
-	 *  Waits until the user has entered the code, then saves the token on this
-	 *  machine and (with `account`) to the account.
+	 *  This boot's id (the kernel's, new on every boot): the UI forgets the
+	 *  account sign-in when it changes, so every boot starts at sign-in.
 	 */
-	githubDeviceWait: (account: {
+	bootId: () => __TAURI_INVOKE<string | null>("boot_id"),
+	/**
+	 *  Signs in with GitHub in a window over the app, on the portal's page at
+	 *  `auth_domain` (the Firebase config's). The token waits here for
+	 *  github_save_token; the page gets it back for Firebase.
+	 */
+	githubSignIn: (authDomain: string) => __TAURI_INVOKE<GithubCredential>("github_sign_in", { authDomain }),
+	/**  Stops a sign-in in progress (its window closes). */
+	githubSignInCancel: () => __TAURI_INVOKE<void>("github_sign_in_cancel"),
+	/**  Whose token waits for github_save_token, if any. */
+	githubPending: () => __TAURI_INVOKE<{
+	account: GithubAccount,
+	/**  GitHub's numeric user id, to match against the signed-in user's. */
+	githubId: string,
+} | null>("github_pending"),
+	/**
+	 *  Puts the last sign-in's token in place, once the machine is the account's:
+	 *  in wadd, and (with `account`) in the account for your other machines.
+	 */
+	githubSaveToken: (account: {
 	uid: string,
 	idToken: string,
 	projectId: string,
-} | null) => __TAURI_INVOKE<GithubSignedIn>("github_device_wait", { account }),
-	/**  Stops waiting for a sign-in. */
-	githubDeviceCancel: () => __TAURI_INVOKE<void>("github_device_cancel"),
-	/**
-	 *  Opens GitHub's code page in a window over the app, for signing in without
-	 *  a phone. The page copies nothing: the UI puts the code on the clipboard
-	 *  first, to paste there. The window closes when the sign-in ends.
-	 */
-	githubOpenBrowser: () => __TAURI_INVOKE<null>("github_open_browser"),
+} | null) => __TAURI_INVOKE<GithubSignedIn>("github_save_token", { account }),
 	/**  Tells the HUD which theme the app shows. */
 	setTheme: (theme: Theme) => __TAURI_INVOKE<null>("set_theme", { theme }),
 	/**  Calls wadd's HTTP API: `path` is like `/api/projects?x=1`. */
@@ -65,23 +74,6 @@ export type ApiError = {
 	message: string,
 };
 
-/**  A device-flow sign-in that's waiting for the user. */
-export type DeviceCode = {
-	/**  What the user types at `verification_uri`, e.g. `WDJB-MJHT`. */
-	userCode: string,
-	/**  Where to type it (`https://github.com/login/device`). */
-	verificationUri: string,
-	/**  Seconds until the code expires (GitHub gives 15 minutes). */
-	expiresIn: number,
-};
-
-/**  What the sign-in screen shows. */
-export type DevicePrompt = {
-	code: DeviceCode,
-	/**  A QR code of `code.verificationUri`, as an SVG document. */
-	qrSvg: string,
-};
-
 /**
  *  What kind of failure an error is. The UI picks its wording and whether to
  *  offer a retry from this; `message` is for people.
@@ -111,6 +103,22 @@ export type GithubAccount = {
 	login: string,
 	name: string | null,
 	avatarUrl: string | null,
+};
+
+/**  The result of a sign-in, for the page's Firebase. */
+export type GithubCredential = {
+	account: GithubAccount,
+	/**  GitHub's numeric user id (Firebase's `providerData` uid for github.com). */
+	githubId: string,
+	/**  For `GithubAuthProvider.credential` only: don't keep it. */
+	accessToken: string,
+};
+
+/**  Whose token waits for github_save_token. */
+export type GithubPending = {
+	account: GithubAccount,
+	/**  GitHub's numeric user id, to match against the signed-in user's. */
+	githubId: string,
 };
 
 /**  What became of the token, as well as whose it is. */

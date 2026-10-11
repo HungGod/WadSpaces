@@ -34,6 +34,7 @@ async fn setup(list: Vec<Workspace>, pulls: usize) -> Setup {
             ready_timeout: Duration::from_secs(30),
             max_parallel_pulls: pulls,
             projects_dir: "/p".into(),
+            signins_dir: "/s".into(),
             state_dir: dir.path().into(),
             rootless_uid: Some(1000),
             poll: Duration::from_secs(1),

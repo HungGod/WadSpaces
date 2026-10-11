@@ -97,7 +97,8 @@ fn machine_ws(ws: &Value, state: Option<&Value>) -> Value {
     };
     let idle = json!({"container": "unknown", "phase": "idle", "progress": null, "message": null, "error": null, "image_present": null, "download": null, "since": 0});
     json!({"id": s(ws, "id"), "name": s(ws, "name"), "port": s(ws, "port"), "url": url, "display": s(ws, "display"), "hotkey": s(ws, "hotkey"),
-           "icon": null, "enabled": s(ws, "enabled"), "image": s(ws, "image"), "state": state.map(state_py).unwrap_or(idle)})
+           "icon": null, "enabled": s(ws, "enabled"), "image": s(ws, "image"), "kind": s(ws, "kind"),
+           "state": state.map(state_py).unwrap_or(idle)})
 }
 
 impl Mirror {
@@ -397,6 +398,18 @@ impl RsWadd {
                 }
                 out
             }
+            (Get, ["api", "signins"]) => self.v1(Get, "/v1/signins", None).await?,
+            (Post, ["api", "signins"]) => self.v1(Post, "/v1/signins", Some(&b)).await?,
+            (Get, ["api", "signins", id]) => self.v1(Get, &format!("/v1/signins/{}", enc(id)), None).await?,
+            (Put, ["api", "signins", id]) => self.v1(Put, &format!("/v1/signins/{}", enc(id)), Some(&b)).await?,
+            (Delete, ["api", "signins", id]) => {
+                self.v1(Delete, &format!("/v1/signins/{}", enc(id)), None).await?;
+                ok()
+            }
+            (Post, ["api", "signins", id, "signout"]) => {
+                self.v1(Post, &format!("/v1/signins/{}/signout", enc(id)), None).await?
+            }
+            (Get, ["api", "secrets", "list"]) => self.v1(Get, "/v1/secrets", None).await?,
             (Get, ["api", "github"]) => {
                 let g = self.v1(Get, "/v1/github", None).await?;
                 let mut out = json!({"token": s(&g, "token"), "login": s(&g, "login")});
@@ -538,7 +551,7 @@ impl RsWadd {
         match event {
             "build" => vec![("build".into(), flatten(build_py(s(data, "build")), data))],
             "launch" => vec![("launch".into(), flatten(launch_py(s(data, "launch")), data))],
-            "projects" | "notice" => vec![(event.into(), data.clone())],
+            "projects" | "signins" | "notice" => vec![(event.into(), data.clone())],
             _ => vec![],
         }
     }

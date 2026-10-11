@@ -62,14 +62,16 @@ pub enum Event {
     Projects {
         ids: Vec<String>,
     },
+    /// Saved sign-ins were made, renamed, signed out or deleted here.
+    SignIns {
+        ids: Vec<String>,
+    },
     /// A launch moved on: the job, and its log lines since the last event.
     Launch(LaunchLog),
     /// A build moved on: the job, and its log lines since the last event.
     Build(BuildLog),
     /// The account link changed (linked, unlinked, a heartbeat, an error).
     Cloud(CloudLink),
-    /// A GitHub device sign-in moved on.
-    Github(crate::github::SignIn),
     /// The network changed (joined, left, connectivity).
     Network(NetworkStatus),
     /// The workspace list changed (added, edited, removed, built).
@@ -95,10 +97,10 @@ impl Event {
             Event::Carousel(_) => "carousel",
             Event::Session(_) => "session",
             Event::Projects { .. } => "projects",
+            Event::SignIns { .. } => "signins",
             Event::Launch(_) => "launch",
             Event::Build(_) => "build",
             Event::Cloud(_) => "cloud",
-            Event::Github(_) => "github",
             Event::Network(_) => "network",
             Event::Workspaces(_) => "workspaces",
             Event::Notice { .. } => "notice",
@@ -182,6 +184,24 @@ pub enum Display {
     Stream,
 }
 
+/// What runs a workspace.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Kind {
+    /// An image, run as a podman container (a quadlet).
+    #[default]
+    Container,
+    /// A program on the machine itself (the terminal, WadBrowser), run as the
+    /// kiosk user in a transient unit: no image, no projects.
+    App,
+}
+
+impl Kind {
+    pub fn is_container(&self) -> bool {
+        *self == Kind::Container
+    }
+}
+
 /// A project folder a workspace mounts at ~/Desktop/<mount> (set by a launch).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -199,6 +219,12 @@ pub struct MountedProject {
 pub struct Workspace {
     pub id: String,
     pub name: String,
+    /// Container or app (left out for a container, so older lists read the same).
+    #[serde(default, skip_serializing_if = "Kind::is_container")]
+    pub kind: Kind,
+    /// An app's command line (an app has no image: `image` is empty).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exec: Vec<String>,
     pub image: String,
     pub display: Display,
     /// The stream's port (streamed workspaces).
@@ -218,6 +244,74 @@ pub struct Workspace {
     pub devices: Vec<String>,
     pub shm_size: Option<String>,
     pub projects: Vec<MountedProject>,
+    /// The saved sign-ins it mounts (from its design).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signins: Vec<WorkspaceSignIn>,
+}
+
+/// A saved sign-in a workspace mounts, for one of its apps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSignIn {
+    /// The sign-in's id.
+    pub id: String,
+    /// The app that uses it: a web app's id (its WadBrowser `--app`) or a
+    /// catalog app's (vscode).
+    pub app: String,
+    /// A web app's (a WadBrowser profile) rather than an app's files.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub web: bool,
+    /// Its name, for making it on a machine that hasn't got it yet.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+}
+
+/// What kind of sign-in: a WadBrowser profile, for any web app.
+pub const SIGNIN_WEB: &str = "web";
+
+/// GET /v1/signins: a sign-in kept on this machine, mounted into each
+/// workspace that uses it, so signing in once covers all of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SignIn {
+    pub id: String,
+    pub name: String,
+    /// "web" (a WadBrowser profile: any web app can use it), or the app
+    /// whose files it keeps (vscode).
+    pub app: String,
+    /// Those files, under the home folder (none for "web").
+    pub paths: Vec<String>,
+    /// Epoch milliseconds.
+    pub created_at: i64,
+    /// What's saved, in bytes.
+    pub size: u64,
+    /// When anything in it last changed (epoch milliseconds); None while empty.
+    pub changed_at: Option<i64>,
+    /// The workspaces here that mount it.
+    pub used_by: Vec<String>,
+    /// Those of them running now.
+    pub in_use: Vec<String>,
+}
+
+/// POST /v1/signins
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SignInRequest {
+    pub name: String,
+    pub app: String,
+    /// For an app with no known files: which to keep.
+    #[serde(default)]
+    pub paths: Vec<String>,
+}
+
+/// PUT /v1/signins/{id}: what changes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SignInPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<Vec<String>>,
 }
 
 /// Where a project's files are.

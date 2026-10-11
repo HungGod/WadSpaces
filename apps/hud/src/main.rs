@@ -12,11 +12,16 @@
 //! - **The clipboard history** (Super+V, wadd's `shortcut` event): the
 //!   machine's copies from every wadspace (wad-clip), one picked to paste.
 //!   The HUD also keeps the latest copy alive when whoever copied it goes.
+//! - **WadNotes** (notes/): notes, tasks and a calendar side by side at the
+//!   top right, for the wadspace on screen (wadd's `view`); reminders at the
+//!   top of the screen. One button on the bar puts them away or brings them
+//!   back; its menu (hover, or a long press) turns each on or off and picks
+//!   the notespace.
 //!
 //! All are wlr-layer-shell overlays, which sway stacks above normal and
 //! fullscreen windows, so they show over whatever wadspace is on screen.
-//! Only the Wi-Fi menu (for a password) and the clipboard history (arrows,
-//! Enter, Esc) take the keyboard, and only while open. Without layer-shell
+//! Only the Wi-Fi menu (for a password), the clipboard history (arrows,
+//! Enter, Esc) and WadNotes (once you click into it) take the keyboard. Without layer-shell
 //! (a desktop session) they're plain windows.
 //!
 //! WADSPACES_HUD_SNAPSHOT=<dir> renders each surface to a PNG there and exits.
@@ -24,6 +29,7 @@
 mod audio;
 mod clips;
 mod model;
+mod notes;
 mod power;
 mod prefs;
 mod theme;
@@ -46,10 +52,19 @@ use wadd::{Incoming, Wadd};
 /// The WadSpaces logo mark for each theme (apps/client/public/brand), 128 px.
 const LOGO_DARK: &[u8] = include_bytes!("../assets/logo-dark.png");
 const LOGO_LIGHT: &[u8] = include_bytes!("../assets/logo-light.png");
+/// WadNotes' icon (64 px) and logo (96 px tall), each theme's
+/// (apps/client/public/brand/wadnotes-*.svg).
+const NOTES_ICON_DARK: &[u8] = include_bytes!("../assets/wadnotes-icon-dark.png");
+const NOTES_ICON_LIGHT: &[u8] = include_bytes!("../assets/wadnotes-icon-light.png");
+const NOTES_LOGO_DARK: &[u8] = include_bytes!("../assets/wadnotes-logo-dark.png");
+const NOTES_LOGO_LIGHT: &[u8] = include_bytes!("../assets/wadnotes-logo-light.png");
+
+fn texture(bytes: &'static [u8]) -> Option<gdk::Texture> {
+    gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)).ok()
+}
 
 fn logo(t: Theme) -> Option<gdk::Texture> {
-    let bytes = if t == Theme::Light { LOGO_LIGHT } else { LOGO_DARK };
-    gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)).ok()
+    texture(if t == Theme::Light { LOGO_LIGHT } else { LOGO_DARK })
 }
 
 /// A square image drawn at `px` logical pixels (whatever its own size),
@@ -347,6 +362,20 @@ struct Wifi {
     busy: Cell<bool>,
 }
 
+/// The WadNotes button's menu, above the bar: each card on or off, and the
+/// notespace. Open while the pointer is over the button or the menu (or
+/// after a long press, for touch).
+struct NotesMenu {
+    win: gtk::Window,
+    logo: gtk::Picture,
+    switches: Vec<(notes::Section, gtk::Switch)>,
+    /// The pointer left: it closes soon unless it comes back.
+    closing: RefCell<Option<glib::SourceId>>,
+    opening: RefCell<Option<glib::SourceId>>,
+    /// Set while the HUD moves a switch itself.
+    syncing: Cell<bool>,
+}
+
 struct Hud {
     wadd: Wadd,
     state: RefCell<State>,
@@ -384,6 +413,10 @@ struct Hud {
     bright_steps: Rc<Steps>,
     sound_steps: Rc<Steps>,
     clip: Clip,
+    /// WadNotes, its button on the bar, and the button's menu.
+    notes: Rc<notes::Panel>,
+    notes_button: gtk::Button,
+    notes_menu: NotesMenu,
     switcher: gtk::Window,
     switcher_box: gtk::Box,
     carousel: RefCell<Carousel>,
@@ -395,7 +428,13 @@ struct Hud {
 }
 
 impl Hud {
-    fn build(app: &gtk::Application, css: gtk::CssProvider, theme: Theme) -> Rc<Hud> {
+    fn build(
+        app: &gtk::Application,
+        css: gtk::CssProvider,
+        theme: Theme,
+        notes_store: wad_notes::Store,
+        reminders: wad_notes::ReminderFile,
+    ) -> Rc<Hud> {
         let wadd = Wadd::from_env();
 
         // The bar.
@@ -417,6 +456,11 @@ impl Hud {
         let sound_icon = icon(audio::icon(None), 16);
         let sound_button = icon_pill(&sound_icon, "Volume");
         let power_button = icon_pill(&icon("system-shutdown-symbolic", 16), "Power");
+        // WadNotes: away or back; its menu does the rest.
+        let notes_button = gtk::Button::new();
+        notes_button.set_child(Some(&icon("accessories-text-editor-symbolic", 16))); // until the theme's icon (apply_theme)
+        notes_button.add_css_class("pill");
+        notes_button.add_css_class("icon-pill");
         let clock = label("", "pill");
         clock.add_css_class("clock");
         // The battery: hidden until there is one (power.rs), as on a desktop.
@@ -437,11 +481,12 @@ impl Hud {
             net.upcast_ref(),
             bright_button.upcast_ref(),
             sound_button.upcast_ref(),
-            power_button.upcast_ref(),
-            battery.upcast_ref(),
-            clock.upcast_ref(),
-            collapse.upcast_ref(),
         ] {
+            row.append(w);
+        }
+        row.append(&notes_button);
+        for w in [power_button.upcast_ref::<gtk::Widget>(), battery.upcast_ref(), clock.upcast_ref(), collapse.upcast_ref()]
+        {
             row.append(w);
         }
         let expand = button("‹", &["pill", "arrow"]);
@@ -600,6 +645,54 @@ impl Hud {
         switcher_box.add_css_class("switcher");
         switcher.set_child(Some(&switcher_box));
 
+        // WadNotes: the cards at the top right, the reminders, and the
+        // button's menu.
+        let notes = notes::Panel::build(app, notes_store, reminders);
+        let menu_win = gtk::Window::builder().application(app).title("wadspaces-notes-menu").build();
+        layer(&menu_win, "wadspaces-notes-menu", &[Edge::Bottom, Edge::Right], false, KeyboardMode::None);
+        let menu_card = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        menu_card.add_css_class("card");
+        menu_card.add_css_class("notes-menu");
+        menu_card.set_size_request(290, -1);
+        // WadNotes' logo (the theme's, apply_theme).
+        let notes_logo = gtk::Picture::new();
+        notes_logo.set_can_shrink(true);
+        notes_logo.set_content_fit(gtk::ContentFit::Contain);
+        notes_logo.set_size_request(104, 48);
+        notes_logo.set_halign(gtk::Align::Start);
+        notes_logo.set_alternative_text(Some("WadNotes"));
+        menu_card.append(&notes_logo);
+        let hint = label("Tap the button to put them away and bring them back.", "sub");
+        hint.set_wrap(true);
+        hint.set_xalign(0.0);
+        menu_card.append(&hint);
+        let mut switches = vec![];
+        for section in notes::Section::ALL {
+            let r = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let name = label(section.label(), "row-title");
+            name.set_hexpand(true);
+            name.set_xalign(0.0);
+            let sw = gtk::Switch::new();
+            sw.set_valign(gtk::Align::Center);
+            r.append(&name);
+            r.append(&sw);
+            menu_card.append(&r);
+            switches.push((section, sw));
+        }
+        let space = label("NOTESPACE", "section");
+        space.set_xalign(0.0);
+        space.set_margin_top(6);
+        menu_card.append(&space);
+        menu_card.append(&notes.scope_box);
+        menu_win.set_child(Some(&menu_card));
+        // The notespace dropdown opens and closes: the menu follows its size.
+        let w = menu_win.downgrade();
+        notes.picker.connect_child_revealed_notify(move |_| {
+            if let Some(w) = w.upgrade() {
+                w.set_default_size(1, 1);
+            }
+        });
+
         // The bar's tooltips, above it: made last, so sway stacks them over
         // every other overlay.
         let tip_win = gtk::Window::builder().application(app).title("wadspaces-tip").build();
@@ -670,6 +763,16 @@ impl Hud {
                 history: RefCell::default(),
                 board: RefCell::default(),
                 current_kept: Cell::new(false),
+            },
+            notes,
+            notes_button,
+            notes_menu: NotesMenu {
+                win: menu_win,
+                logo: notes_logo,
+                switches,
+                closing: RefCell::default(),
+                opening: RefCell::default(),
+                syncing: Cell::new(false),
             },
             switcher,
             switcher_box,
@@ -745,6 +848,7 @@ impl Hud {
         ] {
             hud.hover_tip(w);
         }
+        hud.wire_notes();
         let h = hud.clone();
         collapse.connect_clicked(move |_| h.set_collapsed(true, true));
         let h = hud.clone();
@@ -841,6 +945,12 @@ impl Hud {
             None => self.home.set_label("Home"),
         }
         self.logo.replace(l);
+        // WadNotes' marks, in the theme's colours.
+        let light = t == Theme::Light;
+        if let Some(tex) = texture(if light { NOTES_ICON_LIGHT } else { NOTES_ICON_DARK }) {
+            self.notes_button.set_child(Some(&square_image(&tex, 18, "")));
+        }
+        self.notes_menu.logo.set_paintable(texture(if light { NOTES_LOGO_LIGHT } else { NOTES_LOGO_DARK }).as_ref());
         if self.switcher.is_visible() {
             self.show_switcher();
         }
@@ -1004,16 +1114,155 @@ impl Hud {
         if power::low(&b) { self.battery.add_css_class("low") } else { self.battery.remove_css_class("low") }
     }
 
-    /// Tucks the bar away behind its arrow, or brings it back.
+    /// Tucks the bar away behind its arrow, or brings it back. WadNotes goes
+    /// and comes back with it (the same sections as before).
     fn set_collapsed(&self, collapsed: bool, remember: bool) {
         self.tip_hide();
         self.row.set_visible(!collapsed);
         self.expand.set_visible(collapsed);
         // Shrink to what's left, so the empty corner takes no clicks.
         self.bar.set_default_size(1, 1);
-        if remember {
-            prefs::save_to(&prefs::file(), &prefs::Prefs { collapsed });
+        self.notes.set_hidden(collapsed);
+        if collapsed {
+            self.notes_menu.win.set_visible(false);
         }
+        if remember {
+            prefs::update(|p| p.collapsed = collapsed);
+        }
+    }
+
+    // ------------------------------------------------------------ WadNotes
+    fn wire_notes(self: &Rc<Self>) {
+        // A tap: away, or back (with none on, the menu, to turn one on).
+        let h = self.clone();
+        self.notes_button.connect_clicked(move |_| {
+            if !h.notes.any_on() {
+                h.open_notes_menu();
+                return;
+            }
+            let away = !h.notes.is_put_away();
+            h.notes.set_put_away(away);
+            prefs::update(|p| p.notes_away = away);
+            h.update_notes_button();
+        });
+        // Hover opens the menu; leaving the button and the menu closes it.
+        for w in [self.notes_button.upcast_ref::<gtk::Widget>(), self.notes_menu.win.upcast_ref()] {
+            let motion = gtk::EventControllerMotion::new();
+            let h = self.clone();
+            let is_button = w.is::<gtk::Button>();
+            motion.connect_enter(move |_, _, _| {
+                h.cancel_notes_menu_close();
+                if is_button {
+                    h.open_notes_menu_soon();
+                }
+            });
+            let h = self.clone();
+            motion.connect_leave(move |_| h.close_notes_menu_soon());
+            w.add_controller(motion);
+        }
+        // Touch has no hover: a long press opens it.
+        let long = gtk::GestureLongPress::new();
+        long.set_touch_only(true);
+        let h = self.clone();
+        long.connect_pressed(move |g, _, _| {
+            g.set_state(gtk::EventSequenceState::Claimed);
+            h.open_notes_menu();
+        });
+        self.notes_button.add_controller(long);
+        for (section, sw) in &self.notes_menu.switches {
+            let (h, section) = (self.clone(), *section);
+            sw.connect_active_notify(move |sw| {
+                if !h.notes_menu.syncing.get() {
+                    h.show_section(section, sw.is_active());
+                    let on = sw.is_active();
+                    prefs::update(|p| {
+                        match section {
+                            notes::Section::Notes => p.notes = on,
+                            notes::Section::Tasks => p.tasks = on,
+                            notes::Section::Calendar => p.calendar = on,
+                        }
+                        p.notes_away = false;
+                    });
+                }
+            });
+        }
+        self.update_notes_button();
+    }
+
+    /// A section on or off: its card, its switch, and the button.
+    fn show_section(&self, s: notes::Section, on: bool) {
+        self.notes.set_section(s, on);
+        self.notes_menu.syncing.set(true);
+        for (section, sw) in &self.notes_menu.switches {
+            if *section == s {
+                sw.set_active(on);
+            }
+        }
+        self.notes_menu.syncing.set(false);
+        self.update_notes_button();
+    }
+
+    /// Lit while WadNotes is on screen.
+    fn update_notes_button(&self) {
+        if self.notes.showing() { self.notes_button.add_css_class("on") } else { self.notes_button.remove_css_class("on") }
+    }
+
+    fn open_notes_menu_soon(self: &Rc<Self>) {
+        if self.notes_menu.win.is_visible() || self.notes_menu.opening.borrow().is_some() {
+            return;
+        }
+        let h = self.clone();
+        let id = glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+            h.notes_menu.opening.replace(None);
+            h.open_notes_menu();
+        });
+        self.notes_menu.opening.replace(Some(id));
+    }
+
+    fn cancel_notes_menu_close(&self) {
+        if let Some(id) = self.notes_menu.closing.take() {
+            id.remove();
+        }
+    }
+
+    fn close_notes_menu_soon(self: &Rc<Self>) {
+        if let Some(id) = self.notes_menu.opening.take() {
+            id.remove();
+        }
+        self.cancel_notes_menu_close();
+        let h = self.clone();
+        let id = glib::timeout_add_local_once(std::time::Duration::from_millis(450), move || {
+            h.notes_menu.closing.replace(None);
+            h.notes_menu.win.set_visible(false);
+            h.notes.picker.set_reveal_child(false);
+        });
+        self.notes_menu.closing.replace(Some(id));
+    }
+
+    /// The menu, right-aligned over the button, just above the bar.
+    fn open_notes_menu(self: &Rc<Self>) {
+        self.cancel_notes_menu_close();
+        self.notes.fill_picker();
+        let win = &self.notes_menu.win;
+        if gtk4_layer_shell::is_supported() {
+            let b = &self.notes_button;
+            let at = b.compute_point(&self.bar, &gtk::graphene::Point::new(0.0, 0.0));
+            let right_edge = at.map(|p| p.x() + b.width() as f32).unwrap_or(self.bar.width() as f32);
+            // The bar sits 12 px from the right and bottom edges (layer()).
+            win.set_margin(Edge::Right, (12.0 + self.bar.width() as f32 - right_edge).max(6.0) as i32);
+            win.set_margin(Edge::Bottom, 12 + self.bar.height() + 6);
+        }
+        win.set_default_size(1, 1);
+        win.present();
+    }
+
+    /// WadNotes follows the screen: the wadspace on it has its notespace.
+    fn follow_view(&self) {
+        let st = self.state.borrow();
+        let scope = model::scope_for(st.view.as_deref(), &st.workspaces);
+        let spaces = model::notespaces(&st.workspaces);
+        drop(st);
+        self.notes.set_view(scope, spaces);
     }
 
     // ------------------------------------------------- brightness, volume
@@ -1515,11 +1764,19 @@ impl Hud {
         self.switcher.present();
     }
 
-    /// A workspace's icon: from the cache, else fetched (the switcher redraws when it arrives).
+    /// A workspace's icon, in the theme's variant when it has one (WadBrowser
+    /// does): from the cache, else fetched (the switcher redraws when it arrives).
     fn icon(self: &Rc<Self>, path: &str) -> Option<gdk::Texture> {
-        if let Some(t) = self.icons.borrow().get(path) {
+        let theme = if self.theme.get() == Theme::Light { "light" } else { "dark" };
+        let themed = format!("{path}?theme={theme}");
+        if let Some(t) = self.icons.borrow().get(&themed) {
             return t.clone();
         }
+        // One put in the cache by hand (the snapshots).
+        if let Some(Some(t)) = self.icons.borrow().get(path) {
+            return Some(t.clone());
+        }
+        let path = themed.as_str();
         self.icons.borrow_mut().insert(path.into(), None);
         let w = self.wadd.clone();
         let h = self.clone();
@@ -1564,6 +1821,18 @@ impl Hud {
                     self.toggle_clips();
                 }
             }
+            Incoming::Event(name, data) if name == "view" => {
+                if let Ok(v) = serde_json::from_value::<model::ViewState>(data) {
+                    self.state.borrow_mut().view = Some(v.view);
+                    self.follow_view();
+                }
+            }
+            Incoming::Event(name, data) if name == "workspaces" => {
+                if let Ok(list) = serde_json::from_value::<Vec<model::Space>>(data) {
+                    self.state.borrow_mut().workspaces = list;
+                    self.follow_view();
+                }
+            }
             Incoming::Event(name, data) if name == "carousel" => {
                 self.carousel.replace(serde_json::from_value(data).unwrap_or_default());
                 self.show_switcher();
@@ -1600,6 +1869,51 @@ fn save_png(win: &gtk::Window, path: &std::path::Path) {
     }
 }
 
+/// Made-up WadNotes for the snapshots: a few notes, tasks and events around now.
+fn snapshot_notes(root: &std::path::Path) {
+    use chrono::{Duration, Timelike};
+    use wad_notes::{Event, Note, Priority, Status, Store, Task};
+    let _ = std::fs::remove_dir_all(root);
+    let s = Store::new(root);
+    let t = notes::now().with_second(0).unwrap();
+    let mut notes = vec![
+        (
+            "writing",
+            "Chapter 3 outline",
+            "# Chapter 3 outline\n\nThe **storm** scene moves earlier.\n\n- Open on the harbour\n- [x] Cut the flashback\n- [ ] Ana's letter arrives\n\n> Keep it under 4,000 words.\n",
+        ),
+        ("writing", "Research links", "Tide tables for *Suva*, and the old ferry routes."),
+        ("default", "Machine setup", "Remember to update the stick before Friday."),
+    ];
+    for (i, (scope, title, body)) in notes.drain(..).enumerate() {
+        let mut n = Note { title: title.into(), body: body.into(), ..Note::new(t) };
+        let _ = s.save_note(scope, &mut n, t - Duration::hours(3 * i as i64));
+    }
+    let today = t.date();
+    for (title, status, priority, due) in [
+        ("Draft chapter 3", Status::Doing, Priority::High, Some(today + Duration::days(1))),
+        ("Proofread chapter 2", Status::Todo, Priority::Medium, Some(today - Duration::days(1))),
+        ("Pick a cover photo", Status::Todo, Priority::Low, None),
+        ("Export chapter 1 to PDF", Status::Done, Priority::Medium, None),
+    ] {
+        let mut k = Task { title: title.into(), status, priority, due, ..Task::new(t) };
+        let _ = s.save_task("writing", &mut k);
+    }
+    let soon = t + Duration::minutes(10);
+    for (title, start, scope, all_day, remind) in [
+        ("Writing group", soon, Some("writing"), false, Some(15)),
+        ("Editor call", (today + Duration::days(1)).and_hms_opt(9, 30, 0).unwrap(), Some("writing"), false, Some(15)),
+        ("Sprint review", (today + Duration::days(2)).and_hms_opt(14, 0, 0).unwrap(), Some("iq-dev"), false, None),
+        ("Back up the stick", (today + Duration::days(3)).and_hms_opt(0, 0, 0).unwrap(), None, true, Some(60)),
+    ] {
+        let mut e = Event { title: title.into(), all_day, remind, ..Event::new(start, scope.map(String::from)) };
+        if !all_day {
+            e.end = Some(start + Duration::minutes(45));
+        }
+        let _ = s.save_event(&mut e, t);
+    }
+}
+
 fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
     let _ = std::fs::create_dir_all(&dir);
     // WADSPACES_HUD_SNAPSHOT_ICON: an image file to show as Writing's icon.
@@ -1616,6 +1930,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
             connectivity: Some("full".into()),
             ssid: Some("Home Network".into()),
         }),
+        ..State::default()
     });
     hud.update_bar();
     hud.show_battery(Some(power::Battery { percent: 76, state: power::State::Discharging, minutes: Some(250) }));
@@ -1717,6 +2032,18 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
         h.add(text("https://github.com/HungGod/WadSpaces/pull/42"), None, now() - 20.0);
     }
     hud.toggle_clips();
+    // WadNotes: on Writing, every section on, and the reminder due.
+    hud.state.borrow_mut().view = Some("writing".into());
+    hud.state.borrow_mut().workspaces = [("writing", "Writing", None), ("iq-dev", "IntelligenceQuest Dev", None), ("terminal", "Terminal", Some("app"))]
+        .into_iter()
+        .map(|(id, name, kind)| model::Space { id: id.into(), name: name.into(), kind: kind.map(String::from), enabled: true })
+        .collect();
+    hud.follow_view();
+    for s in [notes::Section::Notes, notes::Section::Tasks, notes::Section::Calendar] {
+        hud.show_section(s, true);
+    }
+    hud.notes.tick();
+    hud.open_notes_menu();
     glib::timeout_add_local_once(std::time::Duration::from_millis(800), move || {
         for (win, name) in [
             (&hud.bar, "bar"),
@@ -1728,9 +2055,17 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
             (&hud.osd.win, "level"),
             (&hud.tip.win, "tip"),
             (&hud.clip.win, "clipboard"),
+            (&hud.notes.win, "notes"),
+            (&hud.notes.reminder.win, "reminder"),
+            (&hud.notes_menu.win, "notes-menu"),
         ] {
             save_png(win, &dir.join(format!("{name}.png")));
         }
+        hud.notes_menu.win.set_visible(false);
+        // A note open in its preview (the card grows leftwards) and an event
+        // open to edit (it grows over the tasks, drawn on top of them).
+        hud.notes.notes.open_first(true);
+        hud.notes.calendar.open_first();
         hud.state.borrow_mut().session = Some(model::Session {
             mode: "focus".into(),
             minutes: Some(25.0),
@@ -1741,13 +2076,24 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
         hud.update_bar();
         glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
             save_png(&hud.bar, &dir.join("bar-focus.png"));
-            // Tucked away, after time ran out: only the arrow, lit.
-            hud.state.borrow_mut().session.as_mut().unwrap().expired = true;
-            hud.update_bar();
-            hud.set_collapsed(true, false);
+            save_png(&hud.notes.win, &dir.join("notes-editors.png"));
+            // Put away with the button: the cards go, the button unlit.
+            hud.notes.set_put_away(true);
+            hud.update_notes_button();
             glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
-                save_png(&hud.bar, &dir.join("bar-collapsed.png"));
-                app.quit();
+                save_png(&hud.bar, &dir.join("bar-notes-away.png"));
+                println!("hud: notes visible when put away: {}", hud.notes.win.is_visible());
+                hud.notes.set_put_away(false);
+                // Tucked away, after time ran out: only the arrow, lit (and
+                // WadNotes gone with the bar).
+                hud.state.borrow_mut().session.as_mut().unwrap().expired = true;
+                hud.update_bar();
+                hud.set_collapsed(true, false);
+                glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+                    save_png(&hud.bar, &dir.join("bar-collapsed.png"));
+                    println!("hud: notes visible when collapsed: {}", hud.notes.win.is_visible());
+                    app.quit();
+                });
             });
         });
     });
@@ -1792,20 +2138,54 @@ fn main() -> glib::ExitCode {
         if let Some(display) = gdk::Display::default() {
             gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
-        let hud = Hud::build(app, css, theme::current());
+        // WadNotes' files (a snapshot draws made-up ones, in a folder of its own).
+        let snapshot_dir = std::env::var_os("WADSPACES_HUD_SNAPSHOT").map(std::path::PathBuf::from);
+        let (store, reminders) = match &snapshot_dir {
+            Some(dir) => {
+                let root = dir.join("wadnotes");
+                (wad_notes::Store::new(&root), wad_notes::ReminderFile(root.join(".reminders.json")))
+            }
+            None => (
+                wad_notes::Store::new(wad_notes::Store::default_root()),
+                wad_notes::ReminderFile(wad_notes::ReminderFile::default_path()),
+            ),
+        };
+        if let Some(dir) = &snapshot_dir {
+            snapshot_notes(&dir.join("wadnotes"));
+        }
+        let hud = Hud::build(app, css, theme::current(), store, reminders);
         r.replace(Some(hud.clone()));
-        if let Some(dir) = std::env::var_os("WADSPACES_HUD_SNAPSHOT") {
+        if let Some(dir) = snapshot_dir {
             let _hold = app.hold();
-            snapshot(hud, app.clone(), dir.into());
+            snapshot(hud, app.clone(), dir);
             std::mem::forget(_hold);
             return;
         }
         // Its volume icon, from the start.
         let h = hud.clone();
         background(audio::get, move |r| h.show_volume(r.ok()));
-        if prefs::load_from(&prefs::file()).collapsed {
+        // As it was left: tucked away first, so WadNotes doesn't flash up.
+        let p = prefs::load_from(&prefs::file());
+        if p.collapsed {
             hud.set_collapsed(true, false);
         }
+        for (s, on) in [(notes::Section::Notes, p.notes), (notes::Section::Tasks, p.tasks), (notes::Section::Calendar, p.calendar)]
+        {
+            if on {
+                hud.show_section(s, true);
+            }
+        }
+        if p.notes_away {
+            hud.notes.set_put_away(true);
+            hud.update_notes_button();
+        }
+        // Reminders due, now and each half minute.
+        hud.notes.tick();
+        let h = hud.clone();
+        glib::timeout_add_seconds_local(30, move || {
+            h.notes.tick();
+            glib::ControlFlow::Continue
+        });
         hud.start_clipboard();
         // Kept for as long as the HUD runs.
         std::mem::forget(hud.follow_theme());

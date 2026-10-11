@@ -47,21 +47,6 @@ pub struct Config {
     pub keys: Keys,
     pub display: Display,
     pub cloud: Cloud,
-    pub github: Github,
-}
-
-/// GitHub (where projects live).
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Github {
-    /// The OAuth App's settings (client_id, scopes) for the device sign-in.
-    pub app: PathBuf,
-}
-
-impl Default for Github {
-    fn default() -> Self {
-        Self { app: "/usr/lib/wadspaces/github.toml".into() }
-    }
 }
 
 /// The account link (the cloud relay). An empty project_id takes the image's
@@ -201,6 +186,8 @@ pub struct Daemon {
     pub units_dir: PathBuf,
     /// Project folders, one per project.
     pub projects_dir: PathBuf,
+    /// Saved sign-ins, one folder each, mounted into the wadspaces that use them.
+    pub signins_dir: PathBuf,
     /// How long a workspace may take to come up.
     pub ready_timeout_s: u64,
     /// Images downloaded at once.
@@ -271,6 +258,7 @@ impl Daemon {
                 podman_socket: "/run/podman/podman.sock".into(),
                 units_dir: "/run/containers/systemd".into(),
                 projects_dir: "/var/lib/wadspaces-projects".into(),
+                signins_dir: "/var/lib/wadspaces-signins".into(),
                 ready_timeout_s: 900,
                 max_parallel_pulls: 3,
                 reconcile_s: 5,
@@ -291,6 +279,7 @@ impl Daemon {
                 podman_socket: runtime_dir().join("podman/podman.sock"),
                 units_dir: runtime_dir().join("containers/systemd"),
                 projects_dir: home().join(".local/share/wadspaces-projects"),
+                signins_dir: home().join(".local/share/wadspaces-signins"),
                 ready_timeout_s: 900,
                 max_parallel_pulls: 3,
                 reconcile_s: 5,
@@ -313,7 +302,6 @@ impl Config {
             keys: Keys::for_profile(profile),
             display: Display::for_profile(profile),
             cloud: Cloud::default(),
-            github: Github::default(),
         }
     }
 
@@ -376,7 +364,6 @@ struct Raw {
     keys: Keys,
     display: Display,
     cloud: Cloud,
-    github: Github,
 }
 #[derive(serde::Serialize)]
 struct RawMachine {
@@ -393,6 +380,7 @@ struct RawDaemon {
     podman_socket: PathBuf,
     units_dir: PathBuf,
     projects_dir: PathBuf,
+    signins_dir: PathBuf,
     ready_timeout_s: u64,
     max_parallel_pulls: usize,
     reconcile_s: u64,
@@ -422,6 +410,7 @@ impl From<&Config> for Raw {
                 podman_socket: c.daemon.podman_socket.clone(),
                 units_dir: c.daemon.units_dir.clone(),
                 projects_dir: c.daemon.projects_dir.clone(),
+                signins_dir: c.daemon.signins_dir.clone(),
                 ready_timeout_s: c.daemon.ready_timeout_s,
                 max_parallel_pulls: c.daemon.max_parallel_pulls,
                 reconcile_s: c.daemon.reconcile_s,
@@ -435,7 +424,6 @@ impl From<&Config> for Raw {
             keys: c.keys.clone(),
             display: c.display.clone(),
             cloud: c.cloud.clone(),
-            github: c.github.clone(),
         }
     }
 }

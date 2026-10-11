@@ -147,7 +147,7 @@ fn migrate(dry_run: bool, force: bool, json: bool, from: Option<PathBuf>, user: 
         }
     };
     let result = rt.block_on(async {
-        let backend = backend::connect(&cfg.daemon, profile).await.inspect_err(|e| eprintln!("wadd migrate: {e}")).ok();
+        let backend = backend::connect(&cfg, profile).await.inspect_err(|e| eprintln!("wadd migrate: {e}")).ok();
         wadd::migrate::apply(&cfg, backend.as_ref().map(|b| b as &dyn Backend), force).await
     });
     match result {
@@ -194,7 +194,7 @@ fn serve(user: bool, config: Option<PathBuf>, socket: Option<PathBuf>) -> ExitCo
         }
     };
     let result = rt.block_on(async move {
-        let backend: Arc<dyn Backend> = match backend::connect(&cfg.daemon, profile).await {
+        let backend: Arc<dyn Backend> = match backend::connect(&cfg, profile).await {
             Ok(real) => Arc::new(real),
             Err(e) => {
                 tracing::error!("can't manage workspaces: {e}");

@@ -29,6 +29,13 @@ surface of their own, which the compositor blends over the page.
 - **Memory**: one shared profile (one network process and cache for every
   web app); tabs idle for 15 minutes sleep (their history kept) and wake
   where they were; WebKit sheds caches under memory pressure.
+- **Sign-ins** (`profile.rs`): cookies are kept on disk (`cookies.sqlite`
+  in the profile), so a sign-in outlasts the browser. A web app given a
+  saved sign-in in WadSpaces uses profile `signin-<id>` instead: its data
+  is the sign-in's folder that wadd mounts at
+  `/run/wadspaces-signins/<id>` (listed in
+  `/run/wadspaces-extra/signins.json`), shared with every wadspace whose
+  apps use it; its cache stays the wadspace's own.
 - **GPU**: on when the container has a usable `/dev/dri` (`gpu.rs`), video
   decoded with VA-API.
 - **What WebKitGTK can't do**: DRM (EME) and video calls (WebRTC). Spotify,
@@ -47,8 +54,8 @@ wadbrowser --app <id> --name <name> --url <start> [URL...]
 Settings: `/etc/wadspaces/wadbrowser.conf`, then
 `~/.config/wadbrowser/wadbrowser.conf` (`default`, `home`, `search`,
 `hibernate_after_minutes`, `gpu`). With no `home`, new tabs and Home show
-`wadbrowser://home`: the WadSpaces mark and a search box (the mark alone in
-Focus, which has no address bar). `WADBROWSER_DEVTOOLS=1` adds the inspector
+`wadbrowser://home`: a search box (none in Focus, which has no address
+bar), under WadBrowser's logo on the machine's own WadBrowser. `WADBROWSER_DEVTOOLS=1` adds the inspector
 (F12); `WADBROWSER_LOG=debug` says more.
 
 ## Building and trying it
@@ -65,5 +72,17 @@ Focus, which has no address bar). `WADBROWSER_DEVTOOLS=1` adds the inspector
 - `apps/wadd/dev/try-build.sh` builds a design with web apps through wadd and
   opens one, and a link, in a real workspace.
 
-The icon is the light WadSpaces mark (`icons/`, from
-`apps/client/public/brand/wadspaces-icon-light-transparent.svg`).
+## Inside wadspaces, and on the machine
+
+The same program, built twice:
+- **Inside wadspaces** (`images/build.sh`, no features): dark in WadSpaces'
+  colours, always, with no logo; its own look, nothing of the machine's. Its
+  icon is the light WadSpaces mark (`icons/`, from
+  `apps/client/public/brand/wadspaces-icon-light-transparent.svg`).
+- **On the machine** (`host/build.sh`, `--features host`): WadBrowser's own
+  logo (`apps/client/public/brand/wadbrowser-logo-{dark,light}.svg`) on its
+  home page, and light or dark as WadSpaces is: it follows the WadSpaces
+  Client's `~/.config/wadspaces/theme` (src/theme.rs). The pages carry it as
+  `data-theme` (WebKit's `prefers-color-scheme` follows the desktop's
+  settings portal, not WadBrowser). `WADBROWSER_THEME=light|dark` overrides
+  it, for the spike.

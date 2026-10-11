@@ -1,13 +1,15 @@
 //! What the Registry asks of the machine: podman (containers, images,
-//! pulls), systemd (the workspaces' units) and a few probes. A trait, so the
-//! lifecycle is tested against a fake (tests/registry.rs).
+//! pulls), systemd (the workspaces' units, and the apps' transient ones) and
+//! a few probes. A trait, so the lifecycle is tested against a fake
+//! (tests/registry.rs).
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use wad_podman::Podman;
-use wad_systemd::Systemd;
+use wad_proto::v1::Workspace;
+use wad_systemd::{Systemd, TransientSpec};
 
 use crate::pull;
 
@@ -25,6 +27,16 @@ pub trait Backend: Send + Sync + 'static {
     async fn start(&self, unit: &str) -> Result<(), String>;
     async fn stop(&self, unit: &str) -> Result<(), String>;
     async fn restart(&self, unit: &str) -> Result<(), String>;
+    /// Runs an app (a program on the machine itself) as the transient unit
+    /// `unit`, as the screen's user and on its screen. Returns once it's
+    /// running (its window comes later).
+    async fn start_app(&self, _unit: &str, _ws: &Workspace) -> Result<(), String> {
+        Err("this machine can't run apps".into())
+    }
+    /// A unit's state: "active", "inactive", "failed", ...
+    async fn unit_state(&self, _unit: &str) -> Result<String, String> {
+        Err("no systemd".into())
+    }
     /// Makes the units directory hold exactly these wad-*.container files
     /// (name, text), and reloads systemd when anything changed. True if it did.
     async fn install_units(&self, units: Vec<(String, String)>) -> Result<bool, String>;
@@ -80,8 +92,10 @@ pub trait Backend: Send + Sync + 'static {
 }
 
 /// The machine as wadd's config describes it: podman's socket, systemd (the
-/// system manager, or yours with --user) and where units go.
-pub async fn connect(daemon: &wad_config::Daemon, profile: wad_config::Profile) -> Result<Real, String> {
+/// system manager, or yours with --user), where units go and the screen
+/// apps draw on.
+pub async fn connect(config: &wad_config::Config, profile: wad_config::Profile) -> Result<Real, String> {
+    let daemon = &config.daemon;
     let systemd = match profile {
         wad_config::Profile::System => Systemd::system().await,
         wad_config::Profile::User => Systemd::user().await,
@@ -93,7 +107,55 @@ pub async fn connect(daemon: &wad_config::Daemon, profile: wad_config::Profile) 
         units_dir: daemon.units_dir.clone(),
         http: reqwest::Client::new(),
         start_timeout: Duration::from_secs(daemon.ready_timeout_s),
+        sway: config.display.enabled.then(|| wad_sway::Sway::new(crate::sway_locate(&config.display))),
+        as_screen_user: profile == wad_config::Profile::System,
     })
+}
+
+/// Whose screen it is, for an app the system manager runs (a user manager
+/// runs it as you): name, primary group and home, from the password database.
+pub struct ScreenUser {
+    pub name: String,
+    pub group: String,
+    pub home: String,
+}
+
+/// The transient unit an app runs in: its program, as the screen's user (on
+/// a machine), with what sway gives its own children: the runtime dir, the
+/// Wayland socket, the session bus, language and cursor. The workspace's
+/// own env comes last, so it wins.
+pub fn app_spec(ws: &Workspace, session: &wad_sway::Session, user: Option<&ScreenUser>) -> TransientSpec {
+    let runtime = session.runtime_dir.to_string_lossy().into_owned();
+    let mut environment = vec![format!("XDG_RUNTIME_DIR={runtime}"), format!("WAYLAND_DISPLAY={}", session.wayland_display)];
+    if let Some(u) = user {
+        environment.push(format!("HOME={}", u.home));
+        environment.push(format!("USER={}", u.name));
+        environment.push(format!("LOGNAME={}", u.name));
+    }
+    environment.extend(session.env.iter().map(|(k, v)| format!("{k}={v}")));
+    if !session.env.iter().any(|(k, _)| k == "DBUS_SESSION_BUS_ADDRESS") && session.runtime_dir.join("bus").exists() {
+        environment.push(format!("DBUS_SESSION_BUS_ADDRESS=unix:path={runtime}/bus"));
+    }
+    environment.extend(ws.env.iter().map(|(k, v)| format!("{k}={v}")));
+    TransientSpec {
+        description: format!("WadSpaces app: {}", ws.name),
+        exec: ws.exec.clone(),
+        user: user.map(|u| u.name.clone()),
+        group: user.map(|u| u.group.clone()),
+        working_directory: user.map(|u| u.home.clone()),
+        environment,
+    }
+}
+
+fn screen_user(uid: u32) -> Result<ScreenUser, String> {
+    use nix::unistd::{Gid, Group, Uid, User};
+    let u = User::from_uid(Uid::from_raw(uid)).ok().flatten().ok_or_else(|| format!("no user with uid {uid}"))?;
+    let group = Group::from_gid(Gid::from_raw(u.gid.as_raw()))
+        .ok()
+        .flatten()
+        .map(|g| g.name)
+        .unwrap_or_else(|| u.gid.to_string());
+    Ok(ScreenUser { name: u.name, group, home: u.dir.to_string_lossy().into_owned() })
 }
 
 /// No machine to manage (systemd unreachable, or a test): everything
@@ -164,6 +226,10 @@ pub struct Real {
     pub units_dir: PathBuf,
     pub http: reqwest::Client,
     pub start_timeout: Duration,
+    /// The screen apps draw on (none: apps can't run).
+    pub sway: Option<wad_sway::Sway>,
+    /// Apps run as the screen's user (the system manager), not as wadd.
+    pub as_screen_user: bool,
 }
 
 #[async_trait]
@@ -194,6 +260,18 @@ impl Backend for Real {
 
     async fn restart(&self, unit: &str) -> Result<(), String> {
         self.systemd.restart(unit, self.start_timeout).await.map_err(|e| e.to_string())
+    }
+
+    async fn start_app(&self, unit: &str, ws: &Workspace) -> Result<(), String> {
+        let sway = self.sway.as_ref().ok_or("there's no screen to show it on")?;
+        let session = sway.session().map_err(|e| e.to_string())?;
+        let user = if self.as_screen_user { Some(screen_user(session.uid)?) } else { None };
+        let spec = app_spec(ws, &session, user.as_ref());
+        self.systemd.start_transient(unit, &spec, self.start_timeout).await.map_err(|e| e.to_string())
+    }
+
+    async fn unit_state(&self, unit: &str) -> Result<String, String> {
+        self.systemd.active_state(unit).await.map_err(|e| e.to_string())
     }
 
     async fn install_units(&self, units: Vec<(String, String)>) -> Result<bool, String> {
@@ -308,5 +386,64 @@ impl Backend for Real {
         let path = root.filter(|r| r.is_dir()).unwrap_or_else(|| "/".into());
         let st = nix::sys::statvfs::statvfs(&path).ok()?;
         Some(st.blocks_available() as f64 * st.fragment_size() as f64 / 1e9)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_app_runs_as_the_screens_user_with_what_sway_gives_its_children() {
+        let ws = Workspace {
+            id: "terminal".into(),
+            name: "Terminal".into(),
+            kind: wad_proto::v1::Kind::App,
+            exec: vec!["/usr/bin/foot".into(), "--title".into(), "Terminal".into()],
+            image: String::new(),
+            display: wad_proto::v1::Display::Host,
+            port: None,
+            hotkey: None,
+            icon: None,
+            enabled: true,
+            autostart: false,
+            container_name: "wad-terminal".into(),
+            container_port: 3000,
+            env: vec![("TERM".into(), "foot".into())],
+            secrets: vec![],
+            volumes: vec![],
+            devices: vec![],
+            shm_size: None,
+            projects: vec![],
+            signins: vec![],
+        };
+        let session = wad_sway::Session {
+            uid: 1000,
+            runtime_dir: "/run/user/1000".into(),
+            wayland_display: "wayland-1".into(),
+            env: vec![("DBUS_SESSION_BUS_ADDRESS".into(), "unix:path=/tmp/dbus-x".into()), ("LANG".into(), "C.UTF-8".into())],
+        };
+        let wad = ScreenUser { name: "wad".into(), group: "wad".into(), home: "/var/home/wad".into() };
+        let spec = app_spec(&ws, &session, Some(&wad));
+        assert_eq!(spec.exec, ws.exec);
+        assert_eq!((spec.user.as_deref(), spec.group.as_deref()), (Some("wad"), Some("wad")));
+        assert_eq!(spec.working_directory.as_deref(), Some("/var/home/wad"));
+        assert_eq!(
+            spec.environment,
+            [
+                "XDG_RUNTIME_DIR=/run/user/1000",
+                "WAYLAND_DISPLAY=wayland-1",
+                "HOME=/var/home/wad",
+                "USER=wad",
+                "LOGNAME=wad",
+                "DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-x",
+                "LANG=C.UTF-8",
+                "TERM=foot",
+            ]
+        );
+        // Your user manager runs it as you (a laptop): no user, no HOME.
+        let mine = app_spec(&ws, &session, None);
+        assert_eq!((mine.user, mine.working_directory), (None, None));
+        assert!(!mine.environment.iter().any(|e| e.starts_with("HOME=")));
     }
 }

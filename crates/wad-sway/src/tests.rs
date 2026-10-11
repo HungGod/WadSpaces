@@ -112,3 +112,33 @@ fn screens_are_pinned_at_their_scale() {
     assert_eq!(scale_pins(&outputs), ["output eDP-1 scale 2", "output HDMI-A-1 scale 1.5"]);
     assert!(scale_pins(&json!(null)).is_empty());
 }
+
+#[test]
+fn the_session_comes_from_sways_environment() {
+    let env = b"HOME=/var/home/wad\0WAYLAND_DISPLAY=wayland-1\0A=b=c\0junk\0";
+    assert_eq!(
+        parse_environ(env),
+        [("HOME", "/var/home/wad"), ("WAYLAND_DISPLAY", "wayland-1"), ("A", "b=c")]
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+    );
+    assert_eq!(socket_ids(Path::new("/run/user/1000/sway-ipc.1000.4242.sock")), Some((1000, 4242)));
+    assert_eq!(socket_ids(Path::new("/run/user/1000/wayland-1")), None);
+
+    // This process stands in for sway: its socket names our pid.
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join(format!("sway-ipc.1000.{}.sock", std::process::id()));
+    std::fs::write(&socket, "").unwrap();
+    let s = Sway::new(Locate::RuntimeDir(dir.path().into())).session().unwrap();
+    assert_eq!((s.uid, s.runtime_dir.as_path()), (1000, dir.path()));
+    let ours = std::env::var("WAYLAND_DISPLAY").ok().filter(|d| !d.is_empty() && !d.contains('/'));
+    assert_eq!(s.wayland_display, ours.clone().unwrap_or_else(|| "wayland-1".into()));
+    // Not in its environment: the Wayland socket beside it.
+    if ours.is_none() {
+        let _l = std::os::unix::net::UnixListener::bind(dir.path().join("wayland-3")).unwrap();
+        std::fs::write(dir.path().join("wayland-3.lock"), "").unwrap();
+        let s = Sway::new(Locate::RuntimeDir(dir.path().into())).session().unwrap();
+        assert_eq!(s.wayland_display, "wayland-3");
+    }
+    assert!(s.env.iter().all(|(k, _)| PASSED_ON.contains(&k.as_str()) || k.starts_with("LC_")));
+    assert!(!s.env.iter().any(|(k, _)| k == "PATH" || k == "HOME"));
+}

@@ -7,9 +7,10 @@ The software that runs a WadSpaces machine, and the WadSpaces Client, the app us
 | `apps/wadd/` | wadd, the machine daemon: workspaces, projects, builds, the account link. Its API is `/v1` over `/run/wadd/wadd.sock`. |
 | `apps/client/` | The WadSpaces Client (the program is `client`, `/usr/bin/client` on a machine): the React UI. It's built for three targets (`src/lib/machine.ts`): the web portal (`online`, `wad-spaces.web.app`), the machine app (`machine`, inside Tauri: the kiosk's shell), and `offline` (development against a dev wadd). The Firebase function and Firestore rules are here too. |
 | `apps/client/src-tauri/` | The machine app: Tauri around the same React UI. Its Rust side holds the commands the UI calls (`src/gen/bindings.ts` is generated from them). |
-| `apps/hud/` | The HUD: the bar above every wadspace (Home, Wi-Fi, brightness and volume, power, the clock; it tucks away behind an arrow), and the switcher, Wi-Fi, power and clipboard-history (Super+V) overlays. |
-| `crates/` | Shared Rust crates:<br>• `wad-proto`: types shared by wadd, the app and the UI<br>• `wad-core`: designs and generators; also compiled to wasm for the UI<br>• `wad-config`<br>• `wad-store`: wadd's state files<br>• `wad-podman`, `wad-systemd`, `wad-sway`<br>• `wad-input`: the keyboard proxy<br>• `wad-git`: project clones and fast-forwards<br>• `wad-net`: Wi-Fi through NetworkManager<br>• `wad-github`: device-flow sign-in<br>• `wad-firebase`: Firestore from Rust<br>• `wad-clip`: one clipboard for the machine (each wadspace's `wadspaces-clipboard` bridge, and the HUD's history) |
-| `host/` | The machine's OS image (Fedora bootc, sway, WadSpaces Client as the shell), and `host/build.sh` to build it and write it to a drive. `CUTOVER.md` is the checklist for the cutover from the Python wadd. |
+| `apps/hud/` | The HUD: the bar above every wadspace (Home, Wi-Fi, brightness and volume, power, the clock; it tucks away behind an arrow), and the switcher, Wi-Fi, power and clipboard-history (Super+V) overlays. WadNotes is built into it (`src/notes/`): notes and tasks for the wadspace on screen (or the machine's own, "Default": WadSpaces Client, WadTerminal, WadBrowser), a calendar shared by all of them, and reminders. They sit side by side at the top right; the bar's WadNotes button puts them away and brings them back, and its menu (hover, or a long press) turns each on or off and picks the notespace. |
+| `apps/wadbrowser/` | WadBrowser, the WadSpaces web browser (Tauri chrome, WebKitGTK tabs). It's in the lean base image, and on the machine itself as an app. |
+| `crates/` | Shared Rust crates:<br>• `wad-proto`: types shared by wadd, the app and the UI<br>• `wad-core`: designs and generators; also compiled to wasm for the UI<br>• `wad-config`<br>• `wad-store`: wadd's state files<br>• `wad-podman`, `wad-systemd`, `wad-sway`<br>• `wad-input`: the keyboard proxy<br>• `wad-git`: project clones and fast-forwards<br>• `wad-net`: Wi-Fi through NetworkManager<br>• `wad-github`: GitHub's REST calls (whose token, repos, new repos)<br>• `wad-firebase`: Firestore from Rust<br>• `wad-clip`: one clipboard for the machine (each wadspace's `wadspaces-clipboard` bridge, and the HUD's history)<br>• `wad-notes`: WadNotes' files: markdown notes and tasks per wadspace, the calendar's events, reminders and each wadspace's colour |
+| `host/` | The machine's OS image (Fedora bootc, sway, WadSpaces Client as the shell), and `host/build.sh` to build it and write it to a drive. `CUTOVER.md` is the checklist for the cutover from the Python wadd. Two apps run on the machine itself (`usr/lib/wadspaces/workspaces.d/{terminal,browser}.toml`: workspaces of kind `app`): WadTerminal (foot) and WadBrowser. wadd opens and closes them like wadspaces, each in a transient unit `wad-<id>.service` as the kiosk user, full screen and on Super+Tab, but with no Super+number. |
 | `images/` | The image workspaces are made from: `base`, the lean desktop every design builds on. `images/build.sh` builds it. |
 | `fixtures/` | What every renderer must reproduce:<br>• unit files (`quadlet/`)<br>• the core's goldens (`core/`)<br>• the hand-written workspaces from before the Builder (`presets/`)<br>• the old Python wadd's config cases (`python-state/`) |
 
@@ -53,14 +54,14 @@ The trial scripts use their own state under `.build/`, and need `systemctl --use
 apps/wadd/dev/try.sh           # workspaces: cold and warm start, stop, restart, download progress
 apps/wadd/dev/try-view.sh      # the screen: a headless sway with the machine's rules and a real lean
                                # workspace's window: switching, Super+Tab, focus sessions
+apps/wadd/dev/try-apps.sh      # the machine's own apps (foot, WadBrowser) in the headless sway:
+                               # full screen, Super+Tab, restart, stop, and exiting by themselves
 apps/wadd/dev/try-projects.sh  # projects: a GitHub clone, a folder and a loop-device "stick",
                                # launched together into a workspace
 apps/wadd/dev/try-build.sh     # builds: a design built on the lean base, installed, and opened
                                # in the headless sway
 apps/wadd/dev/try-cloud.sh     # the account link, against the Firebase emulators (real rules and
                                # enrollMachine): link, heartbeat, commands, project and secret sync
-apps/wadd/dev/try-github.sh    # GitHub for real: whose token podman has, and your repos
-                               # (--sign-in: the device sign-in first; it replaces that token)
 apps/wadd/dev/try-network.sh   # NetworkManager for real: status and networks in range
                                # (--join SSID / --forget SSID change things)
 apps/wadd/dev/try-app.sh       # the machine app's spike against `wadd serve --user`
@@ -68,7 +69,9 @@ sudo target/debug/wadd keys    # the keyboard proxy for 20 s (prints what Super 
 ```
 
 A few scripts need extra pieces:
-- `try-view.sh` and `try-build.sh` need sway. Unpacked under `.build/sway` is enough (`dev/sway.sh` says how).
+- `try-view.sh`, `try-build.sh` and `try-apps.sh` need sway. Unpacked under `.build/sway` is enough (`dev/sway.sh` says how). `try-apps.sh` also needs foot (unpacked the same way) and WadBrowser built (`cargo build --profile wadbrowser -p wadbrowser`).
+
+The HUD's surfaces, WadNotes' included, render to PNGs with `apps/hud/snapshot.sh` (made-up notes, tasks and events). `apps/hud/try-wadd.sh` runs the HUD against a real wadd in the headless sway and screenshots WadNotes following the screen.
 - `try-build.sh` needs the base image: `images/build.sh`.
 
 ## History

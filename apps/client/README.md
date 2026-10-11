@@ -10,7 +10,7 @@ One React + Vite + TypeScript + Tailwind codebase, built two ways by
 |---|---|---|
 | Runs | on a WadSpaces machine, as a window of its own (being rebuilt with Tauri; for now `npm run dev` only) | in any browser, on Firebase Hosting |
 | Talks to | `wadd` on `http://127.0.0.1:8080` (`src/data/local`) | Firebase and your machines' cloud relay (`src/data/cloud`) |
-| Account | none: "you" are the machine | email/password or Google, plus a username |
+| Account | none: "you" are the machine | GitHub, plus a username (your GitHub login when it's free) |
 | Builds | on the machine with podman | not yet: build in the machine app |
 | Updates | with the host image (the USB stick) | redeploy Hosting |
 
@@ -29,7 +29,7 @@ src/core/          shared with Cloud Functions: no React, DOM or import.meta.env
   generator/       Dockerfile, root/ overlay, compose, quadlet (= wadd's, byte for byte)
   presets.ts       the six hand-written workspaces from before the Builder
 src/data/          backend.ts + local/ (wadd) + cloud/ (Firebase, relay)
-src/pages/         Home, Wadspaces, Launch, Manager, Login/Signup/Welcome
+src/pages/         Home, Wadspaces, Launch, Manager, Login/Welcome
 src/components/    Shell, Builder, the desktop editor, cards, dialogs
 functions/         Cloud Functions
 infra/             Google Cloud setup (see infra/README.md)
@@ -80,6 +80,13 @@ functions' service account; see `infra/README.md`. Uploaded wallpapers and
 icons are downscaled in the browser and kept in the wadspace doc as data URLs
 (at most 400 KB each), so there's no Storage bucket.
 
+Sign-in is GitHub only (Firebase's GitHub provider, with the OAuth App in
+`host/usr/lib/wadspaces/github.toml`). The web app uses Firebase's popup. The
+machine app opens `/machine-signin.html` from Hosting in a window of its own
+(`src/signin`, `src-tauri/src/github.rs`): the GitHub token it hands back signs
+the app in and becomes the machine's `github_token`. So Hosting has to be
+deployed before a machine can sign in.
+
 Machines link to an account with a one-time code: **Manager → Add machine**
 online, then **Manager → Link to your account** in the machine app.
 wadd (`../wadd/src/cloud.rs`) then heartbeats every 30 s and runs the
@@ -115,6 +122,17 @@ each machine with its `github_token` secret), folders on one machine, or
 drives, which wadd mounts at `~/Desktop/<folder>` when it launches the
 wadspace (`/api/launches`); the bundle's README names the defaults and its
 compose file lists them as mounts to fill in by hand.
+
+Sign-ins aren't in it either. An app on the desktop can use a saved sign-in
+(right-click it in the Builder, Sign-in…): a folder on the machine
+(`/var/lib/wadspaces-signins/<id>`) that wadd mounts into every wadspace
+whose apps use it, so signing in once covers all of them. A web sign-in is a
+WadBrowser profile, for any web app; an app's keeps the files its sign-in is
+in (`crates/wad-core/src/signins.rs` knows VS Code's, Cursor's, Obsidian's
+and Claude Code's; for others you name them), which the image's
+`wadspaces-signins` links into the home folder at each start. They're
+applied at the wadspace's next start, without a rebuild, and kept together
+on the Secrets page with the machine's tokens.
 
 Build it with `podman build -t localhost/wadspaces-<id>:latest .` in the
 folder, with the base image built (`../../images/build.sh --only base`).

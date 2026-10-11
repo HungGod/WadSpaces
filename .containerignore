@@ -9,6 +9,7 @@
 !.build/wadd
 !.build/client-app
 !.build/hud
+!.build/wadbrowser
 !.build/secrets
 !.build/ssh
 **/__pycache__

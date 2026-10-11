@@ -8,10 +8,12 @@
 #      pushing from inside; the image never fetches project files itself)
 #   2. sets up the projects wadd mounted under ~/Desktop (wadspaces-projects):
 #      git trust, their one-time setup command, a launcher each
-#   3. seeds ~/Desktop with the launchers named in the desktop-entries lists
-#   4. hands the paths in the chown lists to abc
-#   5. rebuilds the labwc right-click menu from those launchers
-#   6. nudges the Selkies panel to rescan
+#   3. links apps' sign-in files to the saved sign-ins wadd mounted
+#      (wadspaces-signins)
+#   4. seeds ~/Desktop with the launchers named in the desktop-entries lists
+#   5. hands the paths in the chown lists to abc
+#   6. rebuilds the labwc right-click menu from those launchers
+#   7. nudges the Selkies panel to rescan
 #
 # Projects are folders on the host, bind-mounted read-write by wadd at
 # ~/Desktop/<name> and listed in /run/wadspaces-extra/projects.json. They are
@@ -91,6 +93,9 @@ asabc git config --global credential.https://github.com.username "x-access-token
 
 # --------------------------------------------------------------- projects
 /usr/local/bin/wadspaces-projects "${DESKTOP_DIR}" "${STATE_DIR}"
+
+# ------------------------------------------------------------ saved sign-ins
+/usr/local/bin/wadspaces-signins /config "${STATE_DIR}"
 
 # ---------------------------------------------------------- desktop icons
 # selkies-desktop draws an icon for every .desktop file in $HOME/Desktop. The

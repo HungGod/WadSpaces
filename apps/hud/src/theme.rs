@@ -186,10 +186,110 @@ button.forget:hover { color: @fg; background: @surface3; }
 .item .icon { background: @surface3; border-radius: 16px; min-width: 64px; min-height: 64px; font-size: 26px; font-weight: 700; color: @fg; }
 .item .name { color: @fg; font-size: 13px; font-weight: 500; margin-top: 8px; }
 .item .state { color: @faint; font-size: 11px; }
+
+/* WadNotes (notes/): the panel on the right, its cards, and reminders. */
+.pill.on { background: @accent_soft; border-color: alpha(@accent, 0.5); }
+.pill.on image { color: @accent; }
+.notes-card {
+  background: alpha(@surface, 0.97); color: @fg; border: 1px solid @line_strong;
+  border-radius: 20px; padding: 12px 14px; box-shadow: 0 16px 48px -20px rgba(3, 2, 8, 0.6);
+}
+.notes-card .heading { font-size: 14px; font-weight: 700; color: @fg; }
+.notes-card .count { color: @faint; font-size: 12px; font-feature-settings: "tnum"; }
+.scope-tag { color: @muted; font-size: 12px; }
+.scope-tag.looking { color: @accent; }
+.card.notes-menu { padding: 16px; border-radius: 20px; }
+button.flat-icon {
+  background: transparent; background-image: none; border: none; box-shadow: none;
+  color: @muted; padding: 4px 6px; min-height: 0; min-width: 0; border-radius: 8px;
+}
+button.flat-icon:hover { background: @surface2; color: @fg; }
+button.flat-icon image { color: inherit; }
+button.scope-chip {
+  background: @surface2; background-image: none; color: @fg; border: 1px solid @line; box-shadow: none;
+  border-radius: 999px; padding: 3px 10px; min-height: 0; font-size: 13px; font-weight: 500;
+}
+button.scope-chip:hover { background: @surface3; }
+button.link {
+  background: transparent; background-image: none; border: none; box-shadow: none;
+  color: @muted; padding: 0 2px; min-height: 0; font-size: 12px;
+}
+button.link:hover { color: @fg; }
+button.row {
+  background: transparent; background-image: none; border: none; box-shadow: none;
+  border-radius: 12px; padding: 7px 8px; min-height: 0; color: @fg;
+}
+button.row:hover { background: @surface2; }
+button.row.picked { background: @accent_soft; }
+.row-title { font-size: 13px; font-weight: 500; color: @fg; }
+.row-sub { font-size: 11px; color: @faint; }
+.row-title.done { color: @faint; }
+.key { font-family: monospace; font-size: 11px; color: @faint; }
+.overdue { color: @danger; }
+.empty-note { color: @faint; font-size: 12px; padding: 8px 4px; }
+button.status {
+  background-image: none; box-shadow: none; border: 1px solid @line; border-radius: 999px;
+  padding: 1px 8px; min-height: 0; font-size: 11px; font-weight: 600;
+  background: @surface3; color: @muted;
+}
+button.status.doing { background: @accent_soft; color: @accent; border-color: alpha(@accent, 0.4); }
+button.status.done { background: transparent; color: @faint; }
+.prio { font-size: 11px; font-weight: 700; }
+.prio.high { color: @danger; }
+.prio.medium { color: @warn; }
+.prio.low { color: @faint; }
+button.chip {
+  background: @surface2; background-image: none; color: @muted; border: 1px solid @line; box-shadow: none;
+  border-radius: 999px; padding: 2px 10px; min-height: 0; font-size: 12px; font-weight: 500;
+}
+button.chip:hover { color: @fg; background: @surface3; }
+button.chip.on { background: @accent; color: @accent_fg; border-color: @accent; }
+.field-label { color: @faint; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; }
+entry.title-entry { font-size: 15px; font-weight: 600; }
+textview.md, textview.md text { background: @bg; color: @fg; font-family: monospace; font-size: 13px; }
+textview.md { border: 1px solid @line_strong; border-radius: 10px; padding: 8px; }
+.preview { font-size: 13px; color: @fg; }
+.weekday { color: @faint; font-size: 11px; font-weight: 600; }
+button.day {
+  background: transparent; background-image: none; border: 1px solid transparent; box-shadow: none;
+  border-radius: 10px; padding: 2px 0; min-height: 0; min-width: 40px; color: @fg;
+}
+button.day:hover { background: @surface2; }
+button.day.other { color: @faint; }
+button.day.today { border-color: alpha(@accent, 0.6); }
+button.day.selected { background: @accent_soft; }
+button.day .num { font-size: 12px; font-feature-settings: "tnum"; }
+.dots { font-size: 7px; min-height: 8px; }
+.stripe { min-width: 4px; border-radius: 2px; }
+.when { color: @muted; font-size: 11px; font-feature-settings: "tnum"; }
+.toast-row { background: @surface3; border-radius: 12px; padding: 6px 6px 6px 12px; }
+.card.reminder { padding: 14px 16px; border-radius: 20px; }
+calendar { background: @bg; color: @fg; border: 1px solid @line; border-radius: 12px; padding: 4px; }
+calendar > header { border: none; }
+calendar > header > button { background: transparent; background-image: none; border: none; box-shadow: none; color: @muted; }
+calendar > grid > label.day-number { padding: 4px; border-radius: 8px; }
+calendar > grid > label.day-number.other-month { color: @faint; }
+calendar > grid > label.day-number:selected { background: @accent; color: @accent_fg; }
+spinbutton { background: @bg; color: @fg; border: 1px solid @line_strong; border-radius: 10px; }
+spinbutton button { background: transparent; background-image: none; border: none; box-shadow: none; color: @muted; }
+switch { background: @surface3; border: 1px solid @line_strong; border-radius: 999px; }
+switch:checked { background: @accent; }
+switch slider { background: @fg; border-radius: 999px; box-shadow: none; border: none; }
+switch:checked slider { background: @accent_fg; }
 "#;
 
+/// Each wadspace's colour (wad_notes::PALETTE) as classes: `.scope-N` on a
+/// dot (●) colours its text, on a stripe its background.
+fn scope_rules() -> String {
+    wad_notes::PALETTE
+        .iter()
+        .enumerate()
+        .map(|(i, (_, hex))| format!(".dot.scope-{i} {{ color: {hex}; }}\n.stripe.scope-{i} {{ background: {hex}; }}\n"))
+        .collect()
+}
+
 pub fn css(t: Theme) -> String {
-    format!("{}{RULES}", palette(t))
+    format!("{}{RULES}{}", palette(t), scope_rules())
 }
 
 #[cfg(test)]
@@ -223,6 +323,7 @@ mod tests {
             ] {
                 assert!(css.contains(&format!("@define-color {name} ")), "{t:?} lacks {name}");
             }
+            assert!(css.contains(".dot.scope-11 { color: #10b981; }"), "the wadspaces' colours");
         }
     }
 }

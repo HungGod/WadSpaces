@@ -24,9 +24,6 @@ export const hasLocal = import.meta.env.VITE_TARGET !== "online";
 /** A browser that opens links in new tabs. The machine app opens none: show the address instead. */
 export const canOpenLinks = import.meta.env.VITE_TARGET === "online";
 
-/** Sign in with Google: only in a browser (its popup needs one). */
-export const hasGoogleSignIn = import.meta.env.VITE_TARGET === "online";
-
 /** The machine you're on, in machine lists and as a launch target. */
 export const THIS_MACHINE = "this-machine";
 

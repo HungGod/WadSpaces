@@ -79,6 +79,7 @@ async fn setup_in(dir: Arc<tempfile::TempDir>, list: Vec<Workspace>, fake: Fake)
             ready_timeout: Duration::from_secs(30),
             max_parallel_pulls: 3,
             projects_dir: "/p".into(),
+            signins_dir: "/s".into(),
             state_dir: dir.path().into(),
             rootless_uid: Some(1000),
             poll: Duration::from_secs(1),
@@ -200,18 +201,32 @@ async fn the_switcher_starts_on_the_view_before_and_commits() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn cancel_and_stopped_ones_last() {
+async fn only_what_runs_is_on_the_switcher() {
     let s = abc().await;
     s.view.session_begin(&["a".into(), "b".into()], None).unwrap();
     settle(&s).await;
     s.view.stop("b").await.unwrap();
     s.view.switch("a").unwrap();
     settle(&s).await;
-    let its = s.view.carousel_items();
-    assert_eq!(its.last().map(|i| (i.view.clone(), i.running)), Some((wsv("b"), false)));
+    // A stopped pick drops out; one that runs without being picked is there.
+    assert_eq!(items(&s), [wsv("a"), V::Home]);
+    s.reg.start("c").unwrap();
+    settle(&s).await;
+    assert_eq!(sorted(items(&s)), sorted(vec![wsv("a"), V::Home, wsv("c")]));
     s.view.carousel_step(false); // Shift+Tab: from the end
     s.view.carousel_cancel();
     assert_eq!(s.view.current(), wsv("a"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_focus_session_offers_only_its_running_picks() {
+    let s = abc().await;
+    s.view.session_begin(&["a".into(), "b".into()], Some(25)).unwrap();
+    settle(&s).await;
+    s.reg.start("c").unwrap(); // running, but not a pick
+    s.view.stop("b").await.unwrap();
+    settle(&s).await;
+    assert_eq!(items(&s), [wsv("a")]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -480,4 +495,114 @@ async fn windows_are_matched_to_workspaces() {
         m.labels.insert("c0ffee".into(), "n".into());
     });
     assert_eq!(s.view.resolve(Owner::Container("c0ffee".into())).await.as_deref(), Some("n"));
+}
+
+// ------------------------------------------------------------------- apps
+async fn with_app() -> Setup {
+    let mut t = common::app("t", "/usr/bin/foot");
+    t.name = "Terminal".into();
+    let s = setup(vec![t, native("n")]).await;
+    s.reg.windows().set_available(true);
+    s
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_app_runs_in_a_transient_unit_and_shows_like_a_workspace() {
+    let s = with_app().await;
+    s.view.switch("t").unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(s.reg.state("t").unwrap().phase, Phase::Waiting);
+    window(&s, "t", true);
+    settle(&s).await;
+    s.reg.settled("t").await;
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let st = s.reg.state("t").unwrap();
+    assert_eq!((st.phase, st.container.as_str(), st.image_present), (Phase::Ready, "running", Some(true)));
+    assert_eq!(s.view.current(), wsv("t"));
+    assert_eq!(s.screen.last().as_deref(), Some("native:t"));
+    // No image, no pull, no quadlet: just the program.
+    assert_eq!(s.fake.calls(), ["app wad-t.service /usr/bin/foot"]);
+    assert!(s.fake.0.lock().unwrap().units.iter().all(|(n, _)| n != "wad-t.container"));
+    // On Super+Tab while it runs; never on Super+number (no hotkey).
+    assert!(items(&s).contains(&wsv("t")));
+    assert!(!s.view.bindings(&wad_config::Keys::default()).values().any(|a| a == "switch:t"));
+    // Nothing to download.
+    s.reg.download("t").await.unwrap();
+    assert_eq!(s.fake.calls().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_app_whose_window_closes_is_stopped_and_leaves_the_screen() {
+    let s = with_app().await;
+    s.view.switch("t").unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    window(&s, "t", true);
+    settle(&s).await;
+    s.reg.settled("t").await;
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    assert_eq!(s.view.current(), wsv("t"));
+    // `exit` in the terminal: its last window goes, and its unit with it
+    // (just as wadd stops it).
+    s.fake.with(|m| m.app_gone_at_stop = Some("wad-t.service".into()));
+    window(&s, "t", false);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let st = s.reg.state("t").unwrap();
+    assert_eq!((st.phase, st.container.as_str()), (Phase::Idle, "exited"));
+    assert_eq!(s.view.current(), V::Home);
+    assert!(s.fake.0.lock().unwrap().apps.is_empty());
+    assert!(!items(&s).contains(&wsv("t")));
+    // It opens again: a fresh unit.
+    s.view.switch("t").unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    window(&s, "t", true);
+    settle(&s).await;
+    s.reg.settled("t").await;
+    assert_eq!(s.reg.state("t").unwrap().phase, Phase::Ready);
+    assert_eq!(s.fake.calls().iter().filter(|c| c.starts_with("app ")).count(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_app_stops_and_restarts_without_closing_itself() {
+    let s = with_app().await;
+    s.reg.start("t").unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    window(&s, "t", true);
+    s.reg.settled("t").await;
+    // Restart: the unit is stopped and made afresh; its window going in
+    // between is the restart's, not a reason to stop it.
+    let restart = s.view.restart("t");
+    let close = async {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        window(&s, "t", false);
+    };
+    let (r, ()) = tokio::join!(restart, close);
+    r.unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    window(&s, "t", true);
+    s.reg.settled("t").await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(s.reg.state("t").unwrap().phase, Phase::Ready);
+    let apps = s.fake.0.lock().unwrap().apps.len();
+    assert_eq!(apps, 1, "{:?} {:?}", s.fake.calls(), s.reg.state("t"));
+    // Stop: the unit goes; stopping one that already ended is fine too.
+    s.view.stop("t").await.unwrap();
+    assert!(s.fake.0.lock().unwrap().apps.is_empty());
+    s.view.stop("t").await.unwrap();
+    assert_eq!(s.reg.state("t").unwrap().phase, Phase::Idle);
+    // reconcile follows the unit, podman or not.
+    s.fake.with(|m| {
+        m.apps.insert("wad-t.service".into(), vec!["/usr/bin/foot".into()]);
+    });
+    s.reg.reconcile().await;
+    assert_eq!(s.reg.state("t").unwrap().container, "running");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_app_can_be_a_focus_pick_and_is_locked_out_otherwise() {
+    let s = with_app().await;
+    window(&s, "n", true);
+    s.view.session_begin(&["n".into()], Some(30)).unwrap();
+    settle(&s).await;
+    let e = s.view.switch("t").unwrap_err();
+    assert_eq!(e.code, ErrorCode::Conflict);
 }

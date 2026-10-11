@@ -319,6 +319,7 @@ mod tests {
         let icons = cfg.daemon.state_dir.join("icons");
         std::fs::create_dir_all(&icons).unwrap();
         std::fs::write(icons.join("w.png"), b"\x89PNG-ish").unwrap();
+        std::fs::write(icons.join("w-dark.png"), b"\x89PNG-dark").unwrap();
         let ws = serde_json::json!([{"id": "writing", "name": "Writing", "image": "i", "display": "host", "port": null,
             "hotkey": 1, "icon": icons.join("w.png"), "enabled": true, "autostart": false, "containerName": "wad-writing",
             "containerPort": 3000, "env": [], "secrets": [], "volumes": [], "devices": [], "shmSize": null, "projects": []}]);
@@ -349,24 +350,28 @@ mod tests {
             w.home().unwrap();
             assert_eq!(w.bytes("/v1/workspaces/writing/icon").as_deref(), Some(&b"\x89PNG-ish"[..]));
             assert_eq!(w.bytes("/v1/workspaces/nope/icon"), None);
+            // A theme's own variant when there's one beside it, else the icon.
+            assert_eq!(w.bytes("/v1/workspaces/writing/icon?theme=dark").as_deref(), Some(&b"\x89PNG-dark"[..]));
+            assert_eq!(w.bytes("/v1/workspaces/writing/icon?theme=light").as_deref(), Some(&b"\x89PNG-ish"[..]));
+            assert_eq!(w.bytes("/v1/workspaces/writing/icon?theme=../x").as_deref(), Some(&b"\x89PNG-ish"[..]));
             // The laptop's own screen is never set from a test: only read.
             w.brightness().unwrap();
             // No NetworkManager here: wadd says so, in words.
             let e = w.wifi_scan().unwrap_err();
             assert!(!e.is_empty() && !e.starts_with("wadd answered"), "{e}");
-            // A free session with Writing: the switcher offers it and WadSpaces Client.
+            // A free session with Writing, which can't run here (no podman):
+            // Super+Tab only offers what runs, so with WadSpaces Client alone
+            // the switcher doesn't open.
             w.post("/v1/session", json!({"workspaces": ["writing"], "minutes": null})).unwrap();
             w.post("/v1/carousel/next", json!({})).unwrap();
             let mut names = vec![];
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
             while std::time::Instant::now() < deadline {
                 match rx.try_recv() {
                     Ok(Incoming::Event(name, data)) => {
                         if name == "carousel" {
                             let c: crate::model::Carousel = serde_json::from_value(data.clone()).unwrap();
-                            if c.open {
-                                return (names, c);
-                            }
+                            assert!(!c.open, "a switcher with nothing to switch to: {c:?}");
                         }
                         names.push(format!("{name} {data}"));
                     }
@@ -374,15 +379,14 @@ mod tests {
                     Err(_) => std::thread::sleep(Duration::from_millis(20)),
                 }
             }
-            panic!("no open switcher; events: {names:#?}");
+            names
         })
         .await
         .unwrap();
-        let (names, carousel) = got;
-        assert!(names.iter().any(|n| n.starts_with("session ")), "{names:?}");
-        let views: Vec<&str> = carousel.items.iter().map(|i| i.view.as_str()).collect();
-        assert_eq!(views, ["home", "writing"]);
-        assert_eq!(carousel.items[1].icon.as_deref(), Some("/v1/workspaces/writing/icon"));
+        assert!(got.iter().any(|n| n.starts_with("session ")), "{got:?}");
+        // The view and the workspaces come too (WadNotes follows them).
+        assert!(got.iter().any(|n| n.starts_with("view ")), "{got:?}");
+        assert!(got.iter().any(|n| n.starts_with("workspaces ")), "{got:?}");
         drop(stop);
     }
 }

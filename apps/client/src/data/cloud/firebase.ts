@@ -3,8 +3,9 @@
 // local emulator suite (`firebase emulators:start`).
 //
 // The machine app (WebKitGTK, tauri://localhost) keeps the sign-in in
-// IndexedDB and loads no popup/redirect helper: it signs in with email and
-// password only, and Google's helper script is outside its CSP. Firestore
+// IndexedDB until the next boot (machine/boot.ts) and loads no popup/redirect
+// helper (Google's helper script is outside its CSP): it signs in with a GitHub token from its Rust side
+// (auth.ts signInGithub). Firestore
 // keeps a persistent cache there, so the app starts with your designs even
 // when the machine boots offline.
 import { initializeApp } from "firebase/app";
