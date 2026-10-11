@@ -16,7 +16,8 @@
 //! ```
 //!
 //! One process per user holds every window (`ipc.rs`): later launches hand
-//! their request over and exit.
+//! their request over and exit. `--instance` makes a WadBrowser of its own
+//! (instance.rs), and `--setup` opens what a WadSpaces setup asks for.
 
 mod actions;
 mod app_id;
@@ -26,6 +27,7 @@ mod commands;
 mod config;
 mod downloads;
 mod gpu;
+mod instance;
 mod ipc;
 mod keys;
 mod menu;
@@ -75,6 +77,7 @@ pub fn run() {
         return;
     }
     req.activation_token = std::env::var("XDG_ACTIVATION_TOKEN").or_else(|_| std::env::var("DESKTOP_STARTUP_ID")).ok();
+    instance::init(req.instance.clone(), req.setup.as_ref().is_some_and(|s| s.ephemeral));
 
     #[cfg(feature = "spike")]
     let spiking = std::env::var_os("WADBROWSER_SPIKE_DIR").is_some();
@@ -132,7 +135,7 @@ pub fn run() {
                 });
             }
             let restored = session::restore(&handle);
-            if !restored || !req.urls.is_empty() || req.app_id.is_some() {
+            if !restored || !req.urls.is_empty() || req.app_id.is_some() || req.setup.is_some() {
                 route(&handle, req.clone());
             }
             browser::start_hibernation();
@@ -152,6 +155,11 @@ fn route(app: &AppHandle, req: Request) {
     // Launchers' unexpanded field codes (%U) aren't addresses.
     let urls: Vec<String> = req.urls.iter().filter(|u| !u.starts_with('%')).map(|u| urlbar::normalize(u)).collect();
     let token = req.activation_token.as_deref();
+
+    if let Some(setup) = &req.setup {
+        open_setup(app, setup, token);
+        return;
+    }
 
     if let Some(app_id) = &req.app_id {
         if !req.new_window
@@ -197,6 +205,38 @@ fn route(app: &AppHandle, req: Request) {
         return;
     }
     open(app, Opts { mode, profile: req.profile.clone(), ..Default::default() }, urls);
+}
+
+/// A setup's windows: each web app in its own (with its saved sign-in, or a
+/// profile that keeps nothing), or one main window when it has none. Those
+/// already open are brought up rather than opened again.
+fn open_setup(app: &AppHandle, setup: &cli::Setup, token: Option<&str>) {
+    let mode = if setup.focus() { Mode::Focus } else { Mode::Full };
+    if setup.webapps.is_empty() {
+        match browser::recent(|b| b.opts.mode == mode) {
+            Some(label) => {
+                browser::with(&label, |b| b.present(token));
+            }
+            None => open(app, Opts { mode, ..Default::default() }, vec![]),
+        }
+        return;
+    }
+    for w in &setup.webapps {
+        let app_id = format!("wadspaces-webapp-{}", w.id);
+        if let Some(label) = browser::recent(|b| b.opts.app_id.as_deref() == Some(app_id.as_str())) {
+            browser::with(&label, |b| b.present(token));
+            continue;
+        }
+        let opts = Opts {
+            mode: Mode::App,
+            app_id: Some(app_id),
+            name: Some(w.name.clone()),
+            start: Some(urlbar::normalize(&w.url)),
+            icon: None,
+            profile: Some(profile::for_signin(setup.signins.get(&w.id).map(String::as_str), &w.id)),
+        };
+        open(app, opts, vec![]);
+    }
 }
 
 fn open(app: &AppHandle, opts: Opts, urls: Vec<String>) {

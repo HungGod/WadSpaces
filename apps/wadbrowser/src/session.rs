@@ -1,7 +1,8 @@
 //! The open windows and tabs, written down as they change, so a browser that
 //! crashed (or a container stopped under it) comes back as it was. A browser
 //! that quits normally (its last window closed) throws the file away, so the
-//! next start is fresh.
+//! next start is fresh. An instance keeps its own (instance.rs); an
+//! ephemeral one keeps none.
 
 use crate::browser::{self, First, Mode, Opts, Tab};
 use gtk::glib;
@@ -40,16 +41,12 @@ thread_local! {
 }
 
 fn file() -> PathBuf {
-    let base = match std::env::var_os("XDG_STATE_HOME") {
-        Some(d) if !d.is_empty() => PathBuf::from(d),
-        _ => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"),
-    };
-    base.join("wadbrowser/session.json")
+    crate::instance::under(crate::instance::xdg("XDG_STATE_HOME", ".local/state")).join("session.json")
 }
 
 /// Writes the session down in a couple of seconds (changes come in bursts).
 pub fn save_soon() {
-    if DONE.get() || QUEUED.replace(true) {
+    if crate::instance::ephemeral() || DONE.get() || QUEUED.replace(true) {
         return;
     }
     glib::timeout_add_local_once(Duration::from_secs(2), || {
@@ -109,6 +106,9 @@ pub fn clear() {
 /// Reopens what a crashed browser had open; whether there was anything.
 /// Only each window's shown tab loads now; the rest wake when looked at.
 pub fn restore(app: &AppHandle) -> bool {
+    if crate::instance::ephemeral() {
+        return false;
+    }
     let Some(saved) = std::fs::read(file()).ok().and_then(|b| serde_json::from_slice::<Saved>(&b).ok()) else {
         return false;
     };
@@ -117,7 +117,7 @@ pub fn restore(app: &AppHandle) -> bool {
         // A web app's sign-in is whatever this wadspace gives it now.
         let profile = match w.app_id.as_deref().and_then(crate::profile::for_app) {
             Some(p) => Some(p),
-            None => w.profile.filter(|p| !crate::profile::is_signin(p)),
+            None => w.profile.filter(|p| !crate::profile::is_signin(p) || crate::profile::has(p)),
         };
         let opts = Opts { mode: w.mode, app_id: w.app_id, name: w.name, start: w.start, icon: w.icon, profile };
         let tabs: Vec<Tab> = w

@@ -9,6 +9,12 @@
 //! covers all of them). wadd lists them in /run/wadspaces-extra/signins.json;
 //! such an app's windows get profile `signin-<id>`, whose data is that
 //! folder. Its cache stays this wadspace's own.
+//!
+//! A profile named `ephemeral-…` keeps nothing at all ("Don't save" in a
+//! WadBrowser setup): its cookies and storage live in memory and go when its
+//! last window closes. In an ephemeral instance (a throwaway run) every
+//! profile is. An instance's other profiles keep their data apart from the
+//! user's own WadBrowser (instance.rs).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -21,6 +27,7 @@ use webkit2gtk::{
 
 pub const DEFAULT: &str = "default";
 const SIGNIN: &str = "signin-";
+const EPHEMERAL: &str = "ephemeral-";
 const SIGNINS: &str = "/run/wadspaces-extra/signins.json";
 
 /// A saved web sign-in this wadspace mounts: its id, folder and web apps.
@@ -68,6 +75,36 @@ pub fn is_signin(name: &str) -> bool {
     name.starts_with(SIGNIN)
 }
 
+/// Whether a sign-in's profile can be used here (it's in the manifest).
+pub fn has(name: &str) -> bool {
+    name.strip_prefix(SIGNIN).is_some_and(|id| signins().iter().any(|s| s.id == id))
+}
+
+/// The profile of saved sign-in `id`, when it's here; else one that keeps nothing.
+pub fn for_signin(id: Option<&str>, app: &str) -> String {
+    match id {
+        Some(id) if has(&format!("{SIGNIN}{id}")) => format!("{SIGNIN}{id}"),
+        Some(id) => {
+            tracing::warn!(id, app, "a sign-in that isn't here: this window keeps nothing");
+            format!("{EPHEMERAL}{app}")
+        }
+        None => format!("{EPHEMERAL}{app}"),
+    }
+}
+
+/// Whether a profile keeps nothing.
+pub fn is_ephemeral(name: &str) -> bool {
+    name.starts_with(EPHEMERAL) || (crate::instance::ephemeral() && !is_signin(name))
+}
+
+/// Lets an ephemeral profile go (its last window closed): its cookies and
+/// storage go with it.
+pub fn forget(name: &str) {
+    if is_ephemeral(name) {
+        CONTEXTS.with_borrow_mut(|all| all.remove(name));
+    }
+}
+
 /// Where a profile's cookies and storage live.
 fn data_dir(name: &str) -> PathBuf {
     if let Some(id) = name.strip_prefix(SIGNIN)
@@ -75,7 +112,7 @@ fn data_dir(name: &str) -> PathBuf {
     {
         return s.dir.clone();
     }
-    xdg("XDG_DATA_HOME", ".local/share").join("wadbrowser/profiles").join(name)
+    crate::instance::under(xdg("XDG_DATA_HOME", ".local/share")).join("profiles").join(name)
 }
 
 thread_local! {
@@ -88,16 +125,22 @@ pub fn context(name: &str) -> WebContext {
 }
 
 fn make(name: &str) -> WebContext {
-    let data = data_dir(name);
-    let cache = xdg("XDG_CACHE_HOME", ".cache").join("wadbrowser").join(name);
-    let manager = WebsiteDataManager::builder()
-        .base_data_directory(data.to_string_lossy().as_ref())
-        .base_cache_directory(cache.to_string_lossy().as_ref())
-        .build();
+    let ephemeral = is_ephemeral(name);
+    let manager = if ephemeral {
+        WebsiteDataManager::new_ephemeral()
+    } else {
+        let data = data_dir(name);
+        let cache = crate::instance::under(xdg("XDG_CACHE_HOME", ".cache")).join(name);
+        WebsiteDataManager::builder()
+            .base_data_directory(data.to_string_lossy().as_ref())
+            .base_cache_directory(cache.to_string_lossy().as_ref())
+            .build()
+    };
     let context = WebContext::builder().website_data_manager(&manager).memory_pressure_settings(&pressure()).build();
     context.set_cache_model(CacheModel::WebBrowser);
-    // Kept on disk, so a sign-in outlasts the browser.
-    if let Some(cookies) = context.cookie_manager() {
+    // Kept on disk, so a sign-in outlasts the browser (not an ephemeral one's).
+    if !ephemeral && let Some(cookies) = context.cookie_manager() {
+        let data = data_dir(name);
         cookies.set_persistent_storage(&data.join("cookies.sqlite").to_string_lossy(), CookiePersistentStorage::Sqlite);
     }
     context.register_uri_scheme(crate::pages::SCHEME, crate::pages::serve);
@@ -106,7 +149,9 @@ fn make(name: &str) -> WebContext {
         sec.register_uri_scheme_as_secure(crate::pages::SCHEME);
     }
     crate::downloads::watch(&context);
-    context.set_favicon_database_directory(Some(&data.join("favicons").to_string_lossy()));
+    if !ephemeral {
+        context.set_favicon_database_directory(Some(&data_dir(name).join("favicons").to_string_lossy()));
+    }
     context
 }
 
@@ -129,8 +174,17 @@ fn total_ram_mb() -> Option<u32> {
 }
 
 fn xdg(var: &str, fallback: &str) -> PathBuf {
-    match std::env::var_os(var) {
-        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
-        _ => PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/tmp".into())).join(fallback),
+    crate::instance::xdg(var, fallback)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ephemeral_profiles_are_named_so() {
+        assert!(super::is_ephemeral(&super::for_signin(None, "gmail")));
+        // A sign-in this wadspace doesn't have: nothing is kept rather than
+        // the window quietly using the default profile.
+        assert_eq!(super::for_signin(Some("gone"), "gmail"), "ephemeral-gmail");
+        assert!(!super::is_ephemeral("default") && !super::is_ephemeral("signin-x"));
     }
 }

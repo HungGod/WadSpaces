@@ -287,8 +287,16 @@ fn open_near(app: &AppHandle, opts: Opts, first: First, near: Option<Geometry>) 
         WindowEvent::Destroyed => {
             let label = closing.clone();
             glib::idle_add_local_once(move || {
-                BROWSERS.with_borrow_mut(|all| all.remove(&label));
+                let gone = BROWSERS.with_borrow_mut(|all| all.remove(&label));
                 RECENT.with_borrow_mut(|r| r.retain(|l| l != &label));
+                // An ephemeral profile's data goes with its last window.
+                if let Some(b) = gone {
+                    let name = b.opts.profile().to_owned();
+                    drop(b);
+                    if !BROWSERS.with_borrow(|all| all.values().any(|o| o.opts.profile() == name)) {
+                        profile::forget(&name);
+                    }
+                }
                 crate::session::save_soon();
             });
         }

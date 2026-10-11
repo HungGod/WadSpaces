@@ -4,7 +4,8 @@
 //! The first launch listens on `$XDG_RUNTIME_DIR/wadbrowser/ctl.sock`; a later
 //! one hands its request over and exits before GTK even starts, so a link
 //! opens in a few milliseconds. A lock file decides who's first when two start
-//! at once.
+//! at once. An instance (`--instance <id>`, instance.rs) has its own socket,
+//! in `$XDG_RUNTIME_DIR/wadbrowser/<id>/`, so it's a browser of its own.
 
 use crate::cli::Request;
 use std::fs::File;
@@ -22,10 +23,14 @@ pub enum Claim {
 }
 
 pub fn dir() -> PathBuf {
-    match std::env::var_os("XDG_RUNTIME_DIR") {
+    let base = match std::env::var_os("XDG_RUNTIME_DIR") {
         Some(d) if !d.is_empty() => PathBuf::from(d).join("wadbrowser"),
         // SAFETY: getuid can't fail.
         _ => std::env::temp_dir().join(format!("wadbrowser-{}", unsafe { libc::getuid() })),
+    };
+    match crate::instance::id() {
+        Some(id) => base.join(id),
+        None => base,
     }
 }
 
