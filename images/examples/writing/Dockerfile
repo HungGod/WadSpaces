@@ -1,7 +1,7 @@
 # Writing workspace: Obsidian + the HungGod/Writing vault.
 #
 # Everything generic (git auth, the mounted projects, desktop launchers,
-# wallpaper, blanked Selkies icon) comes from the WadSpaces base image in
+# wallpaper, the WadSpaces logo on the Start button) comes from the WadSpaces base image in
 # ../../base. This image adds Obsidian and pins the vault.
 ARG BASE_IMAGE=localhost/wadspaces-base:trixie
 FROM ${BASE_IMAGE}

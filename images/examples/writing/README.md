@@ -2,7 +2,7 @@
 
 Obsidian and the `HungGod/Writing` vault, on the WadSpaces base image
 (`../../base`), which provides git auth, mounted projects, desktop launchers,
-the wallpaper and the blanked Selkies icon. This image adds Obsidian
+the wallpaper and the WadSpaces logo on the Start button. This image adds Obsidian
 (`wadspaces-feature obsidian`) and `init-writing-vault`, which pins the vault in
 `obsidian.json`. On a machine its desktop is a window on the screen (wadd's
 `display: host`); run by hand, it's a window on your own Wayland desktop.
@@ -69,30 +69,18 @@ are **shipped in the image** and **copied into `~/Desktop` at init**:
 Init also deletes `~/Desktop/writing-files.desktop` if it finds one, so the
 retired Dolphin shortcut does not linger on a `/config` that survived a restart.
 
-### The blanked start icon
+### The start icon
 
 `selkies-desktop` has a single global `start_icon`, loaded from
 `/usr/share/selkies/www/icon.png` and drawn in **two** places: at native size in
 the dead centre of the desktop (`ui.c` `draw_bg`) and scaled to 16px in the
-panel's start button (`ui.c` `draw_panel`). One file feeds both, so there is no
-way to show it in the tray without also stamping it across the middle of the
-wallpaper.
+panel's start button (`ui.c` `draw_panel`). One file feeds both. The base image
+puts the WadSpaces logo there (128px, the dark mark), so every wadspace shows
+it on its Start button and in the middle of its desktop.
 
-The Dockerfile therefore writes a 1x1 fully transparent PNG there. Both draws
-become invisible; the start button is a plain grey rectangle that still opens
-the menu.
-
-Two things to know if you revisit this:
-
-- The button only falls back to the word "Start" when the image fails to
-  *load*. A valid-but-transparent PNG loads fine, so you get a blank button.
-  Deleting the file would give you the "Start" label instead — but
-  `icon.png` is also referenced by `web/manifest.json` and both index pages, so
-  deleting it 404s the PWA icon.
-- The 1x1 transparent PNG that turns up in search results
-  (`...AAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAA...`) is **not** transparent — it is
-  a half-opaque blue pixel, `rgba(0,0,255,0.5)`, which renders as a faint blue
-  square in the tray. The one in the Dockerfile was generated and checked.
+The button only falls back to the word "Start" when the image fails to *load*;
+`icon.png` is also referenced by `web/manifest.json` and both index pages, so
+don't delete it.
 
 Obsidian keeps its own logo on the desktop launcher and in the right-click
 menu, copied out of the AppImage to

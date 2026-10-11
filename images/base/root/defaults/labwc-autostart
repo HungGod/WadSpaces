@@ -4,14 +4,8 @@
 # Wallpaper, then the per-workspace hooks (e.g. AUTOSTART_OBSIDIAN).
 . /defaults/autostart_wayland
 
-# Desktop icons and panel, the same shell the streamed workspaces show. The
-# shim makes it draw ~/Desktop in name order (wadspaces-layout numbers them).
-SHIM=/usr/local/lib/wadspaces/libsorted-desktop.so
-if [ -f "${SHIM}" ]; then
-  LD_PRELOAD="${SHIM}" selkies-desktop > /dev/null 2>&1 &
-else
-  selkies-desktop > /dev/null 2>&1 &
-fi
+# Desktop icons and panel, the same shell the streamed workspaces show.
+selkies-desktop > /dev/null 2>&1 &
 
 # One clipboard for the machine: copies here paste in every other wadspace
 # and WadSpaces Client, and theirs here (crates/wad-clip).

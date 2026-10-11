@@ -10,10 +10,12 @@
 #      git trust, their one-time setup command, a launcher each
 #   3. links apps' sign-in files to the saved sign-ins wadd mounted
 #      (wadspaces-signins)
-#   4. seeds ~/Desktop with the launchers named in the desktop-entries lists
-#   5. hands the paths in the chown lists to abc
-#   6. rebuilds the labwc right-click menu from those launchers
-#   7. nudges the Selkies panel to rescan
+#   4. copies VS Code extensions the image has into ~/.vscode/extensions,
+#      where they're missing (wadspaces-vscode-extensions)
+#   5. seeds ~/Desktop with the launchers named in the desktop-entries lists
+#   6. hands the paths in the chown lists to abc
+#   7. rebuilds the labwc right-click menu from those launchers
+#   8. nudges the Selkies panel to rescan
 #
 # Projects are folders on the host, bind-mounted read-write by wadd at
 # ~/Desktop/<name> and listed in /run/wadspaces-extra/projects.json. They are
@@ -96,6 +98,15 @@ asabc git config --global credential.https://github.com.username "x-access-token
 
 # ------------------------------------------------------------ saved sign-ins
 /usr/local/bin/wadspaces-signins /config "${STATE_DIR}"
+
+# -------------------------------------------------------- VS Code extensions
+# A customization's extensions are in the image; each home gets its own copy,
+# which the user can update (as abc, so they're abc's).
+if [[ -s "${CONF}/vscode-extensions.list" ]]; then
+    mkdir -p /config/.vscode
+    chown abc:abc /config/.vscode
+    asabc /usr/local/bin/wadspaces-vscode-extensions --seed /config
+fi
 
 # ---------------------------------------------------------- desktop icons
 # selkies-desktop draws an icon for every .desktop file in $HOME/Desktop. The

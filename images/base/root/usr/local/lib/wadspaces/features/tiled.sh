@@ -11,7 +11,8 @@ chmod +x /tmp/tiled.app
 rm -rf /opt/tiled && mv squashfs-root /opt/tiled
 rm -f /tmp/tiled.app
 cd /
-ICON="$(find /opt/tiled -path '*hicolor*' -name 'org.mapeditor.Tiled.png' | sort -V | tail -n1)"
+# The AppImage names it org.mapeditor.Tiled.png or tiled.png (newer); the largest.
+ICON="$(find /opt/tiled -path '*hicolor*/apps/*' \( -name 'org.mapeditor.Tiled.png' -o -name 'tiled.png' \) | sort -V | tail -n1)"
 [[ -n "${ICON}" ]] && install -D -m 0644 "${ICON}" /usr/share/icons/hicolor/256x256/apps/org.mapeditor.Tiled.png
 cat > /usr/local/bin/tiled <<'WRAP'
 #!/bin/bash

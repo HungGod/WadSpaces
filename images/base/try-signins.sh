@@ -52,6 +52,37 @@ is_link "${T}/b/.claude.json" "${T}/mnt/code/.claude.json"
 run "${T}/a"
 is_link "${T}/a/.config/Code/User/globalStorage" "${T}/mnt/code/.config/Code/User/globalStorage"
 
+# The Builder's kinds (wad-core's signins.rs): each path through the linker,
+# folders and files, adopted from a signed-in wadspace and seen by another.
+kind() { # id paths...
+    local id=$1; shift
+    local paths; paths="$(printf '"%s",' "$@")"
+    mkdir -p "${T}/mnt/${id}"
+    printf '{"version":1,"signins":[{"id":"%s","name":"%s","web":false,"apps":["x"],"dir":"%s","paths":[%s]}]}' \
+        "${id}" "${id}" "${T}/mnt/${id}" "${paths%,}" > "${T}/signins.json"
+}
+for spec in \
+    "claude .claude/ .claude.json" \
+    "codex .codex/" \
+    "steam .steam/ .local/share/Steam/config/ .local/share/Steam/userdata/"; do
+    read -r id rest <<< "${spec}"
+    read -ra paths <<< "${rest}"
+    rm -rf "${T}/c" "${T}/d" && mkdir -p "${T}/c" "${T}/d"
+    kind "${id}" "${paths[@]}"
+    for p in "${paths[@]}"; do
+        if [[ "${p}" == */ ]]; then mkdir -p "${T}/c/${p}" && echo "${id}" > "${T}/c/${p}token"
+        else mkdir -p "$(dirname "${T}/c/${p}")" && echo "${id}" > "${T}/c/${p}"; fi
+    done
+    run "${T}/c"
+    run "${T}/d"
+    for p in "${paths[@]}"; do
+        f="${p}"; [[ "${p}" == */ ]] && f="${p}token"
+        is_link "${T}/d/${p%/}" "${T}/mnt/${id}/${p%/}"
+        [[ "$(cat "${T}/d/${f}")" == "${id}" ]] || fail "${id}: ${p} isn't shared"
+    done
+done
+manifest ".config/Code/User/globalStorage/" ".claude.json"
+
 # No longer wanted: the links go, b's own comes back.
 printf '{"version":1,"signins":[]}' > "${T}/signins.json"
 run "${T}/b"

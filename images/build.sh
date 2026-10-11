@@ -15,7 +15,9 @@
 #           builds on; its window goes on the machine's screen.
 #           WadBrowser and the clipboard bridge are built for it first
 #           (images/builder/: a Debian container with Rust; the first build
-#           takes a while)
+#           takes a while), and Dolphin is staged in it from linuxserver's
+#           build (lscr.io/linuxserver/dolphin, pulled once: DOLPHIN_PULL=1
+#           gets a newer one)
 #
 # host/build.sh install (or update --bases) copies it onto a machine's drive:
 # the machine builds designs on it.
@@ -84,6 +86,34 @@ build_wadbrowser() {
     cp -r "${ROOT}/apps/wadbrowser/icons/hicolor/." "${STAGE}/icons/"
 }
 
+# Dolphin, as linuxserver's docker-dolphin builds it from source (its image
+# is trixie too): only its own files, staged for the base's `dolphin` build
+# context. Its feature script (wadspaces-feature dolphin) puts them in place
+# with the libraries they need. Machines never pull images, so it has to
+# come in the base.
+DOLPHIN_IMAGE="${DOLPHIN_IMAGE:-lscr.io/linuxserver/dolphin:latest}"
+stage_dolphin() {
+    local stage="${ROOT}/.build/dolphin" ctr tmp
+    if [[ -n "${DOLPHIN_PULL:-}" ]] || ! podman image exists "${DOLPHIN_IMAGE}"; then
+        echo ">> pulling ${DOLPHIN_IMAGE} (Dolphin's build)"
+        podman pull -q "${DOLPHIN_IMAGE}" > /dev/null
+    fi
+    echo ">> staging Dolphin from ${DOLPHIN_IMAGE}"
+    rm -rf "${stage}" && mkdir -p "${stage}/usr/local"
+    tmp="$(mktemp -d)"
+    ctr="$(podman create -q "${DOLPHIN_IMAGE}")"
+    podman cp "${ctr}:/usr/local/." "${tmp}/" > /dev/null
+    podman rm -f "${ctr}" > /dev/null
+    (cd "${tmp}" && find . \( -path ./bin/dolphin-emu -o -path ./bin/dolphin-tool -o -path ./share/dolphin-emu \
+        -o -path ./share/applications/dolphin-emu.desktop -o -path './share/icons/*' -name 'dolphin-emu.*' \
+        -o -path './share/man/man6/dolphin-emu*' \) -prune -print) | while read -r p; do
+        mkdir -p "${stage}/usr/local/$(dirname "${p}")"
+        cp -a "${tmp}/${p}" "${stage}/usr/local/${p}"
+    done
+    rm -rf "${tmp}"
+    [[ -x "${stage}/usr/local/bin/dolphin-emu" ]] || { echo "no dolphin-emu in ${DOLPHIN_IMAGE}" >&2; exit 1; }
+}
+
 for name in "${ONLY[@]}"; do
     img="localhost/wadspaces-${name}:trixie"
     args=(--build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg VERSION="$(date -u +%Y%m%d)")
@@ -91,7 +121,8 @@ for name in "${ONLY[@]}"; do
     if [[ "${name}" == base ]]; then
         rm -rf "${STAGE}" && mkdir -p "${STAGE}/bin" "${STAGE}/icons"
         build_wadbrowser
-        args+=(--build-context "wadbrowser=${STAGE}")
+        stage_dolphin
+        args+=(--build-context "wadbrowser=${STAGE}" --build-context "dolphin=${ROOT}/.build/dolphin")
     fi
     echo ">> building ${img} from images/${name}/"
     podman build "${args[@]}" -t "${img}" "${HERE}/${name}"

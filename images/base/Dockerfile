@@ -26,13 +26,13 @@
 # Both are built for trixie by images/build.sh, which passes them in as the
 # `wadbrowser` build context (so build with that script).
 #
-# selkies-desktop lists ~/Desktop in readdir order; this shim sorts it by name
-# so a designed desktop keeps its order (shim/sorted-desktop.c).
-FROM docker.io/library/debian:trixie AS shim
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
-COPY shim/sorted-desktop.c /src/
-RUN gcc -shared -fPIC -O2 -Wall -Wextra -o /libsorted-desktop.so /src/sorted-desktop.c -ldl
-
+# selkies-desktop draws /usr/share/selkies/www/icon.png on the Start button
+# and again in the middle of the desktop: the WadSpaces logo (root/).
+#
+# Dolphin (the GameCube and Wii emulator) comes as linuxserver's build, staged
+# by images/build.sh as the `dolphin` build context: machines never pull
+# images, and building it from source would take too long for a template.
+# Its feature script (wadspaces-feature dolphin) puts it in place.
 FROM ghcr.io/linuxserver/baseimage-debian:trixie
 
 ARG BUILD_DATE
@@ -107,18 +107,15 @@ RUN \
 COPY --from=ghcr.io/linuxserver/baseimage-selkies:debiantrixie /usr/bin/selkies-desktop /usr/bin/selkies-desktop
 
 COPY root/ /
-COPY --from=shim /libsorted-desktop.so /usr/local/lib/wadspaces/libsorted-desktop.so
 
 RUN \
   chmod +x \
     /usr/local/bin/* \
     /usr/local/lib/wadspaces/features/*.sh \
     /etc/s6-overlay/s6-rc.d/*/run && \
-  echo "**** selkies-desktop draws this as its centre logo: blank it ****" && \
+  echo "**** selkies-desktop's Start button and centre logo: root/ brought the WadSpaces logo ****" && \
   mkdir -p /usr/share/selkies/www && \
-  printf '%s' \
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNgYGBgAAAABQABeqhXUAAAAABJRU5ErkJggg==' \
-    | base64 -d > /usr/share/selkies/www/icon.png && \
+  test -s /usr/share/selkies/www/icon.png && \
   echo "**** check the desktop runs here ****" && \
   ! ldd /usr/bin/selkies-desktop | grep 'not found' && \
   labwc --version
@@ -161,6 +158,9 @@ RUN \
   wadspaces-icon --help > /dev/null && \
   wadspaces-clipboard --version
 ENV BROWSER=/usr/local/bin/wadbrowser-link
+
+# Dolphin, staged for its feature (a layer of its own: it changes rarely).
+COPY --from=dolphin / /usr/local/lib/wadspaces/dolphin/
 
 # Project files are mounted by wadd at run time, never fetched by the image.
 # wadd only mounts projects into images built on a base that says so: older

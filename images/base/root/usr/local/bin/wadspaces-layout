@@ -13,8 +13,9 @@ lists the desktop's icons in order:
 For each app icon it finds the launcher, copies it to <desktop-dir>/NN-<launcher>
 (NN = its position) with the icon's label as its name, and removes launchers it placed on an earlier
 start that are no longer wanted (anything else on the Desktop is left alone).
-selkies-desktop draws them in name order (libsorted-desktop.so), so NN keeps the
-designed order. Apps marked autostart open from /etc/wadspaces/autostart.d/50-layout.sh.
+The NN prefixes once kept a designed order through a sorting shim; selkies-desktop
+now fills its grid in its own order and the Builder no longer orders icons, so
+they're only harmless. Apps marked autostart open from /etc/wadspaces/autostart.d/50-layout.sh.
 
 Prints the placed launchers' basenames, one per line, for wadspaces-menu.
 """
