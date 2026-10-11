@@ -1,36 +1,36 @@
+// The app's frame: the sidebar (the WadSpaces mark, the nav, background
+// work, the Launch button, theme and profile), the focus banner, the page,
+// and what any page can open: a wadspace's details, the launcher, a build's
+// log, toasts and the tour.
 import { Link, useLocation, useNavigate } from "react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { AppWindow, ChevronsLeft, ChevronsRight, FolderGit2, Home, KeyRound, LayoutGrid, Loader2, Lock, LogOut, Play, Rocket, Server, Square, Wand2 } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, FolderGit2, Home, KeyRound, LayoutGrid, Lock, LogOut, Play, Server, Wand2 } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
 import { wadd } from "@/lib/wadd";
 import { countdown } from "@/lib/format";
-import { openFocusWindow, openWadspace } from "@/lib/launch";
-import { THIS_MACHINE, isLocked, useApp } from "@/lib/store";
+import { openFocusWindow } from "@/lib/launch";
+import { useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui";
 import { useTour } from "@/lib/tour";
-import type { PublicUser, Wadspace } from "@/lib/types";
-import { APP_PRODUCTS, LogoMark, ProductMark } from "./Logo";
+import type { PublicUser } from "@/lib/types";
+import { LogoMark } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import { Toaster } from "./Toaster";
 import { useFocusPolling, useFocusRemaining } from "./useFocusClock";
-import { StartDialog } from "./StartDialog";
-import { EditWadspaceDialog } from "./EditWadspaceDialog";
 import { WadspaceDrawer } from "./WadspaceDrawer";
 import { Tour } from "./Tour";
-import { WaitSheet } from "./WaitSheet";
-import { RunDialog } from "./RunDialog";
-import { ActivityTray, BuildLog } from "./ActivityTray";
+import { ActivityTray, BuildLog, LaunchLog } from "./ActivityTray";
 import { ProfileNotices } from "./ProfileNotices";
+import { LaunchDialog } from "./wadbuilder/Launcher";
 
 const NAV = [
   { href: "/", label: "Home", icon: Home },
-  { href: "/manager", label: "Wadspaces Manager", icon: Server },
+  { href: "/builder", label: "Builder", icon: Wand2 },
   { href: "/projects", label: "Projects", icon: FolderGit2 },
   { href: "/secrets", label: "Secrets", icon: KeyRound },
-  { href: "/launch", label: "Quick Launch", icon: Rocket },
-  { href: "/builder", label: "Builder", icon: Wand2 },
+  { href: "/machines", label: "Machines", icon: Server },
 ];
 
 export function Shell({ user, children }: { user: PublicUser; children: React.ReactNode }) {
@@ -141,8 +141,7 @@ export function Shell({ user, children }: { user: PublicUser; children: React.Re
               {!narrow && <span className="truncate">Home screen</span>}
             </button>
           )}
-          {backend.target !== "online" && <MachineApps narrow={narrow} />}
-          {backend.target !== "online" && <StartButton narrow={narrow} />}
+          <LaunchButton narrow={narrow} />
           {narrow ? <div className="flex justify-center"><ThemeToggle compact /></div> : <ThemeToggle />}
 
           <div className={clsx("flex items-center gap-2.5 rounded-2xl p-1.5", narrow ? "justify-center" : "bg-surface/60 ring-1 ring-line")}>
@@ -177,101 +176,42 @@ export function Shell({ user, children }: { user: PublicUser; children: React.Re
       </div>
 
       <WadspaceDrawer />
-      <StartDialog />
-      <EditWadspaceDialog />
-      <WaitSheet />
-      <RunDialog />
+      <Launcher />
       <BuildLog />
+      <LaunchLog />
       <Toaster />
       <Tour />
     </div>
   );
 }
 
-/** The machine's own apps (Terminal, WadBrowser): ▶ opens one (it starts if
- *  it isn't running) and ■ stops it while it runs. */
-function MachineApps({ narrow }: { narrow: boolean }) {
-  // The list itself from the store (a selector that made a new array each
-  // time would re-render without end), the apps picked out here.
-  const wadspaces = useApp((s) => s.wadspaces);
-  const apps = useMemo(() => wadspaces.filter((w) => w.app), [wadspaces]);
-  if (!apps.length) return null;
-  return (
-    <div className={clsx("flex flex-col gap-1", narrow && "items-center")}>
-      {!narrow && <div className="px-3 text-[11px] font-semibold uppercase tracking-wider text-faint">Apps</div>}
-      {apps.map((ws) => (
-        <MachineApp key={ws.id} ws={ws} narrow={narrow} />
-      ))}
-    </div>
-  );
-}
-
-function MachineApp({ ws, narrow }: { ws: Wadspace; narrow: boolean }) {
-  const container = useApp((s) => s.machines.find((m) => m.id === THIS_MACHINE)?.containers.find((c) => c.wadspaceId === ws.id));
+/** Launch: wadspaces, WadBrowsers and the terminal, together (the launcher). */
+function LaunchButton({ narrow }: { narrow: boolean }) {
+  const openLauncher = useUi((s) => s.openLauncher);
   const focus = useApp((s) => s.focus);
-  const loadMachines = useApp((s) => s.loadMachines);
-  const toast = useApp((s) => s.toast);
-  const [stopping, setStopping] = useState(false);
-  const running = container?.status === "running";
-  const starting = !!container?.phase && ["starting", "waiting"].includes(container.phase);
-  const locked = isLocked(focus, ws.id);
-  const product = APP_PRODUCTS[ws.id];
-
-  const stop = async () => {
-    setStopping(true);
-    try {
-      await backend.container(THIS_MACHINE, ws.id, "stop");
-      loadMachines();
-    } catch (e) {
-      toast({ title: `Couldn't stop ${ws.name}`, body: (e as Error).message, tone: "error" });
-    } finally {
-      setStopping(false);
-    }
-  };
-  const button = "grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-40";
-
-  return (
-    <div className={clsx("flex items-center rounded-xl", narrow ? "flex-col gap-0.5" : "h-10 gap-2 pl-3 pr-1 hover:bg-surface-2/60")}>
-      <span className="relative" title={narrow ? ws.name : undefined}>
-        {product ? <ProductMark product={product} className="size-5 shrink-0" /> : <AppWindow className="size-[18px] shrink-0 text-muted" />}
-        {running && <span className="absolute -right-1 -top-1 size-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />}
-      </span>
-      {!narrow && <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted">{ws.name}</span>}
-      <button
-        type="button"
-        className={button}
-        disabled={locked}
-        onClick={() => openWadspace(ws, THIS_MACHINE)}
-        title={locked ? "Focus mode: not one of this session's picks" : running ? `Show ${ws.name}` : `Open ${ws.name}`}
-        aria-label={`Open ${ws.name}`}
-      >
-        {starting ? <Loader2 className="size-4 animate-spin" /> : locked ? <Lock className="size-4" /> : <Play className="size-4 fill-current" />}
-      </button>
-      {running && (
-        <button type="button" className={button} disabled={stopping} onClick={stop} title={`Stop ${ws.name}`} aria-label={`Stop ${ws.name}`}>
-          {stopping ? <Loader2 className="size-4 animate-spin" /> : <Square className="size-3.5 fill-current" />}
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** Start: open wadspaces on this machine together (StartDialog). */
-function StartButton({ narrow }: { narrow: boolean }) {
-  const openStart = useUi((s) => s.openStart);
-  const focus = useApp((s) => s.focus);
+  const signal = useTour((s) => s.signal);
   return (
     <button
       type="button"
-      onClick={() => openStart()}
+      data-tour="launcher"
+      onClick={() => {
+        signal("launcher-opened");
+        openLauncher();
+      }}
       disabled={!!focus}
-      title={focus ? "A focus session is on" : narrow ? "Start" : undefined}
+      title={focus ? "A focus session is on" : narrow ? "Launch" : undefined}
       className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent font-display text-[15px] font-semibold text-accent-fg shadow-[0_8px_24px_-10px_var(--accent)] transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
     >
       <Play className="size-4 shrink-0 fill-current" />
-      {!narrow && "Start"}
+      {!narrow && "Launch"}
     </button>
   );
+}
+
+function Launcher() {
+  const launcher = useUi((s) => s.launcher);
+  const close = useUi((s) => s.closeLauncher);
+  return <LaunchDialog open={!!launcher} onClose={close} customize={launcher?.customize} />;
 }
 
 function FocusBanner() {
@@ -300,7 +240,7 @@ function FocusBanner() {
               ))}
             </div>
             <div className="ml-auto flex items-center gap-3">
-              <span className="hidden text-xs text-faint lg:inline">Restart WAD SPACES to exit early</span>
+              <span className="hidden text-xs text-faint lg:inline">There's no ending it early</span>
               <button type="button" onClick={openFocusWindow} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg hover:brightness-110">
                 Open focus window
               </button>

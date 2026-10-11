@@ -1,13 +1,14 @@
+// The WadSpaces Client's routes: sign-in (with an account), then the app
+// inside the Shell: Home, the Builder, Projects, Secrets and Machines.
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Navigate, Outlet, Route, Routes, useLocation, useParams, useSearchParams } from "react-router";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router";
 import { Loader2 } from "lucide-react";
 import { backend } from "@/data";
-import { Builder } from "@/components/builder/Builder";
 import { Shell } from "@/components/Shell";
 import type { PublicUser } from "@/lib/types";
+import Builder from "@/pages/Builder";
 import Home from "@/pages/Home";
-import Launch from "@/pages/Launch";
-import Manager from "@/pages/Manager";
+import Machines from "@/pages/Machines";
 import Projects from "@/pages/Projects";
 import Secrets from "@/pages/Secrets";
 
@@ -65,22 +66,6 @@ function AppLayout() {
   );
 }
 
-function NewBuilder() {
-  const [params] = useSearchParams();
-  const agent = params.get("agent");
-  const template = params.get("template") ?? undefined;
-  const draft = params.get("draft") ?? undefined;
-  // `key` remounts the builder when switching between a blank, agent, template or draft start.
-  const key = draft ? `draft-${draft}` : template ? `template-${template}` : agent === "1" ? "agent" : "blank";
-  return <Builder key={key} agent={agent === "1"} template={template} draft={draft} />;
-}
-
-function EditBuilder() {
-  const { id } = useParams();
-  const [params] = useSearchParams();
-  return <Builder key={id} id={id} duplicate={params.get("duplicate") === "1"} />;
-}
-
 export default function App() {
   const routes = (
     <Routes>
@@ -92,14 +77,15 @@ export default function App() {
       )}
       <Route element={<AppLayout />}>
         <Route index element={<Home />} />
-        {/* The Wadspaces page is the Wadspaces Manager's first tab now. */}
-        <Route path="wadspaces" element={<Navigate to="/manager" replace />} />
+        <Route path="builder" element={<Builder />} />
         <Route path="projects" element={<Projects />} />
         <Route path="secrets" element={<Secrets />} />
-        <Route path="launch" element={<Launch />} />
-        <Route path="manager" element={<Manager />} />
-        <Route path="builder" element={<NewBuilder />} />
-        <Route path="builder/:id" element={<EditBuilder />} />
+        <Route path="machines" element={<Machines />} />
+        {/* Older addresses: the library is Step 1 of the Builder now, the launcher is in the sidebar. */}
+        <Route path="wadspaces" element={<Navigate to="/builder" replace />} />
+        <Route path="launch" element={<Navigate to="/builder" replace />} />
+        <Route path="builder/:id" element={<Navigate to="/builder" replace />} />
+        <Route path="manager" element={<Navigate to="/machines" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

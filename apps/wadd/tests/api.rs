@@ -375,13 +375,15 @@ async fn editing_workspaces_the_library_and_diagnostics() {
     assert_eq!(request(&sock, "DELETE", "/v1/workspaces/notes").await.0, 204);
     assert_eq!(request(&sock, "DELETE", "/v1/workspaces/notes").await.0, 404);
     // The library.
-    let (status, _) = send(&sock, "PUT", "/v1/library/drafts/d1", r#"{"name":"Draft"}"#).await;
+    let (status, _) = send(&sock, "PUT", "/v1/library/browsers/b1", r#"{"name":"Mail"}"#).await;
     assert_eq!(status, 200);
-    assert!(get(&sock, "/v1/library/drafts/d1").await.1.contains("Draft"));
-    assert!(get(&sock, "/v1/library/drafts").await.1.contains("Draft"));
+    assert!(get(&sock, "/v1/library/browsers/b1").await.1.contains("Mail"));
+    assert!(get(&sock, "/v1/library/browsers").await.1.contains("Mail"));
     assert_eq!(send(&sock, "PUT", "/v1/library/secrets/x", "{}").await.0, 404);
-    assert_eq!(send(&sock, "PUT", "/v1/library/drafts/..", "{}").await.0, 400);
-    assert_eq!(request(&sock, "DELETE", "/v1/library/drafts/d1").await.0, 204);
+    // Drafts are gone from the Builder.
+    assert_eq!(send(&sock, "PUT", "/v1/library/drafts/d1", "{}").await.0, 404);
+    assert_eq!(send(&sock, "PUT", "/v1/library/browsers/..", "{}").await.0, 400);
+    assert_eq!(request(&sock, "DELETE", "/v1/library/browsers/b1").await.0, 204);
     // Load, diagnostics, logs.
     let (status, body) = get(&sock, "/v1/metrics").await;
     assert_eq!(status, 200);

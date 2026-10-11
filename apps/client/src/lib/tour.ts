@@ -1,17 +1,21 @@
+// The new user's tour through the Builder: the Builder in the sidebar, a
+// template stack (Step 1), customizing it and Import (Step 2), constructing a
+// wadspace and its secrets (Step 3), the live preview, then the Launch
+// button. Where it got to is kept per user, so a reload resumes it.
 import { create } from "zustand";
 import { backend } from "@/data";
 
-/** New-user tutorial: highlight the Builder tab, then walk through apps → projects → test. */
-export type TourStep = "nav" | "apps" | "projects" | "test" | "testing";
-export type TourEvent = "app-added" | "preview-opened";
+export type TourStep = "nav" | "stack" | "customize" | "construct" | "preview" | "launch";
+/** What the Builder and launcher tell the tour. */
+export type TourEvent = "stack-opened" | "customization-saved" | "wadspace-saved" | "launcher-opened";
 
-const ORDER: TourStep[] = ["nav", "apps", "projects", "test", "testing"];
+export const ORDER: TourStep[] = ["nav", "stack", "customize", "construct", "preview", "launch"];
 const key = (user: string) => `ws-tour:${user}`;
 
 interface TourState {
   user: string | null;
   step: TourStep | null;
-  /** Steps whose action the user has completed (e.g. added an app). */
+  /** Steps whose action the user has done (e.g. saved a customization). */
   completed: Partial<Record<TourStep, boolean>>;
   /** Start (or resume) the tour for a user. */
   start: (user: string, resume?: boolean) => void;
@@ -26,7 +30,9 @@ function save(user: string | null, step: TourStep | null) {
   try {
     if (step) localStorage.setItem(key(user), step);
     else localStorage.removeItem(key(user));
-  } catch {}
+  } catch {
+    // No storage: the tour starts over next time.
+  }
 }
 
 export const useTour = create<TourState>((set, get) => ({
@@ -39,8 +45,10 @@ export const useTour = create<TourState>((set, get) => ({
     if (resume) {
       try {
         const saved = localStorage.getItem(key(user)) as TourStep | null;
-        if (saved && ORDER.includes(saved)) step = saved === "testing" ? "test" : saved;
-      } catch {}
+        if (saved && ORDER.includes(saved)) step = saved;
+      } catch {
+        // No storage: from the top.
+      }
     }
     set({ user, step, completed: {} });
     save(user, step);
@@ -56,12 +64,14 @@ export const useTour = create<TourState>((set, get) => ({
     save(user, nextStep);
   },
 
-  // Adding an app marks the step done (the user may keep adding, then hit Next);
-  // opening the preview moves straight on to the "testing" hint.
+  // Opening a stack and opening the launcher move on; saving in Steps 2 and 3
+  // marks those done (the user may keep going, then hit Next).
   signal: (e) => {
     const { step, completed } = get();
-    if (step === "apps" && e === "app-added") set({ completed: { ...completed, apps: true } });
-    if (step === "test" && e === "preview-opened") get().next();
+    if (step === "stack" && e === "stack-opened") get().next();
+    if (step === "customize" && e === "customization-saved") set({ completed: { ...completed, customize: true } });
+    if (step === "construct" && e === "wadspace-saved") get().next();
+    if (step === "launch" && e === "launcher-opened") get().finish();
   },
 
   finish: () => {

@@ -1,5 +1,7 @@
+// A wadspace's container on a machine: its state (dot, phase, uptime) and
+// the Restart / Stop / Start controls the Machines page's rows have.
 import { useState } from "react";
-import { CloudDownload, Loader2, Power, RotateCw, Square } from "lucide-react";
+import { Loader2, Power, RotateCw, Square } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
 import type { ContainerAction } from "@/data/backend";
@@ -7,7 +9,7 @@ import { IconButton } from "@/components/ui";
 import { uptime } from "@/lib/format";
 import { isLocked, useApp } from "@/lib/store";
 import { isThisMachine } from "@/lib/machine";
-import type { Container, Machine, Wadspace } from "@/lib/types";
+import type { Container, Machine } from "@/lib/types";
 
 const PHASE: Record<string, string> = {
   idle: "Stopped",
@@ -37,8 +39,8 @@ export function ContainerStatus({ c }: { c: Container }) {
   );
 }
 
-/** Download / Restart / Stop / Start for a wadspace on a machine (the Manager's rows). */
-export function ContainerControls({ m, c, ws }: { m: Machine; c: Container; ws?: Wadspace }) {
+/** Restart / Stop / Start for a wadspace on a machine (the Machines page's rows). */
+export function ContainerControls({ m, c }: { m: Machine; c: Container }) {
   const focus = useApp((s) => s.focus);
   const toast = useApp((s) => s.toast);
   const loadMachines = useApp((s) => s.loadMachines);
@@ -63,11 +65,6 @@ export function ContainerControls({ m, c, ws }: { m: Machine; c: Container; ws?:
 
   return (
     <>
-      {here && ws?.installed && !ws.local && !ws.app && !c.download && (
-        <IconButton label="Download" disabled={!up || busy === "download"} onClick={() => act("download")}>
-          <CloudDownload className="size-4" />
-        </IconButton>
-      )}
       {on ? (
         <>
           <IconButton label="Restart" disabled={!up || busy === "restart"} onClick={() => act("restart")}>

@@ -1,3 +1,5 @@
+// The backgrounds a wadspace can pick (gradients drawn here, pictures from
+// public/wallpapers), the default one (Nebula), and how a desktop draws one.
 import type { Wallpaper } from "@/lib/types";
 
 export const WALLPAPER_PRESETS: { name: string; wallpaper: Wallpaper }[] = [
@@ -10,7 +12,14 @@ export const WALLPAPER_PRESETS: { name: string; wallpaper: Wallpaper }[] = [
   { name: "Ocean", wallpaper: { type: "gradient", value: "linear-gradient(160deg, #031526 0%, #0c3b5e 60%, #1b7fa6 120%)" } },
   { name: "Graphite", wallpaper: { type: "gradient", value: "linear-gradient(160deg, #2a2a2e 0%, #121214 100%)" } },
   { name: "Paper", wallpaper: { type: "gradient", value: "linear-gradient(160deg, #f1f1f1 0%, #d4d4d4 100%)" } },
+  { name: "Cosmic Bodybuilding", wallpaper: { type: "image", value: "/wallpapers/cosmic-bodybuilding.png" } },
+  { name: "Vanua Academy", wallpaper: { type: "image", value: "/wallpapers/vanua-academy.png" } },
+  { name: "WadSpaces Dev", wallpaper: { type: "image", value: "/wallpapers/wadspaces-dev.png" } },
+  { name: "Intelligence Quest", wallpaper: { type: "image", value: "/wallpapers/intelligence-quest.png" } },
 ];
+
+/** What a new wadspace starts with, and what templates and customizations are pictured on. */
+export const DEFAULT_WALLPAPER: Wallpaper = WALLPAPER_PRESETS[0].wallpaper;
 
 export function wallpaperStyle(w: Wallpaper): React.CSSProperties {
   if (w.type === "image") return { backgroundImage: `url("${w.value}")`, backgroundSize: "cover", backgroundPosition: "center", backgroundColor: "#0a0614" };

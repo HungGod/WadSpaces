@@ -1,47 +1,57 @@
+// What can be done with a wadspace, wherever it's listed (the Machines page's
+// rows, its details drawer): open it, customize it for a run, edit it in the
+// Builder or start a new one from it, look at its details, delete it.
 import { useNavigate } from "react-router";
-import { CloudDownload, Copy, Info, Lock, MoreHorizontal, Pencil, Play, Timer, Trash2, Wand2 } from "lucide-react";
+import { Copy, Info, Lock, MoreHorizontal, Pencil, Play, SlidersHorizontal, Trash2 } from "lucide-react";
+import type { WadspaceV2 } from "@core/layers";
+import { useDraft } from "@/components/wadbuilder/draft";
 import { Dropdown, IconButton } from "@/components/ui";
 import { clockTime } from "@/lib/format";
-import { openWadspace, startDownload } from "@/lib/launch";
-import { hasLocal } from "@/lib/machine";
+import { openWadspace } from "@/lib/launch";
 import { isLocked, useApp } from "@/lib/store";
-import type { Wadspace } from "@/lib/types";
 import { useUi } from "@/lib/ui";
-import { cloneWadspace, trashWadspace } from "@/lib/wadspaces";
 
-/**
- * What you can do with a wadspace from a Wadspaces Manager row: open it (on
- * `machineId`, or the default machine), edit it, and the rest in its menu.
- * `download`: offer to download it to this machine (a machine's row has its
- * own button for that).
- */
-export function WadspaceActions({ ws, machineId, download = true }: { ws: Wadspace; machineId?: string; download?: boolean }) {
+/** The actions, for menus and buttons alike. */
+export function useWadspaceActions(w: WadspaceV2) {
   const navigate = useNavigate();
-  const user = useApp((s) => s.user);
-  const focus = useApp((s) => s.focus);
-  const downloading = useApp((s) => s.downloads.some((d) => d.wadspaceId === ws.id));
-  const { openDetails, openEdit, openStart } = useUi();
-  const locked = isLocked(focus, ws.id);
-  // Online, one only a machine has (not in the account) can't be changed from
-  // here; an app (Terminal, WadBrowser) is the machine's own, with no design.
-  const editable = ws.owner === user?.username && !ws.machineOnly && !ws.app;
-  const design = !ws.app;
+  const { openDetails, openLauncher } = useUi();
+  const lib = () => {
+    const { templates, customizations } = useApp.getState();
+    return { templates, customizations };
+  };
+  return {
+    open: () => void openWadspace(w),
+    customize: () => openLauncher({ customize: w.id }),
+    edit: () => {
+      useDraft.getState().edit(w, lib());
+      navigate("/builder");
+    },
+    copy: () => {
+      useDraft.getState().copy(w, lib());
+      navigate("/builder");
+    },
+    details: () => openDetails(w.id),
+    remove: () => {
+      if (!confirm(`Delete ${w.name}?`)) return;
+      useApp
+        .getState()
+        .remove("wadspace", w.id)
+        .then(() => openDetails(null))
+        .catch((e) => useApp.getState().toast({ title: "Can't delete it", body: (e as Error).message, tone: "error" }));
+    },
+  };
+}
 
+/** Open, and the rest in a menu. */
+export function WadspaceActions({ w }: { w: WadspaceV2 }) {
+  const focus = useApp((s) => s.focus);
+  const a = useWadspaceActions(w);
+  const locked = isLocked(focus, w.id);
   return (
     <div className="flex items-center gap-0.5">
-      <IconButton
-        label="Open"
-        title={locked && focus ? `Focus mode: locked until ${clockTime(focus.endsAt)}` : "Open"}
-        disabled={locked}
-        onClick={() => openWadspace(ws, machineId)}
-      >
+      <IconButton label="Open" title={locked && focus ? `Focus mode: locked until ${clockTime(focus.endsAt)}` : "Open"} disabled={locked} onClick={a.open}>
         {locked ? <Lock className="size-4" /> : <Play className="size-4 fill-current" />}
       </IconButton>
-      {editable && (
-        <IconButton label="Edit" title="Edit its name, description and background" onClick={() => openEdit(ws.id)}>
-          <Pencil className="size-4" />
-        </IconButton>
-      )}
       <Dropdown
         trigger={(open) => (
           <IconButton label="More" active={open}>
@@ -49,15 +59,12 @@ export function WadspaceActions({ ws, machineId, download = true }: { ws: Wadspa
           </IconButton>
         )}
         items={[
-          { label: "Details & sharing", icon: <Info />, hidden: !design, onClick: () => openDetails(ws.id) },
-          { label: "Edit", icon: <Pencil />, hidden: !editable, onClick: () => openEdit(ws.id) },
-          { label: "Edit in Builder", icon: <Wand2 />, hidden: !editable, onClick: () => navigate(`/builder/${ws.id}`) },
-          { label: "Duplicate in Builder", icon: <Wand2 />, hidden: editable || !design, onClick: () => navigate(`/builder/${ws.id}?duplicate=1`) },
-          { label: "Clone", icon: <Copy />, hidden: !design, onClick: () => cloneWadspace(ws) },
-          { label: "Start a focus session", icon: <Timer />, hidden: !hasLocal || !ws.installed, disabled: !!focus, onClick: () => openStart([ws.id], { focus: true }) },
-          { label: "Download to this machine", icon: <CloudDownload />, hidden: !download || !hasLocal || !ws.installed || ws.local || downloading, onClick: () => startDownload(ws) },
-          ...(editable ? ["divider" as const] : []),
-          { label: "Delete", icon: <Trash2 />, danger: true, hidden: !editable, onClick: () => trashWadspace(ws) },
+          { label: "Details", icon: <Info />, onClick: a.details },
+          { label: "Customize for a run", icon: <SlidersHorizontal />, disabled: locked, onClick: a.customize },
+          { label: "Edit in Builder", icon: <Pencil />, onClick: a.edit },
+          { label: "New from it", icon: <Copy />, onClick: a.copy },
+          "divider" as const,
+          { label: "Delete", icon: <Trash2 />, danger: true, onClick: a.remove },
         ]}
       />
     </div>

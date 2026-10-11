@@ -20,11 +20,10 @@ pub fn truthy(v: &Value) -> bool {
 /// Fields projects had when they were Syncthing folders: dropped on sight.
 const OLD_FIELDS: &[&str] = &["holders", "ignore", "folderId"];
 /// The library's collections: the Builder's layers (templates,
-/// customizations, wadspaces), saved WadBrowser setups, `meta` (what the
-/// library knows of itself: whether its starter templates were made), and
-/// `drafts` from before the layers, kept listable until WadSpaces has
-/// deleted them.
-pub const COLLECTIONS: &[&str] = &["wadspaces", "templates", "customizations", "browsers", "meta", "drafts"];
+/// customizations, wadspaces), saved WadBrowser setups, and `meta` (what the
+/// library knows of itself: whether its starter templates were made).
+/// Drafts from before the layers are gone (`discard_drafts`).
+pub const COLLECTIONS: &[&str] = &["wadspaces", "templates", "customizations", "browsers", "meta"];
 
 #[derive(Debug, Clone)]
 pub struct State {
@@ -201,6 +200,18 @@ impl State {
         COLLECTIONS
             .contains(&collection)
             .then(|| json_files(&self.dir.join("library").join(collection)).into_iter().map(|(_, d)| d).collect())
+    }
+
+    /// The Builder has no drafts now: library/drafts from before the layers
+    /// is removed. How many there were.
+    pub fn discard_drafts(&self) -> std::io::Result<usize> {
+        let dir = self.dir.join("library").join("drafts");
+        if !dir.exists() {
+            return Ok(0);
+        }
+        let n = json_files(&dir).len();
+        std::fs::remove_dir_all(&dir)?;
+        Ok(n)
     }
 
     fn library_file(&self, collection: &str, id: &str) -> Result<PathBuf, String> {

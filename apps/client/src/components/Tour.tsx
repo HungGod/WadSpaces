@@ -1,9 +1,12 @@
+// The new user's tour (lib/tour.ts): a card beside what each step is about,
+// with that spotlit, from the Builder in the sidebar to the Launch button.
 import { useLocation, useNavigate } from "react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, Check, Sparkles, X } from "lucide-react";
 import clsx from "clsx";
 import { useApp } from "@/lib/store";
+import { useDraft } from "@/components/wadbuilder/draft";
 import { useTour, type TourStep } from "@/lib/tour";
 
 interface StepDef {
@@ -19,14 +22,14 @@ interface StepDef {
 
 const STEPS: Record<TourStep, StepDef> = {
   nav: { targets: ['[data-tour="nav-builder"]'], placement: ["right"], blocking: true, builder: false },
-  apps: { targets: ['[data-tour="library"]', '[data-tour="canvas"]'], placement: ["right", "below"], blocking: true, builder: true },
-  // The Builder shows its Projects step in the left pane for this one.
-  projects: { targets: ['[data-tour="library"]'], placement: ["right"], blocking: true, builder: true },
-  test: { targets: ['[data-tour="preview"]'], placement: ["below", "left"], blocking: true, builder: true },
-  testing: { targets: [], placement: [], blocking: false, builder: true },
+  stack: { targets: ['[data-tour="stack"]'], placement: ["right", "below"], blocking: true, builder: true },
+  customize: { targets: ['[data-tour="step-customize"]', '[data-tour="import"]'], placement: ["right"], blocking: false, builder: true },
+  construct: { targets: ['[data-tour="secrets"]'], placement: ["right"], blocking: false, builder: true },
+  preview: { targets: ['[data-tour="preview"]'], placement: ["left", "below"], blocking: false, builder: true },
+  launch: { targets: ['[data-tour="launcher"]'], placement: ["right", "above"], blocking: true, builder: false },
 };
 
-const NUMBERED: TourStep[] = ["apps", "projects", "test"];
+const NUMBERED: TourStep[] = ["stack", "customize", "construct", "preview", "launch"];
 const PAD = 8;
 const CARD_W = 340;
 
@@ -52,15 +55,17 @@ export function Tour() {
   const navigate = useNavigate();
   const [hole, setHole] = useState<Box | null>(null);
   const [missing, setMissing] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [cardH, setCardH] = useState(220);
   const card = useRef<HTMLDivElement>(null);
   const def = step ? STEPS[step] : null;
+  const draftStep = useDraft((s) => s.step);
 
-  // Step 0 finishes by actually opening the Builder tab.
+  // Step 0 finishes by opening the Builder; Steps 2 and 3 by moving on in it.
   useEffect(() => {
     if (step === "nav" && pathname.startsWith("/builder")) next();
-  }, [step, pathname, next]);
+    if (step === "stack" && draftStep !== "template") next();
+    if (step === "customize" && draftStep === "construct") next();
+  }, [step, pathname, next, draftStep]);
 
   // Follow the target elements every frame (they move with layout, scrolling and resizes).
   useEffect(() => {
@@ -74,7 +79,6 @@ export function Tour() {
       if (def.targets.length && !box) lostAt ??= performance.now();
       else lostAt = null;
       setMissing(lostAt !== null && performance.now() - lostAt > 700);
-      setPreviewOpen(!!document.querySelector('[data-tour="preview-overlay"]'));
       raf = requestAnimationFrame(tick);
     };
     tick();
@@ -91,28 +95,28 @@ export function Tour() {
 
   if (!step || !def) return null;
 
-  const offBuilder = def.builder && !pathname.startsWith("/builder");
-  const lost = offBuilder || (def.targets.length > 0 && missing);
-  const index = NUMBERED.indexOf(step === "testing" ? "test" : step);
+  // Off the Builder: a card to go back. On it with nothing to spotlight yet
+  // (a picker open, an earlier step): the card alone, docked.
+  const lost = def.builder && !pathname.startsWith("/builder");
+  const docked = !lost && def.targets.length > 0 && missing;
+  const index = NUMBERED.indexOf(step);
 
-  const content = copy(step, user?.displayName ?? "there", previewOpen);
+  const content = copy(step, user?.displayName ?? "there");
   const primary =
     step === "nav"
       ? { label: "Open the Builder", onClick: () => navigate("/builder") }
-      : step === "apps"
+      : step === "customize"
         ? { label: completed[step] ? "Next step" : "Skip this step", onClick: next, ready: !!completed[step] }
-        : step === "projects"
+        : step === "construct" || step === "preview"
           ? { label: "Next step", onClick: next, ready: true }
-          : step === "testing"
-          ? { label: "Finish tour", onClick: finish, ready: true }
           : null;
 
   // ---- Card placement ----
   const vw = typeof window === "undefined" ? 1600 : window.innerWidth;
   const vh = typeof window === "undefined" ? 900 : window.innerHeight;
   let pos: { left: number; top: number };
-  if (lost || !hole) {
-    pos = step === "testing" ? { left: (vw - CARD_W) / 2, top: vh - cardH - 88 } : { left: vw - CARD_W - 24, top: vh - cardH - 24 };
+  if (lost || docked || !hole) {
+    pos = { left: vw - CARD_W - 24, top: vh - cardH - 24 };
   } else {
     const fits = {
       right: hole.right + 16 + CARD_W <= vw - 16,
@@ -132,10 +136,18 @@ export function Tour() {
   }
 
   const dim = "bg-[#0a0614]/70";
-  const showHole = def.blocking && hole && !lost;
+  const showHole = def.blocking && hole && !lost && !docked;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[10050]">
+      {hole && !lost && !docked && !def.blocking && (
+        <motion.div
+          className="absolute rounded-2xl border-2 border-accent"
+          style={{ top: hole.top, left: hole.left, width: hole.right - hole.left, height: hole.bottom - hole.top }}
+          animate={{ boxShadow: ["0 0 0 0px var(--accent-soft)", "0 0 0 10px transparent"] }}
+          transition={{ duration: 1.4, repeat: Infinity }}
+        />
+      )}
       {showHole && (
         <>
           {/* Four blockers around the hole: dim the page and swallow clicks outside the spotlight. */}
@@ -177,7 +189,7 @@ export function Tour() {
           {lost ? (
             <>
               <h3 className="font-display text-lg font-bold tracking-tight">Continue in the Builder</h3>
-              <p className="mt-1.5 text-sm text-muted">The rest of the tour happens inside the Wadspace Builder.</p>
+              <p className="mt-1.5 text-sm text-muted">The rest of the tour happens in the Builder.</p>
               <div className="mt-5 flex items-center justify-between">
                 <button type="button" onClick={finish} className="text-xs text-faint hover:text-fg">Skip tour</button>
                 <button type="button" onClick={() => navigate("/builder")} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-accent px-4 text-sm font-semibold text-accent-fg hover:brightness-110">
@@ -190,9 +202,9 @@ export function Tour() {
               <h3 className="font-display text-lg font-bold tracking-tight">{content.title}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-muted">{content.body}</p>
               {content.tip && <p className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted ring-1 ring-line">{content.tip}</p>}
-              {step === "apps" && completed[step] && (
+              {step === "customize" && completed[step] && (
                 <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-fg dark:text-accent">
-                  <Check className="size-3.5" /> App added. Add more, or move on.
+                  <Check className="size-3.5" /> Saved: its image is building. On to Step 3.
                 </p>
               )}
               <div className="mt-5 flex items-center justify-between gap-3">
@@ -200,11 +212,9 @@ export function Tour() {
                   {NUMBERED.map((s, i) => (
                     <span key={s} className={clsx("h-1.5 rounded-full transition-all", i === index ? "w-5 bg-accent" : i < index ? "w-1.5 bg-accent/60" : "w-1.5 bg-line-strong")} />
                   ))}
-                  {step !== "testing" && (
-                    <button type="button" onClick={finish} className="ml-2 text-xs text-faint hover:text-fg">
-                      Skip tour
-                    </button>
-                  )}
+                  <button type="button" onClick={finish} className="ml-2 text-xs text-faint hover:text-fg">
+                    Skip tour
+                  </button>
                 </div>
                 {primary && (
                   <button
@@ -227,40 +237,40 @@ export function Tour() {
   );
 }
 
-function copy(step: TourStep, name: string, previewOpen: boolean): { title: string; body: string; tip?: string } {
+function copy(step: TourStep, name: string): { title: string; body: string; tip?: string } {
   switch (step) {
     case "nav":
       return {
-        title: `Welcome to WAD SPACES, ${name}!`,
-        body: "This is the Wadspace Builder. It's where you design your own desktop: pick the apps you need and try it out before you launch it. Let's build your first one.",
+        title: `Welcome to WadSpaces, ${name}!`,
+        body: "Wadspaces are made in the Builder, in three steps: a template (apps), how they're set up, then the wadspace itself. Let's make your first one.",
       };
-    case "apps":
+    case "stack":
       return {
-        title: "Adding applications",
-        body: "Drag an app from the list onto the desktop, or double-click it to drop it in the next free spot.",
-        tip: "Right-click an icon on the desktop to rename it or change its icon and window color.",
+        title: "Choose your template",
+        body: "Each stack is a template, with your customizations of it and the wadspaces built from them on top. Click one to start from it.",
+        tip: "Writing and Dev are here to start with. Build your own from the catalog with the dashed card.",
       };
-    case "projects":
+    case "customize":
       return {
-        title: "Open your work with it",
-        body: "Projects are folders of your work: an empty one, or a git repository. Tick the ones this wadspace opens on its Desktop. Your files stay on the machine when it stops, and you can pick other projects each time you open it.",
-        tip: "All your projects are on the Projects page in the sidebar.",
+        title: "Set its apps up",
+        body: "Pick WadBrowser's web apps, VS Code's extensions, tools and what opens at boot. Changes are saved as a customization under a new name: an image of its own, built on the template's.",
+        tip: "Import brings parts of another customization in: its web apps, extensions or tools.",
       };
-    case "test":
+    case "construct":
       return {
-        title: "Test out your creation",
-        body: "Click Preview to try your wadspace full screen, exactly the way it will run.",
+        title: "Make it a wadspace",
+        body: "Name it, pick a background and project folders, and a secret for each app that keeps a sign-in: a new one, one you've saved, or Don't save (sign in inside, keep nothing).",
+        tip: "Pick the same secret for two web apps and they share one sign-in.",
       };
-    case "testing":
-      return previewOpen
-        ? {
-            title: "Take it for a spin",
-            body: "Double-click icons to open windows. Drag a window to the edge to snap it, double-click its title bar to maximize, and use the taskbar to switch.",
-            tip: "Press Esc to leave the preview, then go to step 3, Customize, to name it and hit Build.",
-          }
-        : {
-            title: "Looking good!",
-            body: "When you're happy with it, go to step 3, Customize: give it a name and background, then hit Build. The build runs in the background and the sidebar shows its progress. You can replay this tour any time from the sidebar.",
-          };
+    case "preview":
+      return {
+        title: "Try it here",
+        body: "The desktop as its image will show it, at your machine's screen size. Double-click icons and try the Start button. The Image tab shows the layers it's built from.",
+      };
+    case "launch":
+      return {
+        title: "Launch it",
+        body: "Launch opens wadspaces, WadBrowsers and the terminal together on your machine, or for a focus session. Click it to finish the tour.",
+      };
   }
 }

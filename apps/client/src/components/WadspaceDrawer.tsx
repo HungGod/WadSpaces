@@ -1,246 +1,127 @@
-import { Link } from "react-router";
+// A wadspace's details, from Step 1's picker and the Machines page: what it's
+// built on and how its image stands, the folders it opens with (and had last
+// time), where it runs, its run history, and what can be done with it: open
+// it, customize it for a run, edit it in the Builder, start a new one from
+// it, delete it.
 import { useEffect, useState } from "react";
-import { Check, FolderGit2, HardDrive, Lock, Pencil, Play, Server, Timer, Trash2, Users, X } from "lucide-react";
+import { Copy, Layers, Lock, Pencil, Play, Server, SlidersHorizontal, Trash2, X } from "lucide-react";
 import clsx from "clsx";
+import { imageKey, resolve } from "@core/layers";
 import { backend } from "@/data";
-import { clockTime, size, timeAgo, uptime } from "@/lib/format";
-import { openWadspace, opensByLaunch, startDownload } from "@/lib/launch";
-import { RunHistory } from "./RunHistory";
+import { clockTime, timeAgo, uptime } from "@/lib/format";
 import { isLocked, useApp } from "@/lib/store";
-import { trashWadspace } from "@/lib/wadspaces";
 import { useUi } from "@/lib/ui";
-import type { ContainerRun, Visibility } from "@/lib/types";
+import type { ContainerRun } from "@/lib/types";
+import { useWadspaceActions } from "./manager/WadspaceActions";
+import { RunHistory } from "./RunHistory";
 import { Thumb } from "./Thumb";
-import { Avatar, Badge, Button, Drawer, IconButton, Input, Label, Segmented, Textarea } from "./ui";
-import { isThisMachine } from "@/lib/machine";
+import { Badge, Button, Drawer, IconButton } from "./ui";
+import { BuildButton, ImageBadge } from "./wadbuilder/parts";
 
 export function WadspaceDrawer() {
   const detailsId = useUi((s) => s.detailsId);
   const openDetails = useUi((s) => s.openDetails);
-  const openStart = useUi((s) => s.openStart);
-  const ws = useApp((s) => s.wadspaces.find((w) => w.id === detailsId));
-  const user = useApp((s) => s.user);
-  const users = useApp((s) => s.users);
+  const w = useApp((s) => s.wadspaces.find((x) => x.id === detailsId && !x.deletedAt));
+  const close = () => openDetails(null);
+  if (!w) return <Drawer open={false} onClose={close}>{null}</Drawer>;
+  return <Details key={w.id} id={w.id} onClose={close} />;
+}
+
+function Details({ id, onClose }: { id: string; onClose: () => void }) {
+  const w = useApp((s) => s.wadspaces.find((x) => x.id === id))!;
+  const templates = useApp((s) => s.templates);
+  const customizations = useApp((s) => s.customizations);
   const machines = useApp((s) => s.machines);
-  const launchTarget = useApp((s) => s.launchTarget);
   const focus = useApp((s) => s.focus);
-  const patchWadspace = useApp((s) => s.patchWadspace);
-  const toast = useApp((s) => s.toast);
-  const download = useApp((s) => s.downloads.find((d) => d.wadspaceId === detailsId));
   const projects = useApp((s) => s.projects);
-  const openRun = useUi((s) => s.openRun);
+  const a = useWadspaceActions(w);
   /** Its most recent run, for the projects it had (runs record them). */
   const [lastRun, setLastRun] = useState<ContainerRun | null>(null);
-
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (ws) {
-      setName(ws.name);
-      setDescription(ws.description);
-    }
-    // Only reset the form when a different wadspace opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ws?.id]);
+  const caps = backend.caps;
 
   // Refreshed with the machine list, which changes as it starts and stops.
   useEffect(() => {
     let off = false;
-    if (!detailsId || !backend.caps.history || !backend.caps.projects) return setLastRun(null);
+    if (!caps.history || !caps.projects) return setLastRun(null);
     backend
-      .runs({ wadspaceId: detailsId })
+      .runs({ wadspaceId: id })
       .then((r) => !off && setLastRun(r[0] ?? null))
       .catch(() => !off && setLastRun(null));
     return () => {
       off = true;
     };
-  }, [detailsId, machines]);
+  }, [id, machines, caps.history, caps.projects]);
 
-  const close = () => openDetails(null);
-  const caps = backend.caps;
-  if (!ws) return <Drawer open={false} onClose={close}>{null}</Drawer>;
-
-  const mine = ws.owner === user?.username;
-  const owner = users.find((u) => u.username === ws.owner);
-  const dirty = name !== ws.name || description !== ws.description;
-  const locked = isLocked(focus, ws.id);
-  const running = machines.flatMap((m) => m.containers.filter((c) => c.wadspaceId === ws.id).map((c) => ({ m, c })));
-  const others = users.filter((u) => u.username !== user?.username);
-
-  const save = async () => {
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      await patchWadspace(ws.id, { name: name.trim(), description: description.trim() });
-      toast({ title: "Saved", body: name.trim(), tone: "success" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const setVisibility = (visibility: Visibility) => patchWadspace(ws.id, { visibility });
-  const toggleShare = (u: string) =>
-    patchWadspace(ws.id, { sharedWith: ws.sharedWith.includes(u) ? ws.sharedWith.filter((x) => x !== u) : [...ws.sharedWith, u] });
-
-  const remove = async () => {
-    await trashWadspace(ws);
-    close();
+  const r = resolve({ templates, customizations }, w.base);
+  const locked = isLocked(focus, w.id);
+  const running = machines.flatMap((m) => m.containers.filter((c) => c.wadspaceId === w.id).map((c) => ({ m, c })));
+  const go = (fn: () => void) => () => {
+    onClose();
+    fn();
   };
 
   return (
-    <Drawer open onClose={close}>
+    <Drawer open onClose={onClose}>
       <div className="relative shrink-0">
-        <Thumb ws={ws} />
+        <Thumb w={w} zoom={1.2} />
         <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/10 to-transparent" />
-        <IconButton label="Close" onClick={close} className="absolute right-3 top-3 bg-black/40 text-white backdrop-blur-md hover:bg-black/60 hover:text-white">
+        <IconButton label="Close" onClick={onClose} className="absolute right-3 top-3 bg-black/40 text-white backdrop-blur-md hover:bg-black/60 hover:text-white">
           <X className="size-4" />
         </IconButton>
       </div>
 
       <div className="-mt-10 flex-1 space-y-7 overflow-y-auto px-6 pb-6">
-        {/* Identity */}
         <section className="relative">
-          {mine ? (
-            <div className="space-y-3">
-              <div>
-                <Label hint={<span className="flex items-center gap-1"><Pencil className="size-3" /> editable</span>}>Name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} className="h-11 font-display text-lg font-semibold" />
-              </div>
-              <div>
-                <Label>Description</Label>
-                <Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's this wadspace for?" />
-              </div>
-              {dirty && (
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => { setName(ws.name); setDescription(ws.description); }}>Reset</Button>
-                  <Button size="sm" variant="primary" onClick={save} disabled={saving || !name.trim()}>
-                    <Check className="size-3.5" /> Save changes
-                  </Button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <h2 className="font-display text-2xl font-bold tracking-tight">{ws.name}</h2>
-              <p className="mt-1 text-sm text-muted">{ws.description}</p>
-              {owner && (
-                <div className="mt-3 flex items-center gap-2 text-sm text-muted">
-                  <Avatar user={owner} size={22} className="ring-0" /> Owned by <b className="text-fg">{owner.displayName}</b>
-                </div>
-              )}
-            </div>
-          )}
+          <h2 className="font-display text-2xl font-bold tracking-tight">{w.name}</h2>
+          {w.description && <p className="mt-1 text-sm text-muted">{w.description}</p>}
           <div className="mt-3 flex flex-wrap gap-1.5">
-            <Badge>{size(ws.sizeMB)}</Badge>
-            <Badge>Updated {timeAgo(ws.updatedAt)}</Badge>
-            <Badge>{ws.layout.icons.length} apps</Badge>
+            <Badge>Updated {timeAgo(w.updatedAt)}</Badge>
             <Badge>
-              <span className="font-mono">{ws.id.slice(0, 8)}</span>
+              <span className="font-mono">{w.id}</span>
             </Badge>
           </div>
         </section>
 
-        {/* Actions */}
         <section className="grid grid-cols-2 gap-2">
-          <Button variant="primary" disabled={locked} title={locked && focus ? `Locked until ${clockTime(focus.endsAt)}` : undefined} onClick={() => openWadspace(ws)}>
+          <Button variant="primary" disabled={locked} title={locked && focus ? `Locked until ${clockTime(focus.endsAt)}` : undefined} onClick={go(a.open)}>
             {locked ? <Lock className="size-4" /> : <Play className="size-4 fill-current" />} Open
           </Button>
-          <Button disabled={!!focus || !ws.installed || backend.target === "online"} title="Start it in a focus session" onClick={() => openStart([ws.id], { focus: true })}>
-            <Timer className="size-4" /> Focus
+          <Button disabled={locked} onClick={go(a.customize)} title="Its background, folders or secrets, for one run or as a new wadspace">
+            <SlidersHorizontal className="size-4" /> Customize for a run
           </Button>
-          {ws.machineOnly ? (
-            <p className="col-span-2 rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted ring-1 ring-line">
-              Built on {ws.machineOnly}. Edit it there, in WadSpaces on that machine.
-            </p>
-          ) : (
-            <Link to={mine ? `/builder/${ws.id}` : `/builder/${ws.id}?duplicate=1`} onClick={close} className="col-span-2">
-              <Button className="w-full">
-                <Pencil className="size-4" /> {mine ? "Edit in Builder" : "Duplicate in Builder"}
-              </Button>
-            </Link>
-          )}
+          <Button onClick={go(a.edit)}>
+            <Pencil className="size-4" /> Edit in Builder
+          </Button>
+          <Button onClick={go(a.copy)}>
+            <Copy className="size-4" /> New from it
+          </Button>
         </section>
 
-        {/* Projects */}
-        {caps.projects && (
-          <section>
-            <SectionTitle>Projects</SectionTitle>
-            <div className="space-y-2.5 text-sm">
-              <ProjectChips label="Opens with" ids={ws.advanced.projects ?? []} none="No default projects" names={projects} />
-              {lastRun && (
-                <ProjectChips label={`Last run, ${timeAgo(lastRun.startedAt)}`} ids={lastRun.projects ?? []} none="No projects" names={projects} />
-              )}
-            </div>
-            {/* Online it says when that arrives (trusted machines). */}
-            {(opensByLaunch(ws) || backend.target === "online") && (
-              <Button size="sm" className="mt-3" disabled={locked} onClick={() => openRun(ws.id)}>
-                <FolderGit2 className="size-3.5" /> Open with other projects…
-              </Button>
-            )}
-          </section>
-        )}
-
-        {/* Visibility */}
-        {mine && caps.sharing && (
-          <section>
-            <SectionTitle>Visibility</SectionTitle>
-            <Segmented
-              value={ws.visibility}
-              onChange={setVisibility}
-              className="w-full"
-              options={[
-                { value: "private", label: <><Lock className="size-3.5" /> Private</> },
-                { value: "shared", label: <><Users className="size-3.5" /> Shared</> },
-              ]}
-            />
-            <p className="mt-2 text-xs text-muted">
-              {ws.visibility === "private" && "Only you can see and open this wadspace."}
-              {ws.visibility === "shared" && "Only the people you pick can see and open it."}
-            </p>
-            {ws.visibility === "shared" && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {others.map((u) => {
-                  const on = ws.sharedWith.includes(u.username);
-                  return (
-                    <button
-                      key={u.username}
-                      type="button"
-                      onClick={() => toggleShare(u.username)}
-                      className={clsx("flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm ring-1 transition-colors", on ? "bg-accent-soft ring-accent" : "bg-surface-2 ring-line hover:ring-line-strong")}
-                    >
-                      <Avatar user={u} size={24} className="ring-0" /> {u.displayName}
-                      {on && <Check className="size-3.5 text-accent" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Storage */}
         <section>
-          <SectionTitle>Storage</SectionTitle>
-          <div className="divide-y divide-line overflow-hidden rounded-2xl ring-1 ring-line">
-            <StorageRow
-              icon={<HardDrive className="size-4" />}
-              title={isThisMachine(launchTarget) ? "This machine" : (machines.find((m) => m.id === launchTarget)?.label ?? "Your machine")}
-              status={!ws.installed ? `Not built ${isThisMachine(launchTarget) ? "here" : "there"} yet` : ws.local ? "Ready" : download ? `Downloading · ${Math.floor(download.progress * 100)}%` : "Image not downloaded"}
-              on={ws.local}
-              action={
-                isThisMachine(launchTarget) && ws.installed && !ws.local && !download ? (
-                  <Button size="sm" onClick={() => startDownload(ws)}>
-                    Download
-                  </Button>
-                ) : null
-              }
-            />
+          <SectionTitle>Built on</SectionTitle>
+          <div className="flex items-center gap-3 rounded-2xl bg-surface-2 px-3 py-2.5 ring-1 ring-line">
+            <Layers className="size-4 shrink-0 text-muted" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{r ? (r.customization ? `${r.customization.name} (${r.template.name})` : `${r.template.name} template`) : "Its template is gone"}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <ImageBadge image={imageKey(w.base)} />
+                {w.legacyImage && <Badge tone="accent-2">Runs its image from before layers</Badge>}
+              </div>
+            </div>
+            {r && <BuildButton image={imageKey(w.base)} />}
           </div>
         </section>
 
-        {/* Containers */}
+        {caps.projects && (
+          <section>
+            <SectionTitle>Project folders</SectionTitle>
+            <div className="space-y-2.5 text-sm">
+              <ProjectChips label="Opens with" ids={w.projects} none="No folders" names={projects} />
+              {lastRun && <ProjectChips label={`Last run, ${timeAgo(lastRun.startedAt)}`} ids={lastRun.projects ?? []} none="No folders" names={projects} />}
+            </div>
+          </section>
+        )}
+
         <section>
           <SectionTitle>Containers</SectionTitle>
           {running.length ? (
@@ -250,32 +131,33 @@ export function WadspaceDrawer() {
                   <Server className="size-4 text-muted" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">{m.label}</div>
-                    <div className="text-xs text-muted">{c.mode === "stream" ? "Streaming" : "Local session"} · {c.status === "running" ? `up ${uptime(c.startedAt)}` : "stopped"}</div>
+                    <div className="text-xs text-muted">
+                      {c.mode === "stream" ? "Streaming" : "On screen"} · {c.status === "running" ? `up ${uptime(c.startedAt)}` : "stopped"}
+                    </div>
                   </div>
                   <span className={clsx("size-2 shrink-0 rounded-full", c.status === "running" ? "bg-accent shadow-[0_0_10px_var(--accent)]" : "bg-faint")} />
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted">Not running anywhere.</p>
+            <p className="text-sm text-muted">Not on a machine yet: it's installed when it's first launched.</p>
           )}
         </section>
 
-        {/* History */}
-        {caps.history && <section>
-          <SectionTitle>Container history</SectionTitle>
-          <div className="-mx-2">
-            <RunHistory wadspaceId={ws.id} limit={8} />
-          </div>
-        </section>}
-
-        {mine && (
-          <section className="pt-2">
-            <Button variant="danger" className="w-full" onClick={remove}>
-              <Trash2 className="size-4" /> Delete
-            </Button>
+        {caps.history && (
+          <section>
+            <SectionTitle>Container history</SectionTitle>
+            <div className="-mx-2">
+              <RunHistory wadspaceId={w.id} limit={8} />
+            </div>
           </section>
         )}
+
+        <section className="pt-2">
+          <Button variant="danger" className="w-full" onClick={a.remove}>
+            <Trash2 className="size-4" /> Delete
+          </Button>
+        </section>
       </div>
     </Drawer>
   );
@@ -285,30 +167,11 @@ function ProjectChips({ label, ids, none, names }: { label: string; ids: string[
   return (
     <div>
       <div className="mb-1 text-xs text-muted">{label}</div>
-      <div className="flex flex-wrap gap-1.5">
-        {ids.length ? (
-          ids.map((id) => <Badge key={id}>{names.find((p) => p.id === id)?.name ?? "a deleted project"}</Badge>)
-        ) : (
-          <span className="text-xs text-faint">{none}</span>
-        )}
-      </div>
+      <div className="flex flex-wrap gap-1.5">{ids.length ? ids.map((id) => <Badge key={id}>{names.find((p) => p.id === id)?.name ?? "a deleted project"}</Badge>) : <span className="text-xs text-faint">{none}</span>}</div>
     </div>
   );
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">{children}</h3>;
-}
-
-function StorageRow({ icon, title, status, on, action }: { icon: React.ReactNode; title: string; status: string; on: boolean; action: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 bg-surface-2/50 px-3.5 py-3">
-      <span className={clsx("grid size-8 place-items-center rounded-xl", on ? "bg-accent-soft text-fg dark:text-accent" : "bg-surface-3 text-faint")}>{icon}</span>
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">{title}</div>
-        <div className="text-xs text-muted">{status}</div>
-      </div>
-      {action}
-    </div>
-  );
 }

@@ -7,7 +7,7 @@ import { customizationLayer, templateLayer } from "@core/layers";
 import type { Project, ProjectDraft } from "@core/projects";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
 import type { App, ContainerRun, Draft, FocusLock, LastSession, Machine, PublicUser, Wadspace } from "@/lib/types";
-import type { Backend, BuildProgress, Caps, LayerLibrary, LayerPatch, LaunchProgress, Topic } from "@/data/backend";
+import type { Backend, BuildProgress, Caps, LayerLibrary, LayerPatch, Topic } from "@/data/backend";
 import type { ImageRow, RunItem } from "@/data/layers";
 import { STARTERS } from "@core/catalog/catalog";
 
@@ -88,18 +88,18 @@ export class FakeBackend implements Backend {
     this.images.delete(`custom:${id}`);
     this.emit("customizations");
   }
-  async listWadspacesV2() {
+  async listWadspaces() {
     return [...this.wadspaces.values()];
   }
-  async saveWadspaceV2(w: WadspaceV2) {
+  async saveWadspace(w: WadspaceV2) {
     this.wadspaces.set(w.id, w);
     this.emit("wadspaces");
     return w;
   }
-  async patchWadspaceV2(id: string, patch: LayerPatch) {
+  async patchWadspace(id: string, patch: LayerPatch) {
     return this.patchIn(this.wadspaces, id, patch, "wadspaces");
   }
-  async deleteWadspaceV2(id: string) {
+  async deleteWadspace(id: string) {
     this.wadspaces.delete(id);
     this.emit("wadspaces");
   }
@@ -180,6 +180,9 @@ export class FakeBackend implements Backend {
   async machineScreen() {
     return this.screen;
   }
+  owner() {
+    return "me";
+  }
   async createStarters() {
     if (this.startersCreated) return [];
     this.startersCreated = true;
@@ -208,30 +211,21 @@ export class FakeBackend implements Backend {
   async apps(): Promise<App[]> {
     return [];
   }
-  async listWadspaces() {
+  async listOldWadspaces() {
     return this.old;
   }
-  getWadspace = nope("getWadspace");
-  createWadspace = nope("createWadspace");
-  patchWadspace = nope("patchWadspace");
-  deleteWadspace = nope("deleteWadspace");
-  async listDrafts() {
-    return this.drafts;
-  }
-  getDraft = nope("getDraft");
-  saveDraft = nope("saveDraft");
-  async deleteDraft(id: string) {
-    this.drafts = this.drafts.filter((d) => d.id !== id);
+  async discardDrafts() {
+    const n = this.drafts.length;
+    this.drafts = [];
+    return n;
   }
   async listMachines(): Promise<Machine[]> {
     return [];
   }
-  open = nope("open");
   container = nope("container");
   async getFocus(): Promise<{ focus: FocusLock | null; now: number }> {
     return { focus: null, now: Date.now() };
   }
-  startFocus = nope("startFocus");
   async lastSession(): Promise<LastSession | null> {
     return null;
   }
@@ -275,6 +269,5 @@ export class FakeBackend implements Backend {
     return { login: null, repos: [], updatedAt: null };
   }
   createGithubRepo = nope("createGithubRepo");
-  launch = nope("launch") as () => Promise<LaunchProgress>;
   cancelLaunch = nope("cancelLaunch");
 }

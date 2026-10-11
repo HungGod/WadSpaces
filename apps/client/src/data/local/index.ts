@@ -10,15 +10,14 @@
 // account when the machine is linked, clones them from GitHub with the
 // machine's github_token (/api/github) and mounts the clones when it launches
 // a wadspace (/api/launches). Tailscale is wadd's as well (/api/tailnet).
-import { toBuildSpec } from "@core/build";
 import catalog from "@core-data/apps.json";
-import { defaultAdvanced, newWadspaceId, type WadspaceSpec } from "@core/model";
+import { defaultAdvanced, type WadspaceSpec } from "@core/model";
 import { cleanDraft, toProjectDoc, type Project, type ProjectDraft } from "@core/projects";
 import { presetProjects, presetWadspace } from "@core/presets";
-import { toWaddSpec, type WaddSpec } from "@core/spec";
+import { type WaddSpec } from "@core/spec";
 import { imageDataUrl } from "@/lib/images";
 import { THIS_MACHINE } from "@/lib/machine";
-import type { App, Container, ContainerRun, Draft, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
+import type { App, Container, ContainerRun, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
 import {
   waddEvents,
   WaddError,
@@ -32,24 +31,19 @@ import {
   type WaddProject,
 } from "@/lib/wadd";
 import {
-  RestartNeeded,
   Unsupported,
   type Backend,
   type BuildProgress,
   type Caps,
   type ContainerAction,
-  type DraftInput,
   type GithubRepoList,
   type LaunchProgress,
   type NewRepo,
-  type LaunchRequest,
   type Topic,
-  type WadspaceInput,
-  type WadspacePatch,
 } from "../backend";
 import { ensureProjects, hasRepos, knownProjectIds, migrateRepos, withProjects } from "../projects";
-import { designRequest, toLaunchProgress, toProgress } from "./builds";
-import { LocalLibrary, type LibraryEntry } from "./library";
+import { toLaunchProgress, toProgress } from "./builds";
+import { LocalLibrary } from "./library";
 import { lastSession, onboarded, presetProjectsMade } from "./store";
 import { WaddLayerDocs, WaddMachine } from "./layers";
 import type { BrowserSetup, Customization, LayerKey, Template, WadspaceV2 } from "@core/layers";
@@ -149,7 +143,8 @@ export class LocalBackend implements Backend {
     }
   }
 
-  /** Wadspaces and drafts saved before projects: their repos become projects. */
+  /** Wadspaces saved before projects: their repos become projects (before
+   *  they move onto the layers, data/migrate.ts). */
   private async migrateLibrary() {
     let changed = false;
     for (const e of this.lib.entries()) {
@@ -157,15 +152,15 @@ export class LocalBackend implements Backend {
       await this.lib.put({ ...e, spec: { ...e.spec, advanced: await migrateRepos(this, e.spec.advanced) } });
       changed = true;
     }
-    for (const d of this.lib.drafts()) {
-      if (!hasRepos(d.advanced)) continue;
-      await this.lib.putDraft({ ...d, advanced: await migrateRepos(this, d.advanced) });
-      changed = true;
-    }
-    if (changed) {
-      this.emit("wadspaces");
-      this.emit("drafts");
-    }
+    if (changed) this.emit("wadspaces");
+  }
+
+  /** Drafts are gone from the Builder. wadd removes its library/drafts
+   *  itself; these are the ones an older app kept in its own storage. */
+  async discardDrafts() {
+    const drafts = this.lib.drafts();
+    for (const d of drafts) this.lib.removeDraft(d.id);
+    return drafts.length;
   }
 
   // ---------------------------------------------------- the Builder's layers
@@ -199,24 +194,24 @@ export class LocalBackend implements Backend {
     this.emit("customizations");
     this.emit("images");
   }
-  listWadspacesV2() {
+  listWadspaces() {
     return this.docs.wadspaces.list();
   }
   /** Kept in the library and installed here. */
-  async saveWadspaceV2(w: WadspaceV2, lib: LayerLibrary) {
+  async saveWadspace(w: WadspaceV2, lib: LayerLibrary) {
     const saved = await this.docs.wadspaces.put(w);
     await this.machine.install(saved, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== w.id), saved] });
     this.emit("wadspaces");
     return saved;
   }
-  async patchWadspaceV2(id: string, patch: LayerPatch, lib: LayerLibrary) {
+  async patchWadspace(id: string, patch: LayerPatch, lib: LayerLibrary) {
     const saved = await this.docs.wadspaces.patch(id, patch);
     // Its old image gone (its layers built): it runs on them from now on.
     if ("legacyImage" in patch) await this.machine.install(saved, lib);
     this.emit("wadspaces");
     return saved;
   }
-  async deleteWadspaceV2(id: string) {
+  async deleteWadspace(id: string) {
     await this.machine.uninstall(id);
     await this.docs.wadspaces.remove(id);
     this.emit("wadspaces");
@@ -248,6 +243,9 @@ export class LocalBackend implements Backend {
   }
   machineScreen() {
     return this.machine.screen();
+  }
+  owner() {
+    return LOCAL_USER;
   }
   async createStarters() {
     const made = await this.docs.createStarters();
@@ -412,7 +410,9 @@ export class LocalBackend implements Backend {
     };
   }
 
-  async listWadspaces() {
+  /** The wadspaces from before the layers (library designs and installed
+   *  presets), for the migration (data/migrate.ts). */
+  async listOldWadspaces() {
     await this.firstSnap;
     if (!this.specs.length) await this.refreshSpecs();
     await this.presetProjects().catch(() => {});
@@ -432,126 +432,6 @@ export class LocalBackend implements Backend {
       presetProjectsMade.add(s.id);
     }
     await this.refreshProjects();
-  }
-
-  async getWadspace(id: string) {
-    await this.firstSnap;
-    const ws = this.assemble(id);
-    if (!ws) throw new Error("That wadspace isn't on this machine.");
-    return ws;
-  }
-
-  async createWadspace(input: WadspaceInput) {
-    const now = new Date().toISOString();
-    const spec: WadspaceSpec = {
-      id: newWadspaceId(input.name),
-      name: input.name,
-      description: input.description,
-      layout: input.layout,
-      advanced: input.advanced ?? defaultAdvanced(tz()),
-      ...(input.agent && { agent: input.agent }),
-      ...(input.dockerfile && { dockerfile: input.dockerfile }),
-    };
-    await this.lib.put({ spec, visibility: input.visibility, templateId: input.templateId, createdAt: now, updatedAt: now });
-    this.emit("wadspaces");
-    return this.getWadspace(spec.id);
-  }
-
-  async patchWadspace(id: string, patch: WadspacePatch) {
-    const current = await this.getWadspace(id);
-    const now = new Date().toISOString();
-    const prev: LibraryEntry = this.lib.get(id) ?? { spec: current, visibility: current.visibility, createdAt: now, updatedAt: now };
-    const spec: WadspaceSpec = {
-      ...prev.spec,
-      ...(patch.name !== undefined && { name: patch.name }),
-      ...(patch.description !== undefined && { description: patch.description }),
-      ...(patch.layout && { layout: patch.layout }),
-      ...(patch.advanced && { advanced: patch.advanced }),
-      ...("agent" in patch && { agent: patch.agent }),
-      ...("dockerfile" in patch && { dockerfile: patch.dockerfile }),
-    };
-    const next: LibraryEntry = { ...prev, spec, visibility: patch.visibility ?? prev.visibility, updatedAt: now };
-    if (patch.deletedAt) next.deletedAt = patch.deletedAt;
-    else if (patch.deletedAt === null) delete next.deletedAt;
-    await this.lib.put(next);
-    await this.mirrorInstalled(id, spec.name, spec.advanced.hotkey ?? null, !next.deletedAt, spec);
-    this.emit("wadspaces");
-    return this.getWadspace(id);
-  }
-
-  /** The machine's own copy of an edited wadspace: its name, hotkey and
-   *  apps' saved sign-ins (from `design`) change now, the sign-ins at its
-   *  next start; the rest (apps, wallpaper, run settings) when the image is
-   *  rebuilt. A deleted one (not for good) is disabled: wadd leaves it out of
-   *  the HUD's switcher and frees its Super+number. */
-  async mirrorInstalled(id: string, name: string, hotkey: number | null, enabled = true, design?: WadspaceSpec) {
-    const installed = this.specs.find((s) => s.id === id);
-    if (!installed) return;
-    const signins = design ? (toBuildSpec(design, {}).spec.signins ?? []) : (installed.signins ?? []);
-    const sameSignIns = JSON.stringify(signins) === JSON.stringify(installed.signins ?? []);
-    if (installed.name === name && (installed.hotkey ?? null) === hotkey && (installed.enabled !== false) === enabled && sameSignIns) return;
-    const next = { ...installed, name, hotkey, enabled, signins: signins.length ? signins : undefined };
-    try {
-      await wadd.update(id, next);
-    } catch (e) {
-      // Restored after another took its Super+number: back without one.
-      if (!(enabled && hotkey != null && e instanceof WaddError && /hotkey/.test(e.message))) throw e;
-      await wadd.update(id, { ...next, hotkey: null });
-    }
-    await this.refreshSpecs();
-  }
-
-  /** Whether this machine has it: installed, or designed here. */
-  has(id: string): boolean {
-    return this.specs.some((s) => s.id === id) || !!this.lib.get(id);
-  }
-
-  async installCopy(copy: Wadspace, from: string) {
-    const original = this.specs.find((s) => s.id === from);
-    if (!original?.image || this.live(from)?.state.image_present === false || this.specs.some((s) => s.id === copy.id)) return false;
-    const { spec } = toBuildSpec(copy, { image: original.image });
-    await wadd.create(toWaddSpec(spec));
-    await this.refreshSpecs();
-    this.emit("wadspaces");
-    return true;
-  }
-
-  async deleteWadspace(id: string) {
-    if (this.specs.some((s) => s.id === id)) {
-      await wadd.remove(id);
-      await this.refreshSpecs();
-    }
-    await this.lib.remove(id);
-    this.emit("wadspaces");
-  }
-
-  // --------------------------------------------------------------- drafts
-  async listDrafts() {
-    return this.lib.drafts();
-  }
-  async getDraft(id: string) {
-    const d = this.lib.draft(id);
-    if (!d) throw new Error("That draft is gone.");
-    return d;
-  }
-  async saveDraft(id: string | null, input: DraftInput) {
-    const d: Draft = { ...input, id: id ?? crypto.randomUUID(), owner: LOCAL_USER, updatedAt: new Date().toISOString() };
-    await this.lib.putDraft(d);
-    this.emit("drafts");
-    return d;
-  }
-  async deleteDraft(id: string) {
-    await this.lib.removeDraft(id);
-    this.emit("drafts");
-  }
-
-  // --------------------------------------------------------------- builds
-  /** `design`: the wadspace as the account has it (the machine app), when it isn't designed here. */
-  async startBuild(wadspaceId: string, design?: Wadspace) {
-    if (!this.caps.localBuild) throw new Unsupported("Building on this machine (it needs a newer wadd)");
-    // The Rust wadd makes the build folder itself (no machine runs the Python one).
-    const ws = design ?? (await this.getWadspace(wadspaceId));
-    return (await wadd.buildDesign(await designRequest(ws, this.projects))).id;
   }
 
   async cancelBuild(id: string) {
@@ -730,22 +610,6 @@ export class LocalBackend implements Backend {
     this.emit("machines");
   }
 
-  // ------------------------------------------------------------- launches
-  async launch(req: LaunchRequest) {
-    this.needProjects();
-    let job;
-    try {
-      job = await wadd.createLaunch({ workspace: req.wadspaceId, projects: req.projectIds, restart: req.restart, background: req.background });
-    } catch (e) {
-      // wadd won't restart a running wadspace unasked; the app asks first.
-      if (e instanceof WaddError && e.status === 409 && /pass restart/.test(e.message)) throw new RestartNeeded(e.message);
-      throw e;
-    }
-    lastSession.set({ kind: "wadspace", wadspaceIds: [req.wadspaceId], machineId: THIS_MACHINE });
-    this.emit("session");
-    return toLaunchProgress({ ...job, from: 0, lines: [] });
-  }
-
   async cancelLaunch(id: string) {
     await wadd.cancelLaunch(id);
   }
@@ -816,25 +680,6 @@ export class LocalBackend implements Backend {
     ];
   }
 
-  /** `design`: as in startBuild. */
-  async open(_machineId: string, wadspaceId: string, design?: Wadspace) {
-    const installed = this.specs.find((s) => s.id === wadspaceId);
-    if (!installed) {
-      const ws = design ?? this.assemble(wadspaceId);
-      if (ws && ws.advanced.image) {
-        // Designed elsewhere but the image is known: add it to the machine.
-        const { spec } = toBuildSpec(ws, { image: ws.advanced.image });
-        await wadd.create(toWaddSpec(spec));
-        await this.refreshSpecs();
-      } else {
-        throw new Error(this.caps.localBuild ? "Build this wadspace first: open it in the Builder and press Build." : "This wadspace hasn't been built on this machine yet.");
-      }
-    }
-    await wadd.action(wadspaceId, "switch");
-    lastSession.set({ kind: "wadspace", wadspaceIds: [wadspaceId], machineId: THIS_MACHINE });
-    this.emit("session");
-  }
-
   async container(_machineId: string, containerId: string, action: ContainerAction) {
     if (action === "remove") {
       await wadd.remove(containerId);
@@ -859,18 +704,6 @@ export class LocalBackend implements Backend {
     // The clock starts when one is first opened; until then show the full time.
     const endsAt = s.ends_at ? s.ends_at * 1000 : now + minutes * 60_000;
     return { focus: { wadspaceIds: s.workspaces, startedAt: endsAt - minutes * 60_000, endsAt }, now };
-  }
-
-  async startFocus(_machineId: string, wadspaceIds: string[], minutes: number) {
-    await wadd.session(wadspaceIds, Math.max(1, Math.round(minutes)));
-    lastSession.set({ kind: "focus", wadspaceIds, machineId: THIS_MACHINE, minutes });
-    this.emit("session");
-  }
-
-  async beginSession(wadspaceIds: string[], minutes: number | null) {
-    await wadd.session(wadspaceIds, minutes == null ? null : Math.max(1, Math.round(minutes)), true);
-    if (minutes != null) lastSession.set({ kind: "focus", wadspaceIds, machineId: THIS_MACHINE, minutes });
-    this.emit("session");
   }
 
   async lastSession() {

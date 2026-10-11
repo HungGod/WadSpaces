@@ -37,8 +37,8 @@ function legacyImageOf(w: Wadspace): string | null {
  *  key in documents (the uid online, "local" offline). */
 export async function migrateToLayers(backend: Backend, owner: string, now = new Date().toISOString()): Promise<MigrationResult> {
   const [old, v2, templates, customizations, browsers, signins, projects] = await Promise.all([
+    backend.listOldWadspaces(),
     backend.listWadspaces(),
-    backend.listWadspacesV2(),
     backend.listTemplates(),
     backend.listCustomizations(),
     backend.listBrowsers(),
@@ -70,7 +70,7 @@ export async function migrateToLayers(backend: Backend, owner: string, now = new
     if (w.templateId) wadspace = { ...wadspace, deletedAt: now };
     else if (w.deletedAt) wadspace = { ...wadspace, deletedAt: w.deletedAt };
     lib.wadspaces.push(wadspace);
-    await backend.saveWadspaceV2(wadspace, lib);
+    await backend.saveWadspace(wadspace, lib);
     result.migrated.push(w.id);
     if (m.notice) result.notices.push(m.notice);
   }
@@ -80,13 +80,12 @@ export async function migrateToLayers(backend: Backend, owner: string, now = new
 
 /** Drafts are gone from the Builder: each one deleted, and the app's own copy. */
 export async function discardDrafts(backend: Backend): Promise<number> {
-  const drafts = await backend.listDrafts().catch(() => []);
-  for (const d of drafts) await backend.deleteDraft(d.id).catch(() => {});
+  const n = await backend.discardDrafts().catch(() => 0);
   try {
     // Named for the WadSpaces Client's old name, and kept until now.
     localStorage.removeItem("wadcreator.drafts.v1");
   } catch {
     // No storage: nothing kept there.
   }
-  return drafts.length;
+  return n;
 }

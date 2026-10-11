@@ -7,6 +7,8 @@ const src = fileURLToPath(new URL("./src", import.meta.url));
 // Data the Rust core (crates/wad-core) and the UI share: the app catalog and
 // the preset desktops.
 const coreData = fileURLToPath(new URL("../../crates/wad-core/data", import.meta.url));
+// The base image's feature scripts, which the Builder's app details show.
+const features = fileURLToPath(new URL("../../images/base/root/usr/local/lib/wadspaces/features", import.meta.url));
 // The web portal also serves the page machines sign in with GitHub on
 // (src/signin/machine-signin.ts).
 const pages = {
@@ -21,6 +23,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@core-data": coreData,
+      "@features": features,
       "@core": `${src}/core`,
       "@": src,
     },

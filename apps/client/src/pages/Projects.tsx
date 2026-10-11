@@ -126,7 +126,7 @@ export default function ProjectsPage() {
         <EmptyState
           icon={<FolderGit2 className="size-6" />}
           title="No projects yet"
-          body="Add one of your GitHub repositories (or make a new one), a folder or a drive. Then pick it when you open a wadspace, or as one of its defaults in the Builder."
+          body="Add one of your GitHub repositories (or make a new one), a folder or a drive. Then pick it for a wadspace in the Builder (Step 3), or for one run in the launcher."
           action={
             <Button variant="primary" onClick={() => setAdding("github")}>
               <FolderGit2 className="size-4" /> Add from GitHub
@@ -137,7 +137,7 @@ export default function ProjectsPage() {
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {projects.map((p) => {
             const st = status[p.id];
-            const defaults = wadspaces.filter((w) => w.advanced.projects?.includes(p.id));
+            const defaults = wadspaces.filter((w) => !w.deletedAt && w.projects.includes(p.id));
             const where = sourcePath(p.source);
             return (
               <div key={p.id} className="flex flex-col rounded-2xl border border-line bg-surface/70 p-4 transition-colors hover:border-line-strong">

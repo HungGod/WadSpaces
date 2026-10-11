@@ -23,8 +23,8 @@ describe("wallpaper CSS parsing", () => {
     expect(parseStops(["#2a0b2e 0%", "#7a1f3d 55%", "#ff8a3d 120%"]).at(-1)).toEqual({ color: "#ff8a3d", at: 1.2 });
   });
 
-  it("every preset parses into layers the renderer knows", () => {
-    for (const p of WALLPAPER_PRESETS) {
+  it("every gradient preset parses into layers the renderer knows", () => {
+    for (const p of WALLPAPER_PRESETS.filter((x) => x.wallpaper.type === "gradient")) {
       for (const layer of splitTop(p.wallpaper.value)) {
         expect(layer).toMatch(/^(linear-gradient\(|radial-gradient\(\d|#[0-9a-f]{3,8}$)/i);
       }

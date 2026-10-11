@@ -1,13 +1,18 @@
+// Secrets: what this machine keeps for its wadspaces to sign in with. Saved
+// sign-ins (each mounted into the wadspaces and WadBrowser setups whose slots
+// pick it) and the machine's tokens.
 import { useEffect, useState } from "react";
 import { Check, Cloud, KeyRound, LogOut, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Page } from "@/components/Page";
-import { ConfirmSignIn, NewSignIn, SignInAppIcon, signInAppName, usersOf } from "@/components/SignIns";
+import { appById, extensionById } from "@core/catalog/catalog";
+import { resolve, secretUse, type SecretUser } from "@core/layers";
+import { ConfirmSignIn, NewSignIn, SignInAppIcon, signInAppName } from "@/components/SignIns";
 import { openMachinePanel } from "@/components/machine/panels";
 import { Badge, Button, EmptyState, IconButton, Input, PageHeader } from "@/components/ui";
 import { backend } from "@/data";
 import { timeAgo } from "@/lib/format";
 import { hasLocal } from "@/lib/machine";
-import { useApp } from "@/lib/store";
+import { alive, useApp } from "@/lib/store";
 import { formatBytes, type WaddSecret, type WaddSignIn } from "@/lib/wadd";
 
 const ORIGIN: Record<WaddSecret["origin"], string> = {
@@ -21,6 +26,7 @@ const ORIGIN: Record<WaddSecret["origin"], string> = {
 export default function SecretsPage() {
   const signIns = useApp((s) => s.signIns);
   const wadspaces = useApp((s) => s.wadspaces);
+  const browsers = useApp((s) => s.browsers);
   const toast = useApp((s) => s.toast);
   const loadSignIns = useApp((s) => s.loadSignIns);
   const [making, setMaking] = useState(false);
@@ -35,6 +41,18 @@ export default function SecretsPage() {
   }, [loadSignIns]);
 
   const name = (wsId: string) => wadspaces.find((w) => w.id === wsId)?.name ?? wsId;
+  const use = secretUse(alive(wadspaces), alive(browsers));
+  const templates = useApp((s) => s.templates);
+  const customizations = useApp((s) => s.customizations);
+  /** What in it uses the sign-in: the web app, extension or app its slot is for. */
+  const slotLabel = (u: SecretUser) => {
+    const [kind, id] = u.slot.split(/:(.*)/s);
+    if (kind === "ext") return extensionById(id).name;
+    if (kind === "app") return appById(id)?.name ?? id;
+    const w = wadspaces.find((x) => x.id === u.id);
+    const webapps = u.kind === "browser" ? browsers.find((b) => b.id === u.id)?.webapps : w && resolve({ templates, customizations }, w.base)?.setup.webapps;
+    return webapps?.find((x) => x.id === id)?.name ?? id;
+  };
 
   const rename = async (s: WaddSignIn) => {
     const n = newName.trim();
@@ -75,7 +93,7 @@ export default function SecretsPage() {
             <EmptyState
               icon={<KeyRound className="size-6" />}
               title="No saved sign-ins yet"
-              body="In the Builder, right-click an app on the desktop and choose Sign-in to give it one (or make one here). Then sign in once in any wadspace that uses it."
+              body="Construct a wadspace in the Builder and its apps' sign-ins are saved here (or make one now). Then sign in once in any wadspace that uses it."
               action={
                 <Button variant="primary" onClick={() => setMaking(true)}>
                   <Plus className="size-4" /> New sign-in
@@ -85,9 +103,9 @@ export default function SecretsPage() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
               {signIns.map((s) => {
-                const users = usersOf(s.id, wadspaces);
-                // Installed here but not (or no longer) in a design you have.
-                const others = s.usedBy.filter((id) => !users.some((u) => u.ws.id === id));
+                const users = use[s.id] ?? [];
+                // Installed here but not (or no longer) in a wadspace you have.
+                const others = s.usedBy.filter((id) => !users.some((u) => u.id === id || `browser-${u.id}` === id));
                 return (
                   <div key={s.id} className="flex flex-col rounded-2xl border border-line bg-surface/70 p-4 transition-colors hover:border-line-strong">
                     <div className="flex items-start gap-3">
@@ -149,8 +167,8 @@ export default function SecretsPage() {
                         </Badge>
                       ))}
                       {users.map((u) => (
-                        <Badge key={`${u.ws.id}/${u.label}`} tone="accent-2">
-                          {u.ws.name} · {u.label}
+                        <Badge key={`${u.kind}/${u.id}/${u.slot}`} tone="accent-2">
+                          {u.name} · {slotLabel(u)}
                         </Badge>
                       ))}
                       {others.map((id) => (
@@ -167,7 +185,7 @@ export default function SecretsPage() {
           {secrets.length > 0 && (
             <>
               <h2 className="mb-3 mt-10 font-display text-base font-semibold">Tokens</h2>
-              <p className="mb-3 text-sm text-muted">Given to the wadspaces that ask for them (Builder → Advanced → Secrets). Their values never reach this page.</p>
+              <p className="mb-3 text-sm text-muted">Kept on this machine for its wadspaces (github_token lets git reach your repositories). Their values never reach this page.</p>
               <div className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface/70">
                 {secrets.map((t) => (
                   <div key={t.name} className="flex items-center gap-3 px-4 py-3">

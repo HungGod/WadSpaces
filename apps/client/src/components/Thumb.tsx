@@ -1,18 +1,18 @@
+// A wadspace's picture on cards and in the drawer: the desktop its layers
+// give, on its own background, with its project folders.
 import clsx from "clsx";
-import { AppWindow } from "lucide-react";
-import type { Wadspace } from "@/lib/types";
+import { desktopFor, resolve, type WadspaceV2 } from "@core/layers";
+import { useApp } from "@/lib/store";
 import { DesktopThumb } from "./desktop/DesktopThumb";
-import { APP_PRODUCTS, ProductMark } from "./Logo";
 
-export function Thumb({ ws, className }: { ws: Wadspace; className?: string }) {
-  // The machine's own apps have no desktop to draw: their mark instead.
-  if (ws.app) {
-    const product = APP_PRODUCTS[ws.id];
-    return (
-      <div className={clsx("grid aspect-video w-full place-items-center bg-surface-3 text-muted ring-1 ring-line", className)}>
-        {product ? <ProductMark product={product} className="aspect-square h-3/5 w-auto" /> : <AppWindow className="size-1/3" strokeWidth={1.5} />}
-      </div>
-    );
-  }
-  return <DesktopThumb layout={ws.layout} className={clsx("aspect-video w-full", className)} />;
+/** Drawn as on a smaller screen, so icons read at card size. */
+const ZOOM = 1.6;
+
+export function Thumb({ w, className, zoom = ZOOM }: { w: WadspaceV2; className?: string; zoom?: number }) {
+  const templates = useApp((s) => s.templates);
+  const customizations = useApp((s) => s.customizations);
+  const projects = useApp((s) => s.projects);
+  const r = resolve({ templates, customizations }, w.base);
+  const mounted = w.projects.flatMap((id) => projects.find((p) => p.id === id) ?? []);
+  return <DesktopThumb items={r ? desktopFor(r.template, r.setup, mounted) : []} wallpaper={w.wallpaper} zoom={zoom} className={clsx("aspect-video w-full", className)} />;
 }

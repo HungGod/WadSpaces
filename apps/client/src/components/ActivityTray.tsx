@@ -1,10 +1,14 @@
+// Background work in the sidebar: layer image builds (with their logs),
+// launches getting wadspaces ready, and image downloads on the machine.
 import { Link } from "react-router";
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { Check, CircleAlert, CloudDownload, Folder, Hammer, HardDrive, Loader2, Play, Rocket, X } from "lucide-react";
 import clsx from "clsx";
+import { imageRef, type LayerKey } from "@core/layers";
 import { cancelBuild, openBuilt, type BuildJob } from "@/lib/build";
 import type { LaunchJob } from "@/lib/launch";
+import { cancelLaunch } from "@/lib/launch";
 import { useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui";
 import { Button, Modal, Progress } from "./ui";
@@ -67,7 +71,10 @@ function BuildsTray({ narrow }: { narrow: boolean }) {
         <div key={b.id} className="group flex items-center gap-1 rounded-xl hover:bg-surface-2">
           <button type="button" onClick={() => setBuildLog(b.id)} className="min-w-0 flex-1 px-1.5 py-1.5 text-left" title="Show build log">
             <span className="flex items-baseline justify-between gap-2 text-xs">
-              <span className="truncate font-medium">{b.name}</span>
+              <span className="min-w-0 truncate">
+                <span className="font-medium">{b.name}</span>
+                {b.layer && <span className="block truncate font-mono text-[10.5px] text-faint">{imageRef(b.layer as LayerKey)}</span>}
+              </span>
               <span className={clsx("flex shrink-0 items-center gap-1 tabular-nums", b.status === "done" ? "font-medium text-fg dark:text-accent" : b.status === "error" ? "text-accent-2" : "text-faint")}>
                 {b.status === "done" && <Check className="size-3" strokeWidth={3} />}
                 {b.status === "error" && <CircleAlert className="size-3" />}
@@ -76,7 +83,7 @@ function BuildsTray({ narrow }: { narrow: boolean }) {
             </span>
             {b.status === "building" && <Progress value={b.progress} className="mt-1.5 !h-1" />}
           </button>
-          {b.status === "done" && (
+          {b.status === "done" && !b.layer && (
             <button type="button" onClick={() => openBuilt(b.wadspaceId)} className="grid size-7 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-fg" aria-label={`Open ${b.name}`} title="Open">
               <Play className="size-3.5 fill-current" />
             </button>
@@ -96,7 +103,7 @@ function BuildsTray({ narrow }: { narrow: boolean }) {
 function LaunchesTray({ narrow }: { narrow: boolean }) {
   const launches = useApp((s) => s.launches);
   const removeLaunch = useApp((s) => s.removeLaunch);
-  const openRun = useUi((s) => s.openRun);
+  const setLaunchLog = useApp((s) => s.setLaunchLog);
   if (!launches.length) return null;
   const isActive = (l: LaunchJob) => l.status === "queued" || l.status === "running";
 
@@ -112,7 +119,7 @@ function LaunchesTray({ narrow }: { narrow: boolean }) {
         done={!active.length}
         label={active.length ? `${active.length} wadspace${active.length > 1 ? "s" : ""} opening` : "Opened"}
         title={launches.map((l) => `${l.name} · ${launchText(l)}`).join("\n")}
-        onClick={() => openRun(first.wadspaceId, first.id)}
+        onClick={() => setLaunchLog(first.id)}
       />
     );
   }
@@ -124,7 +131,7 @@ function LaunchesTray({ narrow }: { narrow: boolean }) {
       </div>
       {launches.map((l) => (
         <div key={l.id} className="group flex items-start gap-1 rounded-xl hover:bg-surface-2">
-          <button type="button" onClick={() => openRun(l.wadspaceId, l.id)} className="min-w-0 flex-1 px-1.5 py-1.5 text-left" title="Show progress">
+          <button type="button" onClick={() => setLaunchLog(l.id)} className="min-w-0 flex-1 px-1.5 py-1.5 text-left" title="Show progress">
             <span className="flex items-baseline justify-between gap-2 text-xs">
               <span className="truncate font-medium">{l.name}</span>
               <span className={clsx("flex shrink-0 items-center gap-1 tabular-nums", l.status === "done" ? "font-medium text-fg dark:text-accent" : l.status === "error" ? "text-accent-2" : "text-faint")}>
@@ -175,10 +182,10 @@ const launchText = (l: LaunchJob) =>
 
 const statusText = (b: BuildJob) => (b.status === "done" ? "Ready" : b.status === "error" ? "Failed" : `${Math.floor(b.progress * 100)}%`);
 
-/** Background container downloads. Clicking one reopens its "while you wait" sheet. */
+/** Background container downloads. Clicking one opens its wadspace's details. */
 function DownloadsTray({ narrow }: { narrow: boolean }) {
   const downloads = useApp((s) => s.downloads);
-  const setWaitingFor = useApp((s) => s.setWaitingFor);
+  const setWaitingFor = useUi((s) => s.openDetails);
   if (!downloads.length) return null;
 
   if (narrow) {
@@ -230,7 +237,7 @@ export function BuildLog() {
       onClose={close}
       width={580}
       title={job && (job.status === "done" ? `${job.name} is ready` : job.status === "error" ? "Build failed" : `${job.rebuild ? "Rebuilding" : "Building"} ${job.name}`)}
-      subtitle={job && (job.status === "building" ? "You can close this: the build keeps going and the sidebar tracks it." : job.status === "done" ? "Built on this machine." : job.error)}
+      subtitle={job && (job.status === "building" ? "You can close this: the build keeps going and the sidebar tracks it." : job.status === "done" ? (job.layer ? `Built on the machine as ${imageRef(job.layer as LayerKey)}.` : "Built on this machine.") : job.error)}
     >
       {job && (
         <>
@@ -263,10 +270,15 @@ export function BuildLog() {
                 >
                   Dismiss
                 </Button>
-                {job.status === "done" && (
+                {job.status === "done" && job.layer && (
+                  <Link to="/builder" onClick={close}>
+                    <Button>Open the Builder</Button>
+                  </Link>
+                )}
+                {job.status === "done" && !job.layer && (
                   <>
-                    <Link to="/manager" onClick={close}>
-                      <Button>View in Wadspaces Manager</Button>
+                    <Link to="/machines" onClick={close}>
+                      <Button>View in Machines</Button>
                     </Link>
                     <Button
                       variant="primary"
@@ -288,3 +300,72 @@ export function BuildLog() {
   );
 }
 
+/** A launch, followed: the image and each project's folder getting ready, then the start, with its log. */
+export function LaunchLog() {
+  const job = useApp((s) => s.launches.find((l) => l.id === s.launchLog));
+  const setLaunchLog = useApp((s) => s.setLaunchLog);
+  const removeLaunch = useApp((s) => s.removeLaunch);
+  const log = useRef<HTMLDivElement>(null);
+  const close = () => setLaunchLog(null);
+  const active = !!job && (job.status === "queued" || job.status === "running");
+
+  useEffect(() => {
+    log.current?.scrollTo({ top: log.current.scrollHeight });
+  }, [job?.lines.length]);
+
+  return (
+    <Modal
+      open={!!job}
+      onClose={close}
+      width={580}
+      title={job && (job.status === "done" ? `${job.name} is open` : job.status === "error" ? `${job.name} didn't start` : job.status === "cancelled" ? "Cancelled" : `Opening ${job.name}`)}
+      subtitle={job && (active ? "You can close this: it keeps going and the sidebar tracks it." : job.error)}
+    >
+      {job && (
+        <>
+          <div className="space-y-1">
+            {job.parts.map((p) => (
+              <div key={p.key} className="flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-sm ring-1 ring-line">
+                {p.state === "done" ? (
+                  <Check className="size-4 shrink-0 text-accent" strokeWidth={3} />
+                ) : p.state === "error" ? (
+                  <CircleAlert className="size-4 shrink-0 text-accent-2" />
+                ) : p.state === "working" ? (
+                  <Loader2 className="size-4 shrink-0 animate-spin" />
+                ) : p.kind === "image" ? (
+                  <HardDrive className="size-4 shrink-0 text-faint" />
+                ) : (
+                  <Folder className="size-4 shrink-0 text-faint" />
+                )}
+                <span className="min-w-0 flex-1 truncate">{p.kind === "image" ? "Its image" : p.name}</span>
+                <span className="shrink-0 text-xs text-muted">{p.message ?? (p.state === "working" && p.progress != null ? `${Math.floor(p.progress * 100)}%` : "")}</span>
+              </div>
+            ))}
+          </div>
+          <div ref={log} className="mt-3 h-48 overflow-y-auto rounded-2xl bg-[#07040f] p-4 font-mono text-[12px] leading-relaxed text-[#e9e3ff] ring-1 ring-white/10">
+            {job.lines.map((l, i) => (
+              <div key={i} className="whitespace-pre-wrap break-words">
+                {l}
+              </div>
+            ))}
+          </div>
+          <Progress value={job.progress} className="mt-4" />
+          <div className="mt-5 flex justify-end gap-2">
+            {active ? (
+              <>
+                <Button variant="ghost" onClick={() => void cancelLaunch(job.id)}>
+                  Cancel
+                </Button>
+                <Button onClick={close}>Hide</Button>
+              </>
+            ) : (
+              <Button variant="ghost" onClick={() => removeLaunch(job.id)}>
+                Dismiss
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}

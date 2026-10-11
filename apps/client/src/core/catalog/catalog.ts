@@ -30,6 +30,9 @@ export interface AppDef {
   install: Install;
   /** The linuxserver.io image it follows, if one. */
   example: string | null;
+  /** Its licence, as its publisher gives it. */
+  license: string | null;
+  homepage: string | null;
   /** What a customization can set for it (Step 2). */
   options: "wadbrowser" | "vscode" | null;
   /** Opens a folder in a window: without one, projects get no desktop icon. */

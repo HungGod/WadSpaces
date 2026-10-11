@@ -8,6 +8,11 @@ export type { Backend, Caps, Topic } from "./backend";
 
 export let backend: Backend;
 
+/** Tests: the app on a backend of their own (test/fakeBackend.ts). */
+export function setBackendForTests(b: Backend) {
+  backend = b;
+}
+
 export async function initBackend(): Promise<Backend> {
   // Checked inline so the bundler drops the other branch's chunk.
   if (import.meta.env.VITE_TARGET === "online") {

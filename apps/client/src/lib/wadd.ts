@@ -73,7 +73,7 @@ export interface Snapshot {
   workspaces: MachineWorkspace[];
 }
 
-// A session, started from the machine's Home screen or from Wad Creator.
+// A session, started from the machine's Home screen or from the WadSpaces Client.
 // Times are epoch seconds. A focus session's clock starts the first time one
 // of its workspaces is on screen, so ends_at stays null until then.
 export interface Session {
@@ -425,7 +425,7 @@ export const wadd = {
     call<LaunchSummary>("POST", "/api/launches", body),
   launch: (id: string, since = 0) => call<LaunchUpdate>("GET", `/api/launches/${encodeURIComponent(id)}?since=${since}`),
   cancelLaunch: (id: string) => call<LaunchSummary>("DELETE", `/api/launches/${encodeURIComponent(id)}`),
-  // Wad Creator's library, kept by wadd
+  // The WadSpaces Client's library, kept by wadd
   library: <T,>(collection: LibraryCollection) => call<T[]>("GET", `/api/library/${collection}`),
   libraryPut: <T,>(collection: LibraryCollection, id: string, doc: T) => call<T>("PUT", `/api/library/${collection}/${encodeURIComponent(id)}`, doc),
   libraryDelete: (collection: LibraryCollection, id: string) => call("DELETE", `/api/library/${collection}/${encodeURIComponent(id)}`),
@@ -481,7 +481,7 @@ export const wadd = {
 };
 
 /** The library's collections in wadd (`/v1/library/{collection}`). */
-export type LibraryCollection = "wadspaces" | "templates" | "customizations" | "browsers" | "meta" | "drafts";
+export type LibraryCollection = "wadspaces" | "templates" | "customizations" | "browsers" | "meta";
 
 /** wadd's event stream (`state`, `build`, `launch`, …): `on(event, data)` for
  *  each one, `onDrop()` when the stream drops (it reconnects by itself).

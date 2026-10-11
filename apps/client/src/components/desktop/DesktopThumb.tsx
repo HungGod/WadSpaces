@@ -1,35 +1,42 @@
+// A desktop for cards: the image's desktop scaled down, nothing open, the
+// WadSpaces logo in the middle and on the Start button.
 import { useLayoutEffect, useRef, useState } from "react";
-import type { Layout } from "@/lib/types";
+import type { DesktopItem } from "@core/layers";
+import type { Wallpaper } from "@/lib/types";
 import { DesktopIcon } from "./DesktopIcon";
-import { TASKBAR_H, resolveIcons } from "./geometry";
+import { PANEL_H, START_W, cellAt } from "./geometry";
+import { LOGO, LOGO_SIZE, useScreen } from "./look";
 import { wallpaperStyle } from "./wallpapers";
 
-const VW = 1200;
-const VH = 675;
-
-/** Non-interactive, scaled-down render of a layout for cards and pickers. */
-export function DesktopThumb({ layout, className }: { layout: Layout; className?: string }) {
+/** Non-interactive, scaled-down render of a desktop for cards: the image's desktop, nothing open. VS Code with extensions gets a +. */
+/** `zoom`: draw it as on a screen this many times smaller, so icons read at card size (they wrap into columns sooner). */
+export function DesktopThumb({ items, wallpaper, className, zoom = 1 }: { items: DesktopItem[]; wallpaper: Wallpaper; className?: string; zoom?: number }) {
   const box = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(0);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const real = useScreen();
+  const screen = { w: Math.round(real.w / zoom), h: Math.round(real.h / zoom) };
 
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setScale(e.contentRect.width / VW));
+    const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  const pos = resolveIcons(layout.icons, { w: VW, h: VH - TASKBAR_H }, layout.grid);
+  // Cover the card, as a wallpaper would: the top-left (where icons start) stays in view.
+  const scale = size.w ? Math.max(size.w / screen.w, size.h / screen.h) : 0;
   return (
-    <div ref={box} className={className} style={{ position: "relative", overflow: "hidden", ...wallpaperStyle(layout.wallpaper) }}>
+    <div ref={box} className={className} style={{ position: "relative", overflow: "hidden", background: "#0b0b14" }}>
       {scale > 0 && (
-        <div className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ width: VW, height: VH, transform: `scale(${scale})` }}>
-          {layout.icons.map((i) => (
-            <DesktopIcon key={i.id} icon={i} x={pos[i.id].x} y={pos[i.id].y} />
-          ))}
-          <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 border-t border-white/10 bg-[#0a0614]/70 px-3" style={{ height: TASKBAR_H }}>
-            <img src="/brand/wadspaces-icon-dark-transparent.svg" alt="" className="size-7" />
+        <div className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ width: screen.w, height: screen.h, transform: `scale(${scale})`, ...wallpaperStyle(wallpaper) }}>
+          {<img src={LOGO} alt="" className="absolute" style={{ width: LOGO_SIZE, height: LOGO_SIZE, left: (screen.w - LOGO_SIZE) / 2, top: (screen.h - LOGO_SIZE) / 2 }} />}
+          {items.map((item, n) => {
+            const p = cellAt(n, screen.h);
+            return <DesktopIcon key={item.id} label={item.label} iconUrl={item.iconUrl} x={p.x} y={p.y} added={item.added} />;
+          })}
+          <div className="absolute inset-x-0 bottom-0 bg-[rgb(26,26,26)]" style={{ height: PANEL_H }}>
+            <div className="absolute left-1 top-1 rounded bg-[rgb(64,64,64)]" style={{ width: START_W - 8, height: PANEL_H - 8 }} />
           </div>
         </div>
       )}

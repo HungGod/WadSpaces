@@ -18,13 +18,9 @@ import type {
   BuildProgress,
   Caps,
   ContainerAction,
-  DraftInput,
   LaunchProgress,
-  LaunchRequest,
   NewRepo,
   Topic,
-  WadspaceInput,
-  WadspacePatch,
 } from "../backend";
 import { CloudBackend } from "../cloud";
 import { LocalBackend } from "../local";
@@ -87,22 +83,27 @@ export class MachineBackend implements Backend {
     await this.local.deleteImage(`custom:${id}`);
     await this.cloud.deleteCustomization(id);
   }
-  listWadspacesV2() {
-    return this.cloud.listWadspacesV2();
+  listWadspaces() {
+    return this.cloud.listWadspaces();
   }
-  async saveWadspaceV2(w: WadspaceV2, lib: LayerLibrary) {
-    const saved = await this.cloud.saveWadspaceV2(w);
+  async saveWadspace(w: WadspaceV2, lib: LayerLibrary) {
+    const saved = await this.cloud.saveWadspace(w);
     await this.local.machine.install(saved, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== w.id), saved] });
     return saved;
   }
-  async patchWadspaceV2(id: string, patch: LayerPatch, lib: LayerLibrary) {
-    const saved = await this.cloud.patchWadspaceV2(id, patch);
+  async patchWadspace(id: string, patch: LayerPatch, lib: LayerLibrary) {
+    const saved = await this.cloud.patchWadspace(id, patch);
     if ("legacyImage" in patch) await this.local.machine.install(saved, lib);
     return saved;
   }
-  async deleteWadspaceV2(id: string) {
+  async deleteWadspace(id: string) {
     await this.local.machine.uninstall(id);
-    await this.cloud.deleteWadspaceV2(id);
+    await this.cloud.deleteWadspace(id);
+  }
+  /** The account's drafts and any this machine kept. */
+  async discardDrafts() {
+    const [a, b] = await Promise.all([this.cloud.discardDrafts(), this.local.discardDrafts()]);
+    return a + b;
   }
   listBrowsers() {
     return this.cloud.listBrowsers();
@@ -130,6 +131,13 @@ export class MachineBackend implements Backend {
   }
   machineScreen() {
     return this.local.machineScreen();
+  }
+  owner() {
+    return this.cloud.owner();
+  }
+  buildingLayers() {
+    // Builds run here: their events say what's building.
+    return [];
   }
   createStarters() {
     return this.cloud.createStarters();
@@ -178,56 +186,13 @@ export class MachineBackend implements Backend {
     return { ...here, owner: this.username ?? here.owner };
   }
 
-  async listWadspaces() {
-    const [designs, here] = await Promise.all([this.cloud.listWadspaces(), this.local.listWadspaces()]);
+  /** The account's designs from before the layers, with this machine's own, for the migration. */
+  async listOldWadspaces() {
+    const [designs, here] = await Promise.all([this.cloud.listOldWadspaces(), this.local.listOldWadspaces()]);
     const byId = new Map(here.map((w) => [w.id, w]));
     const fromAccount = designs.map((d) => this.merge(d, byId.get(d.id)));
     const ids = new Set(designs.map((d) => d.id));
     return [...fromAccount, ...here.filter((w) => !ids.has(w.id)).map((w) => this.own(w))];
-  }
-
-  async getWadspace(id: string) {
-    const here = await this.local.getWadspace(id).catch(() => undefined);
-    try {
-      return this.merge(await this.cloud.getWadspace(id), here);
-    } catch (e) {
-      if (here) return this.own(here);
-      throw e;
-    }
-  }
-
-  createWadspace(input: WadspaceInput) {
-    return this.cloud.createWadspace(input);
-  }
-
-  async patchWadspace(id: string, patch: WadspacePatch) {
-    if (!this.cloud.knows(id)) return this.own(await this.local.patchWadspace(id, patch));
-    const saved = await this.cloud.patchWadspace(id, patch);
-    await this.local.mirrorInstalled(id, saved.name, saved.advanced.hotkey ?? null, !saved.deletedAt, saved);
-    return this.getWadspace(id);
-  }
-
-  async deleteWadspace(id: string) {
-    if (this.cloud.owns(id)) await this.cloud.deleteWadspace(id);
-    if (this.local.has(id)) await this.local.deleteWadspace(id);
-  }
-
-  installCopy(copy: Wadspace, from: string) {
-    return this.local.installCopy(copy, from);
-  }
-
-  // --------------------------------------------------------------- drafts
-  listDrafts() {
-    return this.cloud.listDrafts();
-  }
-  getDraft(id: string) {
-    return this.cloud.getDraft(id);
-  }
-  saveDraft(id: string | null, input: DraftInput) {
-    return this.cloud.saveDraft(id, input);
-  }
-  deleteDraft(id: string) {
-    return this.cloud.deleteDraft(id);
   }
 
   // ------------------------------------------------------------- machines
@@ -241,12 +206,6 @@ export class MachineBackend implements Backend {
   async listMachines(): Promise<Machine[]> {
     const [here, others] = await Promise.all([this.local.listMachines(), this.cloud.listMachines()]);
     return [...here, ...others];
-  }
-
-  async open(machineId: string, wadspaceId: string) {
-    if (!isThisMachine(machineId)) return this.cloud.open(machineId, wadspaceId);
-    const design = this.cloud.knows(wadspaceId) ? await this.getWadspace(wadspaceId) : undefined;
-    await this.local.open(machineId, wadspaceId, design);
   }
 
   container(machineId: string, containerId: string, action: ContainerAction) {
@@ -263,12 +222,6 @@ export class MachineBackend implements Backend {
   // ---------------------------------------------------------------- focus
   getFocus() {
     return this.local.getFocus();
-  }
-  startFocus(machineId: string, wadspaceIds: string[], minutes: number) {
-    return isThisMachine(machineId) ? this.local.startFocus(machineId, wadspaceIds, minutes) : this.cloud.startFocus();
-  }
-  beginSession(wadspaceIds: string[], minutes: number | null) {
-    return this.local.beginSession(wadspaceIds, minutes);
   }
   async lastSession() {
     return (await this.local.lastSession()) ?? (await this.cloud.lastSession());
@@ -341,10 +294,6 @@ export class MachineBackend implements Backend {
     return uid ? this.cloud.tellMachines(uid, "sync-secrets") : 0;
   }
 
-  // ----------------------------------------------------- launches, builds
-  launch(req: LaunchRequest) {
-    return this.local.launch(req);
-  }
   cancelLaunch(id: string) {
     return this.local.cancelLaunch(id);
   }
@@ -355,9 +304,6 @@ export class MachineBackend implements Backend {
     return this.local.onLaunch(fn);
   }
 
-  async startBuild(wadspaceId: string) {
-    return this.local.startBuild(wadspaceId, await this.getWadspace(wadspaceId));
-  }
   cancelBuild(id: string) {
     return this.local.cancelBuild(id);
   }

@@ -1,4 +1,4 @@
-// What this build of Wad Creator can reach, fixed at build time (VITE_TARGET):
+// What this build of the WadSpaces Client can reach, fixed at build time (VITE_TARGET):
 //
 //   offline  wadd on this machine and no account (development, and machines
 //            from before the app)

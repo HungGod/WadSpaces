@@ -76,8 +76,9 @@ fn custom(t: Value, c: Value) -> LayerBuildRequest {
     LayerBuildRequest { layer: format!("custom:{}", c["id"].as_str().unwrap()), template: t, customization: Some(c) }
 }
 
+/// A build's log once it's finished (in 30 s at most: a loaded CI machine is slow).
 async fn wait(e: &Env, id: &str) -> BuildLog {
-    for _ in 0..500 {
+    for _ in 0..3000 {
         let l = e.builds.log(id, 0).unwrap();
         if l.build.status.finished() {
             return l;

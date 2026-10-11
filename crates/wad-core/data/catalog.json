@@ -29,6 +29,8 @@
         "source": "Comes with the base image"
       },
       "example": null,
+      "license": "Part of WadSpaces",
+      "homepage": null,
       "options": "wadbrowser",
       "opensFolders": false,
       "secret": null
@@ -55,6 +57,8 @@
         "source": "Microsoft's .deb"
       },
       "example": "https://github.com/linuxserver/docker-vscode",
+      "license": "Proprietary (https://code.visualstudio.com/license)",
+      "homepage": "https://code.visualstudio.com",
       "options": "vscode",
       "opensFolders": true,
       "secret": null
@@ -89,6 +93,8 @@
         "source": "AppImage from GitHub releases"
       },
       "example": "https://github.com/linuxserver/docker-obsidian",
+      "license": "Proprietary (https://obsidian.md/eula)",
+      "homepage": "https://obsidian.md/",
       "options": null,
       "opensFolders": false,
       "secret": {
@@ -122,6 +128,8 @@
         "source": "AppImage from GitHub releases"
       },
       "example": null,
+      "license": "GPL-2.0+ and BSD-2-Clause",
+      "homepage": "https://www.mapeditor.org/",
       "options": null,
       "opensFolders": false,
       "secret": null
@@ -148,6 +156,8 @@
         "source": "AppImage from GitHub releases"
       },
       "example": null,
+      "license": "GPL-2.0",
+      "homepage": "https://libresprite.github.io",
       "options": null,
       "opensFolders": false,
       "secret": null
@@ -174,6 +184,8 @@
         "source": "AppImage from GitHub releases"
       },
       "example": "https://github.com/linuxserver/docker-audacity",
+      "license": "GPL-3.0-only",
+      "homepage": "https://www.audacityteam.org/",
       "options": null,
       "opensFolders": false,
       "secret": null
@@ -203,6 +215,8 @@
         "source": "Debian's package"
       },
       "example": null,
+      "license": "GPL-2.0+",
+      "homepage": "https://lmms.io/",
       "options": null,
       "opensFolders": false,
       "secret": null
@@ -237,6 +251,8 @@
         "source": "KDE's AppImage"
       },
       "example": "https://github.com/linuxserver/docker-krita",
+      "license": "GPL-3.0-only",
+      "homepage": "https://www.krita.org/",
       "options": null,
       "opensFolders": false,
       "secret": null
@@ -267,6 +283,8 @@
         "source": "Debian's package"
       },
       "example": "https://github.com/linuxserver/docker-openshot",
+      "license": "GPL-3.0-or-later",
+      "homepage": "https://www.openshot.org/",
       "options": null,
       "opensFolders": false,
       "secret": null
@@ -301,6 +319,8 @@
         "source": "Valve's .deb, 32-bit libraries"
       },
       "example": "https://github.com/linuxserver/docker-steam",
+      "license": "Proprietary",
+      "homepage": "https://store.steampowered.com/",
       "options": null,
       "opensFolders": false,
       "secret": {
@@ -338,6 +358,8 @@
         "source": "Built from source (linuxserver's build)"
       },
       "example": "https://github.com/linuxserver/docker-dolphin",
+      "license": "GPL-2.0+",
+      "homepage": "https://dolphin-emu.org",
       "options": null,
       "opensFolders": false,
       "secret": null
@@ -367,6 +389,8 @@
         "source": "Debian's package"
       },
       "example": null,
+      "license": "GPL-2.0-or-later",
+      "homepage": "https://obsproject.com",
       "options": null,
       "opensFolders": false,
       "secret": null

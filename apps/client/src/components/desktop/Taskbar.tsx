@@ -1,143 +1,95 @@
-import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { BatteryFull, Search, Volume2, Wifi } from "lucide-react";
+// selkies-desktop's panel, drawn to its sizes and colours (ui.c draw_frame):
+// a Start button, then one button per open window. No clock, tray or search:
+// the machine's HUD shows those, outside the wadspace.
+import { useState } from "react";
 import clsx from "clsx";
-import type { LayoutIcon } from "@/lib/types";
-import { TASKBAR_H } from "./geometry";
-import type { Win } from "./useWindows";
 import { localIcon } from "@core/catalog/icons";
+import type { MenuApp, MenuCategory } from "@core/layers";
+import { MENU_APP_W, MENU_CAT_W, MENU_ROW_H, PANEL_H, SMALL_ICON, START_W, TASK_GAP, appListOffset, taskButtonWidth } from "./geometry";
+import { LOGO } from "./look";
+import type { Win } from "./useWindows";
+
+const FONT = { fontFamily: "sans-serif" };
 
 interface Props {
+  screenW: number;
   wins: Win[];
   activeId: string | null;
-  icons: LayoutIcon[];
-  title: string;
+  menu: MenuCategory[];
+  menuOpen: boolean;
+  onToggleMenu: () => void;
   onWindowClick: (id: string) => void;
-  onLaunch: (icon: LayoutIcon) => void;
+  onLaunch: (app: MenuApp) => void;
 }
 
-export function Taskbar({ wins, activeId, icons, title, onWindowClick, onLaunch }: Props) {
-  const [now, setNow] = useState<Date | null>(null);
-  const [menu, setMenu] = useState(false);
-  const [q, setQ] = useState("");
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setNow(new Date());
-    const t = setInterval(() => setNow(new Date()), 15_000);
-    return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = (e: PointerEvent) => !menuRef.current?.contains(e.target as Node) && setMenu(false);
-    window.addEventListener("pointerdown", close, true);
-    return () => window.removeEventListener("pointerdown", close, true);
-  }, [menu]);
-
-  const filtered = icons.filter((i) => i.label.toLowerCase().includes(q.toLowerCase()));
-
+export function Taskbar({ screenW, wins, activeId, menu, menuOpen, onToggleMenu, onWindowClick, onLaunch }: Props) {
+  const btnW = taskButtonWidth(screenW, wins.length);
   return (
-    <div
-      ref={menuRef}
-      className="absolute inset-x-0 bottom-0 z-[9000] flex items-center gap-1 border-t border-white/10 bg-[#0a0614]/70 px-2 text-white backdrop-blur-xl"
-      style={{ height: TASKBAR_H }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-    >
-      <button
-        type="button"
-        aria-label="Start"
-        onClick={() => setMenu((m) => !m)}
-        className={clsx("grid size-9 place-items-center rounded-lg transition-colors hover:bg-white/10", menu && "bg-white/15")}
-      >
-        <img src="/brand/wadspaces-icon-dark-transparent.svg" alt="" className="size-7" draggable={false} />
-      </button>
-
-      <div className="mx-1 h-5 w-px bg-white/10" />
-
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-        {wins.map((w) => (
+    <>
+      <div className="absolute inset-x-0 bottom-0 z-[9000] bg-[rgb(26,26,26)]" style={{ height: PANEL_H, ...FONT }} onPointerDown={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          aria-label="Start"
+          onClick={onToggleMenu}
+          className="absolute left-1 top-1 grid place-items-center rounded bg-[rgb(64,64,64)]"
+          style={{ width: START_W - 8, height: PANEL_H - 8 }}
+        >
+          <img src={LOGO} alt="" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
+        </button>
+        {wins.map((w, i) => (
           <button
             key={w.id}
             type="button"
             onClick={() => onWindowClick(w.id)}
+            title={w.title}
             className={clsx(
-              "relative flex h-9 max-w-[180px] shrink-0 items-center gap-2 rounded-lg px-2.5 text-[12.5px] transition-colors",
-              w.id === activeId ? "bg-white/15" : "hover:bg-white/10",
-              w.minimized && "opacity-60",
+              "absolute top-[3px] flex items-center gap-[5px] overflow-hidden whitespace-nowrap rounded border border-[rgb(102,102,102)] pl-[5px] text-left text-[12px] text-[rgb(230,230,230)]",
+              w.id === activeId ? "bg-[rgb(77,77,77)]" : w.minimized ? "bg-[rgb(13,13,13)]" : "bg-[rgb(38,38,38)]",
             )}
+            style={{ left: START_W + TASK_GAP + i * (btnW + TASK_GAP), width: btnW, height: PANEL_H - 6 }}
           >
-            <img src={localIcon(w.iconUrl)} alt="" className="size-4 rounded-sm" draggable={false} />
-            <span className="truncate">{w.title}</span>
-            <span
-              className={clsx(
-                "absolute bottom-0.5 left-1/2 h-[3px] -translate-x-1/2 rounded-full transition-all",
-                w.id === activeId ? "w-5 bg-[#c6ff1f]" : "w-1.5 bg-white/50",
-              )}
-            />
+            <img src={localIcon(w.iconUrl)} alt="" className="shrink-0 object-contain" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
+            <span className="overflow-hidden pr-[5px]">{w.title}</span>
           </button>
         ))}
       </div>
+      {menuOpen && <StartMenu menu={menu} onLaunch={onLaunch} />}
+    </>
+  );
+}
 
-      <div className="flex items-center gap-2.5 px-2 text-white/80">
-        <Wifi className="size-4" />
-        <Volume2 className="size-4" />
-        <BatteryFull className="size-4" />
-        <div className="text-right text-[11px] leading-tight tabular-nums" suppressHydrationWarning>
-          {now && (
-            <>
-              <div>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-              <div className="text-white/50">{now.toLocaleDateString([], { month: "short", day: "numeric" })}</div>
-            </>
-          )}
-        </div>
+/** Categories on the left; hovering one shows its apps beside it. Clicking an app opens it and closes the menu. */
+function StartMenu({ menu, onLaunch }: { menu: MenuCategory[]; onLaunch: (app: MenuApp) => void }) {
+  const [hovered, setHovered] = useState(-1);
+  const cat = menu[hovered];
+  const { catH, appH, fromBottom } = appListOffset(menu.length, Math.max(0, hovered), cat?.apps.length ?? 0);
+  const row = "flex w-full items-center text-left text-[13px] text-white hover:bg-[rgb(77,77,77)]";
+
+  return (
+    <div className="absolute inset-0 z-[9100]" style={FONT} onPointerDown={(e) => e.stopPropagation()}>
+      <div className="absolute left-[2px] overflow-y-auto rounded-lg bg-[rgb(38,38,38)] py-[5px]" style={{ bottom: PANEL_H + 4, width: MENU_CAT_W, height: catH }}>
+        {menu.map((c, i) => (
+          <div key={c.name} onPointerEnter={() => setHovered(i)} className={clsx(row, "relative pl-[10px]", i === hovered && "bg-[rgb(77,77,77)]")} style={{ height: MENU_ROW_H }}>
+            {c.name}
+            <svg className="absolute" style={{ left: 158, top: 9 }} width="9" height="12" viewBox="0 0 9 12" fill="none" stroke="white" strokeWidth="1.5">
+              <path d="M2 1l5 5-5 5" />
+            </svg>
+          </div>
+        ))}
       </div>
-
-      <AnimatePresence>
-        {menu && (
-          <motion.div
-            initial={{ opacity: 0, y: 12, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.98, transition: { duration: 0.1 } }}
-            className="absolute bottom-[calc(100%+8px)] left-2 w-[340px] rounded-2xl border border-white/10 bg-[#140d22]/90 p-3 shadow-2xl backdrop-blur-2xl"
-          >
-            <div className="mb-3 flex items-center gap-2 rounded-lg bg-white/5 px-2.5 py-2 ring-1 ring-white/10">
-              <Search className="size-4 text-white/50" />
-              <input
-                autoFocus
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search apps"
-                className="w-full bg-transparent text-sm outline-none placeholder:text-white/40"
-              />
-            </div>
-            <div className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wider text-white/40">{title}</div>
-            {filtered.length ? (
-              <div className="grid grid-cols-4 gap-1">
-                {filtered.map((i) => (
-                  <button
-                    key={i.id}
-                    type="button"
-                    onClick={() => {
-                      onLaunch(i);
-                      setMenu(false);
-                    }}
-                    className="flex flex-col items-center gap-1.5 rounded-lg p-2 text-[11px] hover:bg-white/10"
-                  >
-                    <img src={localIcon(i.iconUrl)} alt="" className="size-8 rounded-md" draggable={false} />
-                    <span className="line-clamp-1">{i.label}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="px-1 py-6 text-center text-sm text-white/50">No apps on this desktop yet.</p>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {cat && (
+        <div
+          className="absolute overflow-y-auto rounded-lg bg-[rgb(46,46,46)] py-[5px]"
+          style={{ left: 2 + MENU_CAT_W + 4, bottom: PANEL_H + 4 + fromBottom - appH, width: MENU_APP_W, height: appH }}
+        >
+          {cat.apps.map((a) => (
+            <button key={a.key} type="button" onClick={() => onLaunch(a)} className={clsx(row, "gap-[10px] pl-[10px]")} style={{ height: MENU_ROW_H }}>
+              <img src={localIcon(a.iconUrl)} alt="" className="shrink-0 object-contain" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
+              <span className="truncate">{a.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

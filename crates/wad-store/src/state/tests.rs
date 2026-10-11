@@ -113,9 +113,15 @@ fn session_link_library_and_secrets() {
     assert!(link.linked && link.machine_id.as_deref() == Some("m1"));
     assert!(!serde_json::to_string(&link).unwrap().contains("SECRET"));
 
-    write(dir, "library/drafts/x.json", &json!({"id": "x", "name": "Draft"}).to_string());
-    assert_eq!(st.library("drafts").unwrap().len(), 1);
+    write(dir, "library/browsers/x.json", &json!({"id": "x", "name": "Mail"}).to_string());
+    assert_eq!(st.library("browsers").unwrap().len(), 1);
     assert_eq!(st.library("wadspaces").unwrap().len(), 0);
+    // Drafts from before the layers: not a collection now, and removed.
+    write(dir, "library/drafts/x.json", &json!({"id": "x", "name": "Draft"}).to_string());
+    assert!(st.library("drafts").is_none());
+    assert_eq!(st.discard_drafts().unwrap(), 1);
+    assert!(!dir.join("library/drafts").exists());
+    assert_eq!(st.discard_drafts().unwrap(), 0);
     assert!(st.library("../etc").is_none());
 
     write(dir, "seeded-secrets.json", &json!({"github_token": "abc"}).to_string());

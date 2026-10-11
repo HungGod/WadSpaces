@@ -1,141 +1,55 @@
-export interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+// The desktop as the image draws it: selkies-desktop's fixed sizes
+// (selkies-project/selkies-desktop, desktop.h and ui.c), in logical pixels.
+// The image has no settings for any of these, so neither does the Builder.
+
 export interface Size {
   w: number;
   h: number;
 }
-export type SnapState = "normal" | "max" | "left" | "right";
-export type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
-export const MIN_W = 260;
-export const MIN_H = 170;
-/** Distance from an edge (px) at which a dragged window offers to snap. */
-export const SNAP_EDGE = 10;
-export const TASKBAR_H = 46;
-
-export const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), Math.max(min, max));
-
-export const toPx = (r: Rect, a: Size): Rect => ({ x: r.x * a.w, y: r.y * a.h, w: r.w * a.w, h: r.h * a.h });
-export const toFrac = (r: Rect, a: Size): Rect => ({ x: r.x / a.w, y: r.y / a.h, w: r.w / a.w, h: r.h / a.h });
-
-/** Rect for a snapped state, in fractions of the work area. */
-export function snapRect(state: Exclude<SnapState, "normal">): Rect {
-  if (state === "left") return { x: 0, y: 0, w: 0.5, h: 1 };
-  if (state === "right") return { x: 0.5, y: 0, w: 0.5, h: 1 };
-  return { x: 0, y: 0, w: 1, h: 1 };
-}
-
-/** Keep a px rect fully inside the work area, shrinking it if the area is too small. */
-export function clampRect(r: Rect, a: Size): Rect {
-  const minW = Math.min(MIN_W, a.w);
-  const minH = Math.min(MIN_H, a.h);
-  const w = clamp(r.w, minW, a.w);
-  const h = clamp(r.h, minH, a.h);
-  return { w, h, x: clamp(r.x, 0, a.w - w), y: clamp(r.y, 0, a.h - h) };
-}
-
-/** Resize from a handle. Edges stop at the work-area boundary and at the minimum size. */
-export function resizeRect(start: Rect, handle: Handle, dx: number, dy: number, a: Size): Rect {
-  const minW = Math.min(MIN_W, a.w);
-  const minH = Math.min(MIN_H, a.h);
-  let { x, y, w, h } = start;
-  if (handle.includes("e")) w = clamp(start.w + dx, minW, a.w - start.x);
-  if (handle.includes("s")) h = clamp(start.h + dy, minH, a.h - start.y);
-  if (handle.includes("w")) {
-    const right = start.x + start.w;
-    x = clamp(start.x + dx, 0, right - minW);
-    w = right - x;
-  }
-  if (handle.includes("n")) {
-    const bottom = start.y + start.h;
-    y = clamp(start.y + dy, 0, bottom - minH);
-    h = bottom - y;
-  }
-  return { x, y, w, h };
-}
-
-/** Which snap zone (if any) the pointer is in, in work-area px coordinates. */
-export function snapZone(px: number, py: number, a: Size): Exclude<SnapState, "normal"> | null {
-  if (py <= SNAP_EDGE) return "max";
-  if (px <= SNAP_EDGE) return "left";
-  if (px >= a.w - SNAP_EDGE) return "right";
-  return null;
-}
-
-// ---- Desktop icon grid ----
-export const CELL_W = 92;
+/** The bottom panel. It reserves its height, so maximized windows stop above it. */
+export const PANEL_H = 30;
+/** The Start button's slot at the left of the panel (the button itself is 8px narrower). */
+export const START_W = 80;
+/** Icons in the panel and the Start menu. */
+export const SMALL_ICON = 16;
+/** A desktop icon's picture. */
+export const DESKTOP_ICON = 48;
+/** One desktop icon's cell. */
+export const CELL_W = 96;
 export const CELL_H = 104;
+/** Gap from the screen's top-left corner to the first cell. */
 export const GRID_PAD = 10;
-export const ICON_W = 84;
-export const ICON_H = 92;
+/** Taskbar buttons: at most this wide, with this gap between them. */
+export const TASK_MAX_W = 150;
+export const TASK_GAP = 5;
+/** The Start menu: category and app lists, rows, and how tall they can get. */
+export const MENU_CAT_W = 180;
+export const MENU_APP_W = 250;
+export const MENU_ROW_H = 30;
+export const MENU_MAX_H = 600;
 
-export function gridDims(a: Size) {
-  return {
-    cols: Math.max(1, Math.floor((a.w - GRID_PAD * 2 + (CELL_W - ICON_W)) / CELL_W)),
-    rows: Math.max(1, Math.floor((a.h - GRID_PAD * 2 + (CELL_H - ICON_H)) / CELL_H)),
-  };
+/** How many icons fit in a column above the panel. */
+export const rowsFor = (screenH: number) => Math.max(1, Math.floor((screenH - PANEL_H) / CELL_H));
+
+/** Where the n-th desktop icon goes (get_desktop_cell): down each column, then the next column. */
+export function cellAt(index: number, screenH: number) {
+  const rows = rowsFor(screenH);
+  return { x: Math.floor(index / rows) * CELL_W + GRID_PAD, y: (index % rows) * CELL_H + GRID_PAD };
 }
 
-export function snapToGrid(px: number, py: number, a: Size) {
-  const { cols, rows } = gridDims(a);
-  const col = clamp(Math.round((px - GRID_PAD) / CELL_W), 0, cols - 1);
-  const row = clamp(Math.round((py - GRID_PAD) / CELL_H), 0, rows - 1);
-  return { col, row, cols, rows };
+/** Width of each taskbar button for this many open windows. */
+export function taskButtonWidth(screenW: number, windows: number) {
+  if (!windows) return TASK_MAX_W;
+  const room = screenW - START_W - TASK_GAP - windows * TASK_GAP;
+  return Math.max(SMALL_ICON + 10, Math.min(TASK_MAX_W, Math.floor(room / windows)));
 }
 
-export const cellToPx = (col: number, row: number) => ({ x: GRID_PAD + col * CELL_W, y: GRID_PAD + row * CELL_H });
-
-type Cell = { col: number; row: number };
-type IconLike = { id: string; x: number; y: number; cell?: Cell };
-
-/** Desired grid cell for an icon: its stored cell, or its free position snapped. */
-const wantedCell = (i: IconLike, a: Size): Cell => i.cell ?? snapToGrid(i.x * a.w, i.y * a.h, a);
-
-/**
- * Resolve every icon to a px position for a given work area.
- * In grid mode, cells are placed in order (column-major like a real desktop): rows that don't fit
- * wrap into the next column and collisions move to the next free cell, so icons never overlap.
- */
-export function resolveIcons(icons: IconLike[], a: Size, grid: boolean) {
-  const out: Record<string, { x: number; y: number; cell?: Cell }> = {};
-  if (!grid) {
-    for (const i of icons) out[i.id] = { x: clamp(i.x * a.w, 0, a.w - ICON_W), y: clamp(i.y * a.h, 0, a.h - ICON_H) };
-    return out;
-  }
-  const { cols, rows } = gridDims(a);
-  const total = cols * rows;
-  const taken = new Set<number>();
-  for (const i of icons) {
-    const want = wantedCell(i, a);
-    let idx = clamp(Math.min(want.col, cols - 1) * rows + want.row, 0, total - 1);
-    for (let n = 0; n < total && taken.has(idx); n++) idx = (idx + 1) % total;
-    taken.add(idx);
-    const cell = { col: Math.floor(idx / rows), row: idx % rows };
-    out[i.id] = { ...cellToPx(cell.col, cell.row), cell };
-  }
-  return out;
-}
-
-/** First free grid cell (column-major) given the icons already on the desktop. */
-export function nextFreeCell(icons: IconLike[], a: Size, from: Cell = { col: 0, row: 0 }, ignoreId?: string): Cell {
-  const { cols, rows } = gridDims(a);
-  const total = cols * rows;
-  const resolved = resolveIcons(icons.filter((i) => i.id !== ignoreId), a, true);
-  const taken = new Set(Object.values(resolved).map((p) => p.cell!.col * rows + p.cell!.row));
-  let idx = clamp(Math.min(from.col, cols - 1) * rows + Math.min(from.row, rows - 1), 0, total - 1);
-  for (let n = 0; n < total && taken.has(idx); n++) idx = (idx + 1) % total;
-  return { col: Math.floor(idx / rows), row: idx % rows };
-}
-
-/** Readable text color (near-black or white) for a background hex color. */
-export function inkFor(hex: string) {
-  const m = hex.replace("#", "").match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
-  if (!m) return "#ffffff";
-  const [r, g, b] = m.slice(1).map((v) => parseInt(v, 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return lum > 0.45 ? "#0a0614" : "#ffffff";
+/** Where the app list sits for the hovered category (update_menu_heights): beside it, kept on screen. */
+export function appListOffset(categories: number, hovered: number, apps: number) {
+  const catH = Math.min(categories * MENU_ROW_H + 10, MENU_MAX_H);
+  const appH = Math.min(apps * MENU_ROW_H + 10, MENU_MAX_H);
+  const centre = catH - 5 - hovered * MENU_ROW_H - 15;
+  const fromBottom = Math.min(MENU_MAX_H, Math.max(appH, Math.round(centre + appH / 2)));
+  return { catH, appH, fromBottom };
 }

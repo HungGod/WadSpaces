@@ -2,17 +2,16 @@
 // build time by VITE_TARGET (see index.ts and lib/machine.ts):
 //
 //   offline  local/    wadd on this machine (HTTP + server-sent events); the
-//                      library and drafts are kept on the machine.
+//                      Builder's documents are kept in its library.
 //   online   cloud/    Firebase Auth and Firestore, and the machines' cloud
 //                      relay (users/{uid}/machines/*/commands).
-//   machine  machine/  both: the account for you and your designs, wadd for
-//                      this machine.
+//   machine  machine/  both: the account for you and your documents, wadd
+//                      for this machine.
 //
 // The UI keys people by username (owner, sharedWith, run history); each
 // backend translates to whatever it stores.
-import { dropFileIcons } from "@core/model";
 import type { GithubRepo, Project, ProjectDraft, ProjectStatus } from "@core/projects";
-import type { App, ContainerRun, Draft, FocusLock, LastSession, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
+import type { App, ContainerRun, FocusLock, LastSession, Machine, PublicUser, TailnetStatus, Wadspace } from "@/lib/types";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
 import type { BrowserSetup, Customization, LayerKey, Library, Template, WadspaceV2 } from "@core/layers";
 import type { ImageRow, RunItem } from "./layers";
@@ -31,17 +30,6 @@ export interface Caps {
   /** Saved sign-ins, kept on this machine and mounted into wadspaces. */
   signins: boolean;
 }
-
-export type WadspaceInput = Pick<Wadspace, "name" | "description" | "visibility" | "layout" | "advanced" | "agent" | "dockerfile" | "templateId"> & {
-  sharedWith?: string[];
-};
-
-export type WadspacePatch = Partial<Pick<Wadspace, "name" | "description" | "visibility" | "sharedWith" | "layout" | "advanced" | "agent" | "dockerfile">> & {
-  /** Set: deleted, not for good. null: restored. */
-  deletedAt?: string | null;
-};
-
-export type DraftInput = Omit<Draft, "id" | "owner" | "updatedAt">;
 
 export type ContainerAction = "start" | "stop" | "restart" | "download" | "remove";
 
@@ -87,15 +75,6 @@ export interface LaunchProgress {
   parts: LaunchPart[];
   from: number;
   lines: string[];
-}
-
-export interface LaunchRequest {
-  wadspaceId: string;
-  projectIds: string[];
-  /** Restart it when it's running with other projects. */
-  restart?: boolean;
-  /** Start it without switching the screen to it. */
-  background?: boolean;
 }
 
 /** Offline: whether wadd has a github_token and whose it is. Online: whether
@@ -152,7 +131,6 @@ export interface FolderListing {
 export type Topic =
   | "user"
   | "wadspaces"
-  | "drafts"
   | "machines"
   | "focus"
   | "session"
@@ -193,10 +171,10 @@ export interface Backend {
   patchCustomization(id: string, patch: LayerPatch): Promise<Customization>;
   deleteCustomization(id: string): Promise<void>;
   /** Saved on a machine (offline, the machine app): installed there too. */
-  listWadspacesV2(): Promise<WadspaceV2[]>;
-  saveWadspaceV2(w: WadspaceV2, lib: LayerLibrary): Promise<WadspaceV2>;
-  patchWadspaceV2(id: string, patch: LayerPatch, lib: LayerLibrary): Promise<WadspaceV2>;
-  deleteWadspaceV2(id: string): Promise<void>;
+  listWadspaces(): Promise<WadspaceV2[]>;
+  saveWadspace(w: WadspaceV2, lib: LayerLibrary): Promise<WadspaceV2>;
+  patchWadspace(id: string, patch: LayerPatch, lib: LayerLibrary): Promise<WadspaceV2>;
+  deleteWadspace(id: string): Promise<void>;
   listBrowsers(): Promise<BrowserSetup[]>;
   saveBrowser(b: BrowserSetup): Promise<BrowserSetup>;
   patchBrowser(id: string, patch: LayerPatch): Promise<BrowserSetup>;
@@ -215,6 +193,11 @@ export interface Backend {
   /** On a library's first load: the starter templates (Writing, Dev), made
    *  once as the user's own. The ones made now. */
   createStarters(): Promise<Template[]>;
+  /** The user's key in the Builder's documents: the uid online, "local" offline. */
+  owner(): string;
+  /** Online: the layers the launch machine is building as far as the app
+   *  knows (its heartbeat has no build log). Offline, build events say so. */
+  buildingLayers?(): string[];
 
   /** Settle what this backend can do before the app renders (e.g. which wadd). */
   init?(): Promise<void>;
@@ -232,24 +215,12 @@ export interface Backend {
 
   apps(): Promise<App[]>;
 
-  listWadspaces(): Promise<Wadspace[]>;
-  getWadspace(id: string): Promise<Wadspace>;
-  createWadspace(input: WadspaceInput): Promise<Wadspace>;
-  patchWadspace(id: string, patch: WadspacePatch): Promise<Wadspace>;
-  /** For good (patchWadspace's deletedAt is the undoable delete). */
-  deleteWadspace(id: string): Promise<void>;
-  /** Offline: install `copy` (a clone of `from`) on this machine with `from`'s
-   *  image, so it opens without a build. False when `from` isn't installed here. */
-  installCopy?(copy: Wadspace, from: string): Promise<boolean>;
-
-  listDrafts(): Promise<Draft[]>;
-  getDraft(id: string): Promise<Draft>;
-  saveDraft(id: string | null, input: DraftInput): Promise<Draft>;
-  deleteDraft(id: string): Promise<void>;
+  /** The wadspaces from before the layers, for the migration (data/migrate.ts). */
+  listOldWadspaces(): Promise<Wadspace[]>;
+  /** Drafts are gone from the Builder: deletes them all; how many there were. */
+  discardDrafts(): Promise<number>;
 
   listMachines(): Promise<Machine[]>;
-  /** Install if needed, start, and show a wadspace on a machine's screen. */
-  open(machineId: string, wadspaceId: string): Promise<void>;
   container(machineId: string, containerId: string, action: ContainerAction): Promise<void>;
   /** Online: a one-time code to link a new machine (valid 15 minutes). */
   createEnrollCode?(machineName: string): Promise<string>;
@@ -257,10 +228,6 @@ export interface Backend {
   linkMachine?(code: string): Promise<void>;
 
   getFocus(): Promise<{ focus: FocusLock | null; now: number }>;
-  startFocus(machineId: string, wadspaceIds: string[], minutes: number): Promise<void>;
-  /** Offline: a session with these wadspaces on this machine, launched by the
-   *  app (they aren't started here). With minutes, a focus session. */
-  beginSession?(wadspaceIds: string[], minutes: number | null): Promise<void>;
   lastSession(): Promise<LastSession | null>;
 
   runs(q: { wadspaceId?: string; machineId?: string }): Promise<ContainerRun[]>;
@@ -316,31 +283,17 @@ export interface Backend {
   tailnetLogin?(): Promise<{ url: string | null; online: boolean }>;
   tailnetLogout?(): Promise<void>;
 
-  /** Get the image and the projects' folders ready, then start and show the
-   *  wadspace. Throws RestartNeeded when it's running with other projects. */
-  launch(req: LaunchRequest): Promise<LaunchProgress>;
   cancelLaunch(id: string): Promise<void>;
   /** Launches already running or finished (e.g. after the app reloads). */
   listLaunches?(): Promise<LaunchProgress[]>;
   /** Progress and log lines as they come. */
   onLaunch?(fn: (l: LaunchProgress) => void): () => void;
 
-  /** Build a saved wadspace's image; returns the build's id. */
-  startBuild?(wadspaceId: string): Promise<string>;
   cancelBuild?(buildId: string): Promise<void>;
   /** Builds already running or finished (e.g. after the app reloads). */
   listBuilds?(): Promise<BuildProgress[]>;
   /** Progress and log lines as they come. */
   onBuild?(fn: (b: BuildProgress) => void): () => void;
-}
-
-const STEPS: Draft["step"][] = ["apps", "projects", "customize"];
-
-/** A stored draft as the Builder knows it now: no file shortcuts, and one
- *  saved on a step that's gone (the old Files step) reopens on Apps. Repos
- *  become projects in the data layer (data/projects.ts). */
-export function migrateDraft(d: Draft): Draft {
-  return { ...d, layout: dropFileIcons(d.layout), step: STEPS.includes(d.step) ? d.step : "apps" };
 }
 
 export class Unsupported extends Error {
