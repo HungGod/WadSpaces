@@ -1,7 +1,7 @@
 //! What's on screen: switching, WadSpaces Client, Super+Tab, sessions and native
 //! windows, against a fake machine and a fake display, with time paused.
 
-mod common;
+use crate::common;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};

@@ -1,7 +1,7 @@
 //! Launches (launches.py's tests): a fake machine, fake drives, a fake clone,
 //! and real git (against a bare repository) for copies already here.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

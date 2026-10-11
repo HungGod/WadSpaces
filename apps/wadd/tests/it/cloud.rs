@@ -2,7 +2,7 @@
 //! relinking, heartbeats, commands, project and secret sync, the other
 //! machines, and the token's refresh.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::sync::Arc;

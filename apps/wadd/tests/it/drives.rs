@@ -1,7 +1,7 @@
 //! Drives (drives.py's tests): lsblk, systemd-mount and udisksctl faked by
 //! a host whose lsblk answer changes as things get mounted.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

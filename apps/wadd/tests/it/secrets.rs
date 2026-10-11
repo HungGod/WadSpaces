@@ -1,7 +1,7 @@
 //! The machine's secrets: account sync by digest, placeholders, local ones,
 //! and forgetting an old owner's.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

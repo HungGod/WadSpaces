@@ -71,6 +71,15 @@ lto = "thin"
 codegen-units = 4
 strip = "debuginfo"
 
+# Dev builds and tests: line numbers for backtraces, none of the rest of the
+# debug info (dependencies get none). Full debug info made each test binary
+# ~450 MB, and linking a few at once ran a 7 GB laptop out of memory. For a
+# debugger session, build with CARGO_PROFILE_DEV_DEBUG=true.
+[profile.dev]
+debug = "line-tables-only"
+[profile.dev.package."*"]
+debug = false
+
 # Icon work (wad-icons, in wadd and its tests) is pixel loops: optimised even
 # in dev builds, or a card takes seconds.
 [profile.dev.package.wad-icons]

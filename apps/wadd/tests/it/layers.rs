@@ -5,7 +5,7 @@
 //! missing base or too little disk, and web apps' icons made first. A fake
 //! podman builds; the real registry installs.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 use std::time::Duration;

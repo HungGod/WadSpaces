@@ -1,7 +1,7 @@
 //! GitHub in wadd (github.py's tests): a mock GitHub and the fake machine's
 //! secrets.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 use std::time::Duration;

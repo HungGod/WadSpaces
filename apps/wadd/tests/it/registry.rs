@@ -1,6 +1,6 @@
 //! The workspace lifecycle against a fake machine, with time paused.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 use std::time::Duration;

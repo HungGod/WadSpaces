@@ -1,7 +1,7 @@
 //! Saved sign-ins: made, renamed, mounted into the workspaces that use
 //! them, and kept while one runs or uses them.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 use std::time::Duration;
