@@ -80,11 +80,21 @@ pub fn clean_subpath(subpath: &str) -> Result<String, FolderError> {
 /// The folders in `path` (not hidden ones), sorted; at most `most`. With
 /// `rel_to`, paths relative to it.
 fn dirs(path: &Path, rel_to: Option<&Path>, most: usize) -> (Vec<Dir>, bool) {
+    entries(path, rel_to, most, true)
+}
+
+/// The files in `path` (not hidden ones), sorted; at most `most`.
+pub fn files(path: &Path, most: usize) -> (Vec<Dir>, bool) {
+    entries(path, None, most, false)
+}
+
+fn entries(path: &Path, rel_to: Option<&Path>, most: usize, folders: bool) -> (Vec<Dir>, bool) {
     let mut out = vec![];
     for e in std::fs::read_dir(path).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         // is_dir follows symlinks, as Python's DirEntry.is_dir does.
-        if name.starts_with('.') || !e.path().is_dir() {
+        let kind_ok = if folders { e.path().is_dir() } else { e.path().is_file() };
+        if name.starts_with('.') || !kind_ok {
             continue;
         }
         let full = path.join(&name);
@@ -105,7 +115,7 @@ fn dirs(path: &Path, rel_to: Option<&Path>, most: usize) -> (Vec<Dir>, bool) {
 pub fn browse(path: Option<&str>, roots: &[PathBuf], most: usize) -> Result<Browse, FolderError> {
     let Some(path) = path.filter(|p| !p.is_empty()) else {
         let dirs = roots.iter().filter(|r| r.is_dir()).map(|r| Dir { name: text(r), path: text(r) }).collect();
-        return Ok(Browse { path: None, parent: None, dirs, truncated: false });
+        return Ok(Browse { path: None, parent: None, dirs, files: vec![], truncated: false });
     };
     let real = PathBuf::from(resolve_folder(path, roots, false)?);
     if !real.is_dir() {
@@ -114,7 +124,7 @@ pub fn browse(path: Option<&str>, roots: &[PathBuf], most: usize) -> Result<Brow
     let (dirs, truncated) = dirs(&real, None, most);
     let is_root = roots.iter().any(|r| realpath(r) == real);
     let parent = (!is_root).then(|| real.parent().map(text)).flatten();
-    Ok(Browse { path: Some(text(&real)), parent, dirs, truncated })
+    Ok(Browse { path: Some(text(&real)), parent, dirs, files: vec![], truncated })
 }
 
 /// browse() inside a drive: paths relative to its root ("" is the root).
@@ -131,7 +141,7 @@ pub fn browse_inside(mountpoint: &str, subpath: &str, most: usize) -> Result<Bro
     let (dirs, truncated) = dirs(&real, Some(&root), most);
     let rel = text(real.strip_prefix(&root).unwrap_or(Path::new("")));
     let parent = (!rel.is_empty()).then(|| Path::new(&rel).parent().map(text).unwrap_or_default());
-    Ok(Browse { path: Some(rel), parent, dirs, truncated })
+    Ok(Browse { path: Some(rel), parent, dirs, files: vec![], truncated })
 }
 
 #[cfg(test)]

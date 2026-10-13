@@ -63,15 +63,26 @@ fn refusals_say_where() {
         ),
         (vec![a(json!({"display": "stream", "port": 70000}))], "workspace 'a': port out of range"),
         (vec![a(json!({"hotkey": 12}))], "workspace 'a': hotkey must be 1..9"),
-        (vec![a(json!({"projects": [{"id": "p"}]}))], "workspace 'a': each project is {id, mount, path?}"),
-        (vec![a(json!({"projects": [{"id": "p", "mount": "M", "path": "rel:x"}]}))], "must be absolute"),
+        (vec![a(json!({"projects": [{"id": "p"}]}))], "workspace 'a': a project is {id, kind, mount"),
         (
-            vec![a(json!({"projects": [{"id": "p", "mount": "M"}, {"id": "p", "mount": "N"}]}))],
+            vec![a(json!({"projects": [{"id": "p", "kind": "github", "mount": "M", "repo": "nope"}]}))],
+            "isn't owner/name",
+        ),
+        (
+            vec![a(json!({"projects": [{"id": "p", "kind": "copy", "mount": "M", "from": {"paths": ["rel/x"]}}]}))],
+            "copied from paths that aren't",
+        ),
+        (
+            vec![a(
+                json!({"projects": [{"id": "p", "kind": "copy", "mount": "M"}, {"id": "p", "kind": "copy", "mount": "N"}]}),
+            )],
             "project p is listed twice",
         ),
         (
-            vec![a(json!({"projects": [{"id": "p", "mount": "M"}, {"id": "q", "mount": "M"}]}))],
-            "two projects are mounted at Desktop/M",
+            vec![a(
+                json!({"projects": [{"id": "p", "kind": "copy", "mount": "M"}, {"id": "q", "kind": "copy", "mount": "M"}]}),
+            )],
+            "two projects are at Desktop/M",
         ),
         (
             vec![a(json!({"signins": [{"id": "x", "app": "github"}, {"id": "y", "app": "github"}]}))],
@@ -82,6 +93,12 @@ fn refusals_say_where() {
         let e = check_workspaces(list).unwrap_err().to_string();
         assert!(e.contains(why), "{e} (wanted {why})");
     }
+    // What a launch used to mount ({id, mount, path?}) is dropped, not refused.
+    assert!(
+        check_workspaces(vec![a(json!({"projects": [{"id": "p", "mount": "M", "path": "/x"}]}))]).unwrap()[0]
+            .projects
+            .is_empty()
+    );
     // Two may name the same hotkey: Super+N follows what runs.
     assert!(check_workspaces(vec![a(json!({"hotkey": 1})), a(json!({"id": "b", "hotkey": 1}))]).is_ok());
 }

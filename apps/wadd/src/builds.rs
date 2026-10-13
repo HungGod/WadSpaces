@@ -80,8 +80,9 @@ fn icon_jobs(spec: &Value) -> Vec<IconJob> {
 }
 
 /// The workspace list with `fresh` added, or merged into the one already
-/// there (which keeps its icon, its extra volumes and its projects); checked
-/// as a whole. Also: whether it replaced one.
+/// there (which keeps its icon and its extra volumes; its projects and
+/// sign-ins are the design's); checked as a whole. Also: whether it replaced
+/// one.
 pub fn merged(current: &[Workspace], fresh: &Value) -> Result<(Vec<Workspace>, bool), String> {
     let id = fresh.get("id").and_then(Value::as_str).unwrap_or_default();
     if let Some(app) = current.iter().find(|w| w.id == id && w.kind == wad_proto::v1::Kind::App) {
@@ -102,7 +103,8 @@ pub fn merged(current: &[Workspace], fresh: &Value) -> Result<(Vec<Workspace>, b
             }
             new["volumes"] = volumes.into();
             new["icon"] = old.get("icon").cloned().unwrap_or(Value::Null);
-            new["projects"] = old["projects"].clone();
+            // Its projects are the design's too.
+            new["projects"] = fresh.get("projects").cloned().unwrap_or(serde_json::json!([]));
             // Its sign-ins are the design's: none left means none.
             if fresh.get("signins").is_none() {
                 new.as_object_mut().expect("an object").remove("signins");

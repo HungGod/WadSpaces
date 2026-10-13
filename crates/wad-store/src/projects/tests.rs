@@ -248,23 +248,35 @@ fn legacy_projects_are_never_pushed() {
 
 #[test]
 fn manifests_are_written_atomically_with_setup_hashes() {
+    use wad_proto::v1::{CopyFrom, ProjectKind, WorkspaceProject};
     let d = tempfile::tempdir().unwrap();
-    let path = write_manifest(
-        d.path(),
-        "writing",
-        &[
-            ManifestEntry { id: "p1", name: "Vault", mount: "Writing", setup: "npm install" },
-            ManifestEntry { id: "p2", name: "Notes", mount: "Notes", setup: "" },
-        ],
-    )
-    .unwrap();
+    let github = WorkspaceProject {
+        id: "p1".into(),
+        kind: ProjectKind::Github,
+        mount: "Writing".into(),
+        repo: "HungGod/Writing".into(),
+        git_ref: Some("main".into()),
+        setup: "npm install".into(),
+        from: None,
+    };
+    let copy = WorkspaceProject {
+        id: "c1".into(),
+        kind: ProjectKind::Copy,
+        mount: "Notes".into(),
+        repo: String::new(),
+        git_ref: None,
+        setup: String::new(),
+        from: Some(CopyFrom { machine_id: "m1".into(), drive: None, paths: vec!["/home/wad/Notes".into()] }),
+    };
+    let path = write_manifest(d.path(), "writing", &[github, copy]).unwrap();
     assert_eq!(path, d.path().join("extra/writing/projects.json"));
     let data: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(
         data,
-        json!({"version": 1, "projects": [
-        {"id": "p1", "name": "Vault", "mount": "Writing", "setup": "npm install", "setupHash": setup_hash("npm install")},
-        {"id": "p2", "name": "Notes", "mount": "Notes", "setup": "", "setupHash": setup_hash("")}]})
+        json!({"version": 2, "projects": [
+        {"id": "p1", "kind": "github", "mount": "Writing", "name": "Writing", "repo": "HungGod/Writing", "ref": "main",
+         "setup": "npm install", "setupHash": setup_hash("npm install")},
+        {"id": "c1", "kind": "copy", "mount": "Notes", "name": "Notes"}]})
     );
     // Python's sha256 hex, first 12.
     assert_eq!(setup_hash(""), "e3b0c44298fc");

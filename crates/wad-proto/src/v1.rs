@@ -223,15 +223,80 @@ impl Kind {
     }
 }
 
-/// A project folder a workspace mounts at ~/Desktop/<mount> (set by a launch).
+/// How a project gets into a wadspace. Nothing is mounted: its files live
+/// inside the wadspace (its /config), at ~/Desktop/<mount>.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectKind {
+    /// A GitHub repo the wadspace clones, then fast-forwards at each start
+    /// when that's safe.
+    Github,
+    /// Files from a machine, copied in once.
+    Copy,
+}
+
+/// A drive a copy came from (a drive project from before copies).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct MountedProject {
-    pub id: String,
-    pub mount: String,
-    /// A folder or drive project's own path (a git project's is wadd's clone).
+pub struct DriveRef {
+    pub uuid: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub fstype: String,
+}
+
+/// Where a copy's files came from: paths on a machine, or on a drive. wadd
+/// copies them here the first time the wadspace starts when it hasn't the
+/// copy yet (one made before copies were made ahead: a folder or drive
+/// project's).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyFrom {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub machine_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
+    pub drive: Option<DriveRef>,
+    pub paths: Vec<String>,
+}
+
+/// A project in a workspace (from its design).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceProject {
+    pub id: String,
+    pub kind: ProjectKind,
+    /// ~/Desktop/<mount>.
+    pub mount: String,
+    /// A GitHub project's repo: owner/name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub repo: String,
+    /// A GitHub project's branch or tag (none: its default branch).
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub git_ref: Option<String>,
+    /// Run once after it's cloned (and again when it changes).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub setup: String,
+    /// A copy's source, for one this machine hasn't made yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<CopyFrom>,
+}
+
+/// POST /v1/copies: files on this machine to copy into wadspaces. One
+/// folder's contents, or each path (files or folders) by its name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyRequest {
+    pub paths: Vec<String>,
+}
+
+/// A copy made on this machine, ready for any wadspace here to take in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyMade {
+    pub id: String,
+    pub files: u64,
+    pub bytes: u64,
 }
 
 /// GET /v1/workspaces: a workspace on this machine.
@@ -264,7 +329,9 @@ pub struct Workspace {
     pub volumes: Vec<String>,
     pub devices: Vec<String>,
     pub shm_size: Option<String>,
-    pub projects: Vec<MountedProject>,
+    /// Its projects (from its design): cloned or copied in by the wadspace.
+    #[serde(default)]
+    pub projects: Vec<WorkspaceProject>,
     /// The saved sign-ins it mounts (from its design).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signins: Vec<WorkspaceSignIn>,
@@ -489,6 +556,9 @@ pub struct Browse {
     /// Where "up" goes; None at a root.
     pub parent: Option<String>,
     pub dirs: Vec<Dir>,
+    /// Its files, when they're asked for (`files=true`: to copy some in).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<Dir>,
     /// There were more than shown.
     pub truncated: bool,
 }
@@ -536,7 +606,7 @@ pub struct Drive {
 pub struct ProjectStatus {
     pub exists_on_disk: bool,
     pub path: Option<String>,
-    /// Workspaces whose unit mounts it.
+    /// Workspaces here it's a project of.
     pub mounted_in: Vec<String>,
     /// None: not a git repository (or git can't tell).
     pub git: Option<GitStatus>,
@@ -554,16 +624,14 @@ pub struct ProjectDeleted {
     pub purged: bool,
 }
 
-/// POST /v1/launches: what to launch. A workspace (with its projects), a
-/// throwaway run of one, a WadBrowser setup, or the terminal. A body with no
+/// POST /v1/launches: what to launch. A workspace, a throwaway run of one, a
+/// WadBrowser setup, or the terminal. A body with no
 /// `kind` is the older shape: a workspace ([`LaunchRequest`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LaunchItem {
     Workspace {
         workspace: String,
-        #[serde(default)]
-        projects: Vec<String>,
         #[serde(default)]
         restart: bool,
         #[serde(default)]
@@ -604,12 +672,9 @@ impl LaunchBody {
     pub fn item(self) -> LaunchItem {
         match self {
             LaunchBody::Item(i) => i,
-            LaunchBody::Workspace(r) => LaunchItem::Workspace {
-                workspace: r.workspace,
-                projects: r.projects,
-                restart: r.restart,
-                background: r.background,
-            },
+            LaunchBody::Workspace(r) => {
+                LaunchItem::Workspace { workspace: r.workspace, restart: r.restart, background: r.background }
+            }
         }
     }
 }
@@ -621,8 +686,6 @@ pub struct RunOverrides {
     /// The wallpaper (none: the wadspace's own).
     #[serde(default)]
     pub wallpaper: Option<WallpaperUpload>,
-    #[serde(default)]
-    pub projects: Vec<String>,
     /// Its sign-ins, by slot; a slot left out keeps nothing.
     #[serde(default)]
     pub signins: Vec<WorkspaceSignIn>,
@@ -667,9 +730,7 @@ pub struct SetupWebApp {
 #[serde(rename_all = "camelCase")]
 pub struct LaunchRequest {
     pub workspace: String,
-    #[serde(default)]
-    pub projects: Vec<String>,
-    /// It may be stopped to change what it mounts (the UI asks first).
+    /// Restarted if it's running (the UI asks first).
     #[serde(default)]
     pub restart: bool,
     /// Started, not switched to (the screen stays put): one of several
@@ -703,7 +764,8 @@ pub enum PartState {
     Error,
 }
 
-/// What a launch's first step is getting: the image, or a project.
+/// What a launch's first step is getting: the image, or a copy this
+/// machine hasn't made yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchPart {
@@ -718,15 +780,14 @@ pub struct LaunchPart {
     pub message: Option<String>,
 }
 
-/// A launch: step 1 gets the image and the projects' folders at once, step
-/// 2 points the workspace at them and brings it up.
+/// A launch: step 1 checks the image and makes any copy the wadspace takes
+/// in that isn't here yet, step 2 brings it up.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Launch {
     pub id: String,
     pub ws_id: String,
     pub name: String,
-    pub projects: Vec<String>,
     pub restart: bool,
     pub status: LaunchStatus,
     /// 0..1

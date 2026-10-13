@@ -1,4 +1,4 @@
-use wad_proto::v1::{Display, Kind, MountedProject};
+use wad_proto::v1::{Display, Kind, ProjectKind, WorkspaceProject};
 
 use super::*;
 
@@ -59,7 +59,15 @@ fn applies_what_is_new_or_changed_and_keeps_the_machines_projects() {
     assert_eq!(list.len(), 1);
     // Applied once: the machine's changes stay.
     list[0].name = "My writing".into();
-    list[0].projects = vec![MountedProject { id: "p1".into(), mount: "notes".into(), path: None }];
+    list[0].projects = vec![WorkspaceProject {
+        id: "p1".into(),
+        kind: ProjectKind::Github,
+        mount: "notes".into(),
+        repo: "o/notes".into(),
+        git_ref: None,
+        setup: String::new(),
+        from: None,
+    }];
     assert_eq!(apply(&mut list, &mut book, &vendor), Applied::default());
     assert_eq!(list[0].name, "My writing");
     // Deleted here: stays deleted.

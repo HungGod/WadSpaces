@@ -48,9 +48,8 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
         "wadbrowserConf" => generator::wadbrowser_conf(a(0)).map(Value::from).unwrap_or(Value::Null),
         "quadlet" => generator::quadlet(
             a(0),
-            opt_s(1).unwrap_or(generator::PROJECTS_DIR),
-            opt_s(2).unwrap_or(generator::STATE_DIR),
-            args.get(3).and_then(Value::as_u64).map(|u| u as u32),
+            opt_s(1).unwrap_or(generator::STATE_DIR),
+            args.get(2).and_then(Value::as_u64).map(|u| u as u32),
         )
         .into(),
         // catalog

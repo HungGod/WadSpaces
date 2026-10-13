@@ -36,6 +36,7 @@ pub struct AppState {
     pub registry: Arc<Registry>,
     pub view: Arc<View>,
     pub projects: Arc<crate::projects::Projects>,
+    pub copies: Arc<crate::copies::Copies>,
     pub launches: Arc<crate::launches::Launches>,
     pub builds: Arc<crate::builds::Builds>,
     pub secrets: Arc<crate::secrets::Secrets>,
@@ -148,6 +149,8 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/signins/{id}/signout", post(signin_sign_out))
         .route("/v1/drives", get(drives))
         .route("/v1/browse", get(browse))
+        .route("/v1/copies", post(copy_create))
+        .route("/v1/copies/{id}", delete(copy_delete))
         .route(
             "/v1/launches",
             get(launches).post(launch_create).layer(axum::extract::DefaultBodyLimit::max(WALLPAPER_BODY)),
@@ -454,12 +457,17 @@ async fn drives(State(app): State<Arc<AppState>>) -> Result<Json<Vec<Drive>>, Fa
 struct BrowseQuery {
     path: Option<String>,
     drive: Option<String>,
+    /// Its files too (not inside a drive).
+    #[serde(default)]
+    files: bool,
 }
 
-/// The folders in `path`, inside the folder roots (no path: those roots).
-/// With `drive`, `path` is inside that drive (mounted first if need be).
+/// The folders in `path`, inside the folder roots (no path: those roots),
+/// and with `files`, its files. With `drive`, `path` is inside that drive
+/// (mounted first if need be).
 async fn browse(State(app): State<Arc<AppState>>, Query(q): Query<BrowseQuery>) -> Result<Json<Browse>, Failure> {
     use wad_store::folders::{self, FolderError, MAX_DIRS};
+    let with_files = q.files;
     let r = match q.drive.filter(|d| !d.is_empty()) {
         Some(drive) => {
             let mp = app.projects.drives.mount(&drive, "", "").await.map_err(drive_failure)?;
@@ -468,7 +476,16 @@ async fn browse(State(app): State<Arc<AppState>>, Query(q): Query<BrowseQuery>) 
         }
         None => {
             let roots = app.projects.store.folder_roots().to_vec();
-            tokio::task::spawn_blocking(move || folders::browse(q.path.as_deref(), &roots, MAX_DIRS)).await
+            tokio::task::spawn_blocking(move || {
+                let mut b = folders::browse(q.path.as_deref(), &roots, MAX_DIRS)?;
+                if let (true, Some(p)) = (with_files, &b.path) {
+                    let (files, more) = folders::files(std::path::Path::new(p), MAX_DIRS);
+                    b.files = files;
+                    b.truncated |= more;
+                }
+                Ok(b)
+            })
+            .await
         }
     };
     match r.map_err(|e| Failure(ApiError::new(ErrorCode::Internal, e.to_string())))? {
@@ -478,12 +495,26 @@ async fn browse(State(app): State<Arc<AppState>>, Query(q): Query<BrowseQuery>) 
     }
 }
 
+/// A copy of files on this machine, for wadspaces to take in (copies.rs).
+async fn copy_create(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<wad_proto::v1::CopyRequest>,
+) -> Result<(StatusCode, Json<wad_proto::v1::CopyMade>), Failure> {
+    Ok((StatusCode::CREATED, Json(app.copies.make(&req.paths).await?)))
+}
+
+/// Removes a copy no wadspace here has.
+async fn copy_delete(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, Failure> {
+    app.copies.delete(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn launches(State(app): State<Arc<AppState>>) -> Json<Vec<Launch>> {
     Json(app.launches.list())
 }
 
-/// Opens a workspace with projects, a throwaway run of one, a WadBrowser
-/// setup or the terminal; its progress arrives as launch events.
+/// Opens a workspace, a throwaway run of one, a WadBrowser setup or the
+/// terminal; its progress arrives as launch events.
 async fn launch_create(
     State(app): State<Arc<AppState>>,
     Json(req): Json<LaunchBody>,

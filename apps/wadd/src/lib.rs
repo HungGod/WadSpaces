@@ -8,6 +8,7 @@ pub mod api;
 pub mod backend;
 pub mod builds;
 pub mod cloud;
+pub mod copies;
 pub mod diagnostics;
 pub mod display;
 pub mod drives;
@@ -245,6 +246,14 @@ impl Server {
             })
         };
         let drives = Arc::new(drives::Drives::new(d.projects_uid, Arc::new(drives::System), uid == 0));
+        let copies = Arc::new(copies::Copies::new(
+            &d.state_dir,
+            d.folder_roots.clone(),
+            d.projects_uid,
+            machine.clone(),
+            drives.clone(),
+            registry.clone(),
+        ));
         let projects = Arc::new(projects::Projects::new(
             &d.state_dir,
             d.projects_dir.clone(),
@@ -261,6 +270,7 @@ impl Server {
             view.clone(),
             backend.clone(),
             projects.clone(),
+            copies.clone(),
             bus.clone(),
             &d.state_dir,
         );
@@ -269,8 +279,16 @@ impl Server {
         let signins =
             signins::SignIns::new(&d.state_dir, d.signins_dir.clone(), d.projects_uid, registry.clone(), bus.clone());
         {
-            let signins = Arc::downgrade(&signins);
-            registry.on_prepare(move |ws| signins.upgrade().map_or(Ok(()), |s| s.prepare(ws)));
+            // Before a container starts: its sign-ins, its projects.json, and
+            // the folders its copies are mounted from.
+            let (signins, copies, state_dir) = (Arc::downgrade(&signins), copies.clone(), d.state_dir.clone());
+            registry.on_prepare(move |ws| {
+                signins.upgrade().map_or(Ok(()), |s| s.prepare(ws))?;
+                copies.prepare(ws)?;
+                wad_store::projects::write_manifest(&state_dir, &ws.id, &ws.projects)
+                    .map(drop)
+                    .map_err(|e| format!("projects.json: {e}"))
+            });
         }
         launches.set_signins(Arc::downgrade(&signins));
         launches.set_builds(Arc::downgrade(&builds));
@@ -313,6 +331,7 @@ impl Server {
             registry,
             view,
             projects,
+            copies,
             launches,
             builds,
             keys: std::sync::Mutex::new(None),

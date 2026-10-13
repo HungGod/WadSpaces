@@ -37,7 +37,7 @@ pub fn is_repo_name(s: &str) -> bool {
 }
 
 /// `/^[\w./-]{1,200}$/`
-fn is_ref(s: &str) -> bool {
+pub fn is_ref(s: &str) -> bool {
     js::all_in(s, 1, 200, |c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-'))
 }
 

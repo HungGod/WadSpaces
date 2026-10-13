@@ -110,14 +110,7 @@ fn not_found(id: &str) -> ApiError {
 pub fn wadd_spec(ws: &Workspace, signins_dir: &std::path::Path) -> Value {
     let env: serde_json::Map<String, Value> =
         ws.env.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect();
-    let projects: Vec<Value> = ws
-        .projects
-        .iter()
-        .map(|p| match &p.path {
-            Some(path) => json!({"id": p.id, "mount": p.mount, "path": path}),
-            None => json!({"id": p.id, "mount": p.mount}),
-        })
-        .collect();
+    let projects: Vec<Value> = ws.projects.iter().map(|p| json!({"id": p.id, "mount": p.mount})).collect();
     let signins: Vec<Value> = ws
         .signins
         .iter()
@@ -166,7 +159,6 @@ impl Registry {
     pub fn unit_text(&self, ws: &Workspace) -> String {
         wad_core::generator::quadlet(
             &wadd_spec(ws, &self.settings.signins_dir),
-            &self.settings.projects_dir,
             &self.settings.state_dir.to_string_lossy(),
             self.settings.rootless_uid,
         )
@@ -217,15 +209,6 @@ impl Registry {
         self.backend.install_units(units).await.map(drop)
     }
 
-    /// Points a workspace at these projects: saved (workspaces.json), and
-    /// its unit rewritten. It takes effect at its next start.
-    pub async fn set_projects(&self, id: &str, projects: Vec<wad_proto::v1::MountedProject>) -> Result<(), String> {
-        let mut list = self.workspaces();
-        let ws = list.iter_mut().find(|w| w.id == id).ok_or_else(|| format!("no workspace {id:?}"))?;
-        ws.projects = projects;
-        self.set_workspaces(list).await
-    }
-
     /// A new workspace list (a build added or changed one): saved, units
     /// rewritten, and whoever follows the list told.
     /// The list is what counts: units that can't be written now (podman or
@@ -241,18 +224,12 @@ impl Registry {
         Ok(())
     }
 
-    /// Adds a workspace, or replaces the one with its id (which keeps its
-    /// projects: those are a launch's business). The list is checked whole.
-    /// Whether it's running with the old settings.
-    pub async fn put_workspace(&self, mut ws: Workspace) -> Result<bool, ApiError> {
+    /// Adds a workspace, or replaces the one with its id. The list is
+    /// checked whole. Whether it's running with the old settings.
+    pub async fn put_workspace(&self, ws: Workspace) -> Result<bool, ApiError> {
         let bad = |e: String| ApiError::new(ErrorCode::BadRequest, e);
         let mut list = self.workspaces();
         let old = list.iter().position(|w| w.id == ws.id);
-        if let Some(i) = old
-            && ws.projects.is_empty()
-        {
-            ws.projects = list[i].projects.clone();
-        }
         let changed = old.is_none_or(|i| list[i] != ws);
         match old {
             Some(i) => list[i] = ws.clone(),

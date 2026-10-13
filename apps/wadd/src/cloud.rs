@@ -27,10 +27,9 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
@@ -40,7 +39,7 @@ use wad_proto::v1::{CloudLink, Display, Event, View as V};
 use wad_proto::{ApiError, ErrorCode};
 
 use crate::events::Bus;
-use crate::launches::{Elsewhere, Launches};
+use crate::launches::Launches;
 use crate::projects::Projects;
 use crate::registry::Registry;
 use crate::secrets::Secrets;
@@ -144,7 +143,6 @@ pub struct Sibling {
     pub id: String,
     pub name: String,
     pub online: bool,
-    pub mounted_projects: Vec<String>,
 }
 
 pub struct Parts {
@@ -186,7 +184,7 @@ impl CloudRelay {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        let relay = Arc::new(Self {
+        Arc::new(Self {
             settings,
             http,
             ends,
@@ -200,10 +198,7 @@ impl CloudRelay {
             repos_written: Mutex::default(),
             status: Mutex::default(),
             kick: Notify::new(),
-        });
-        let weak: Weak<dyn Elsewhere> = Arc::downgrade(&relay) as Weak<dyn Elsewhere>;
-        relay.parts.launches.set_elsewhere(weak);
-        relay
+        })
     }
 
     fn file(&self) -> PathBuf {
@@ -438,21 +433,12 @@ impl CloudRelay {
                 })
             })
             .collect();
-        let mut mounted: Vec<String> = r
-            .workspaces()
-            .into_iter()
-            .filter(|w| states.iter().any(|s| s.id == w.id && s.container == "running"))
-            .flat_map(|w| w.projects.into_iter().map(|p| p.id))
-            .collect();
-        mounted.sort();
-        mounted.dedup();
         let mut m = Map::new();
         m.insert("lastSeen".into(), time(now_ms()));
         m.insert("hostname".into(), hostname().into());
         m.insert("daemonVersion".into(), env!("CARGO_PKG_VERSION").into());
         m.insert("view".into(), view.into());
         m.insert("workspaces".into(), workspaces.into());
-        m.insert("mountedProjects".into(), mounted.into());
         m
     }
 
@@ -764,19 +750,7 @@ impl CloudRelay {
                     .into_iter()
                     .find(|n| !n.is_empty())
                     .unwrap_or_default();
-                Sibling {
-                    id: doc_id(d),
-                    name,
-                    online: seen > 0 && now - seen < online_ms,
-                    mounted_projects: f
-                        .get("mountedProjects")
-                        .and_then(Value::as_array)
-                        .into_iter()
-                        .flatten()
-                        .filter_map(Value::as_str)
-                        .map(String::from)
-                        .collect(),
-                }
+                Sibling { id: doc_id(d), name, online: seen > 0 && now - seen < online_ms }
             })
             .collect();
         *self.siblings.lock().unwrap() = out.clone();
@@ -858,31 +832,5 @@ impl CloudRelay {
     /// Look at the account now (after a change here worth sending).
     pub fn kick(&self) {
         self.kick.notify_one();
-    }
-}
-
-#[async_trait]
-impl Elsewhere for CloudRelay {
-    async fn open_elsewhere(&self, pids: &[String]) -> Vec<(String, Vec<String>)> {
-        if pids.is_empty() || !self.linked() {
-            return vec![];
-        }
-        let siblings = match self.load_siblings().await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::info!("reading the other machines: {e}");
-                return vec![];
-            }
-        };
-        pids.iter()
-            .filter_map(|pid| {
-                let on: Vec<String> = siblings
-                    .iter()
-                    .filter(|s| s.online && s.mounted_projects.contains(pid))
-                    .map(|s| s.name.clone())
-                    .collect();
-                (!on.is_empty()).then(|| (pid.clone(), on))
-            })
-            .collect()
     }
 }

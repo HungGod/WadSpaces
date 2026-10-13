@@ -17,7 +17,7 @@ GIDMap=1001:1001:64535
 Environment=PUID=1000
 Environment=TZ=Pacific/Fiji
 Secret=github_token
-Volume=/home/u/.local/share/wadspaces-projects/p1:/config/Desktop/Notes:rw,z
+Volume=/home/u/.local/state/wadspaces/copies/p1:/run/wadspaces-copies/p1:ro,z
 Volume=/home/u/.local/state/wadspaces/extra/writing:/run/wadspaces-extra:ro,z
 Volume=/run/user/1000:/run/wadspaces-display
 Environment=PULSE_SERVER=unix:/run/wadspaces-display/pulse/native

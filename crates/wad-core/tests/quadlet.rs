@@ -8,7 +8,7 @@ fn values_stay_on_their_line() {
     let evil = "Writing\n[Service]\nExecStartPre=/bin/sh -c 'id > /tmp/owned'";
     let w = json!({"id": "w", "name": evil, "image": "i", "display": "host",
         "env": {"TZ": "x\r\nExecStart=/bin/false"}, "devices": ["/dev/dri"]});
-    let text = quadlet(&w, "/p", "/s", None);
+    let text = quadlet(&w, "/s", None);
     assert!(!text.lines().any(|l| l.starts_with("ExecStart")), "{text}");
     assert_eq!(text.lines().filter(|l| *l == "[Service]").count(), 1, "{text}");
 }

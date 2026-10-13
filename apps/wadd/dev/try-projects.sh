@@ -1,38 +1,50 @@
 #!/usr/bin/env bash
-# Tries the Rust wadd's projects on this laptop, as you: a GitHub repo
-# (cloned for real: a tiny public one), a folder, and a drive (a disk image
-# attached as a loop device with udisksctl, as a USB stick would appear),
-# launched together into the busybox test workspace.
+# Tries projects for real on this laptop, as you: nothing is mounted, the
+# wadspace clones and copies them in itself. wadd (with your rootless podman)
+# installs a stack whose projects are:
+#   - a GitHub repo (octocat/Hello-World: public and tiny), cloned inside;
+#   - a GitHub repo wadd had cloned on the machine (octocat/Spoon-Knife, with
+#     an uncommitted file), which moves in instead of being cloned again;
+#   - a copy made ahead (POST /v1/copies) of a folder here;
+#   - a copy from before copies (a folder project's), made at launch.
+# Then: a restart fast-forwards a clean clone, leaves a changed one alone,
+# and copies nothing again; a throwaway run clones and copies afresh.
 #
 #   apps/wadd/dev/try-projects.sh
 #
-# Needs podman.socket and udisks (both there on a Fedora desktop). Nothing
-# needs root; everything is removed afterwards.
+# Its image is the base as it is (localhost/wadspaces-base:trixie, from
+# images/build.sh --only base) with this checkout's images/base/root/ laid
+# over it, so the image's side (wadspaces-projects) is the one here. Needs
+# podman.socket and sway (see sway.sh); everything is removed afterwards.
 set -euo pipefail
 ulimit -c 0
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 dir=$root/.build/wadd-try-projects
 sock=$dir/wadd.sock
-port=3197
+image=localhost/wadspaces-template-trypj:latest
 rm -rf "$dir"
-mkdir -p "$dir/state" "$dir/projects" "$dir/home/Notes" "$dir/stick-files/Books/Novel"
+mkdir -p "$dir/state" "$dir/projects" "$dir/signins" "$dir/home/Notes/drafts" "$dir/home/Photos"
 echo "my notes" >"$dir/home/Notes/todo.md"
-echo "chapter one" >"$dir/stick-files/Books/Novel/one.md"
+echo "chapter one" >"$dir/home/Notes/drafts/one.md"
+echo "a photo" >"$dir/home/Photos/beach.jpg"
+podman image exists localhost/wadspaces-base:trixie || { echo "no base: images/build.sh --only base" >&2; exit 1; }
+[ -S "$XDG_RUNTIME_DIR/podman/podman.sock" ] || systemctl --user start podman.socket
 
-podman image exists localhost/wadspaces-template-trytest:latest &&
-  [ "$(podman image inspect localhost/wadspaces-template-trytest:latest --format '{{index .Labels "io.wadspaces.projects"}}')" = 1 ] ||
-  podman build -q -t localhost/wadspaces-template-trytest:latest "$root/apps/wadd/dev/test-image" >/dev/null
+echo "== the image: the base with this checkout's root/ over it"
+cat >"$dir/Containerfile" <<'EOF'
+FROM localhost/wadspaces-base:trixie
+COPY root/ /
+RUN chmod +x /usr/local/bin/* /etc/s6-overlay/s6-rc.d/*/run
+LABEL io.wadspaces.projects="2"
+EOF
+podman build -q -t "$image" -f "$dir/Containerfile" "$root/images/base" >/dev/null
 
-# The "stick": a 64 MB disk with one ext4 partition holding Books/.
-img=$dir/stick.img
-truncate -s 64M "$img"
-echo 'start=2048, type=83' | sfdisk -q "$img"
-mkfs.ext4 -q -F -L WADTRY -d "$dir/stick-files" -E offset=$((2048 * 512)) "$img" 63M
-loop=$(udisksctl loop-setup -f "$img" --no-user-interaction | sed -n 's/.* as \(\/dev\/loop[0-9]*\)\.$/\1/p')
-for _ in $(seq 50); do [ -e "${loop}p1" ] && break; sleep 0.1; done
-uuid=$(lsblk -no UUID "${loop}p1")
-echo "== the stick: ${loop}p1 ($uuid)"
+echo "== the clone wadd kept on this machine (from before), with work not committed"
+git clone -q https://github.com/octocat/Spoon-Knife.git "$dir/projects/spoon"
+echo "not committed yet" >"$dir/projects/spoon/wip.md"
 
+. "$root/apps/wadd/dev/sway.sh"
+start_sway "$dir"
 cat >"$dir/wadd.toml" <<TOML
 [machine]
 name = "wadd-try-projects"
@@ -40,71 +52,123 @@ name = "wadd-try-projects"
 socket = "$sock"
 state_dir = "$dir/state"
 projects_dir = "$dir/projects"
-ready_timeout_s = 60
+signins_dir = "$dir/signins"
+folder_roots = ["$dir/home"]
+vendor_workspaces = "$dir/none.d"
+ready_timeout_s = 120
 [display]
-enabled = false
+socket = "$ipc"
 TOML
-cat >"$dir/state/workspaces.json" <<JSON
-[{"id":"tryprojects","name":"Try projects","image":"localhost/wadspaces-template-trytest:latest","display":"stream","port":$port,
-  "enabled":true,"autostart":false,"containerName":"wad-tryprojects","containerPort":3000,
-  "env":[],"secrets":[],"volumes":[],"devices":[],"projects":[]}]
-JSON
-
+echo '[]' >"$dir/state/workspaces.json"
 (cd "$root" && cargo build -q -p wadd)
 "$root/target/debug/wadd" serve --user --config "$dir/wadd.toml" >"$dir/wadd.log" 2>&1 &
 wadd_pid=$!
 finish() {
   kill "$wadd_pid" 2>/dev/null || true
   wait "$wadd_pid" 2>/dev/null || true
-  systemctl --user stop wad-tryprojects.service 2>/dev/null || true
-  rm -f "$XDG_RUNTIME_DIR"/containers/systemd/wad-tryprojects.container
+  for u in "$XDG_RUNTIME_DIR"/containers/systemd/wad-trypj*.container "$XDG_RUNTIME_DIR"/containers/systemd/wad-run-trypj*.container; do
+    [ -e "$u" ] || continue
+    systemctl --user stop "$(basename "$u" .container).service" 2>/dev/null || true
+    rm -f "$u"
+  done
   systemctl --user daemon-reload
-  udisksctl unmount -b "${loop}p1" --no-user-interaction >/dev/null 2>&1 || true
-  udisksctl loop-delete -b "$loop" --no-user-interaction >/dev/null 2>&1 || true
+  podman volume rm -f wad-trypj-config >/dev/null 2>&1 || true
+  podman rmi -i "$image" >/dev/null 2>&1 || true
+  stop_sway
 }
 trap finish EXIT
 for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
+api() { curl -sS --unix-socket "$sock" -X "$1" "http://wadd$2"; echo; }
+send() { curl -sS --unix-socket "$sock" -X "$1" -H 'Content-Type: application/json' --data-binary @- "http://wadd$2"; echo; }
+fail() { echo "FAILED: $*"; grep -E "warn|error" "$dir/wadd.log" | tail -5; exit 1; }
+inside() { podman exec -u abc "$1" sh -c "$2"; }
+# The wadspace's own log lines about its projects, once it's done with them.
+projects_log() {
+  for _ in $(seq 120); do
+    podman logs "$1" 2>&1 | grep -q "\[wadspaces-projects\].*$2" && break
+    sleep 1
+  done
+  podman logs "$1" 2>&1 | grep "\[wadspaces-projects\]" | sed 's/^/  | /'
+}
 
-api() { curl -sS --unix-socket "$sock" -X "$1" ${3:+-H 'Content-Type: application/json' -d "$3"} "http://wadd$2"; echo; }
-field() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
+echo "== a copy made ahead, of Notes"
+copy=$(printf '{"paths":["%s/home/Notes"]}' "$dir" | send POST /v1/copies)
+echo "  $copy"
+copy_id=$(python3 -I -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("id") or sys.exit(str(d)))' "$copy")
+printf '{"paths":["/etc/passwd"]}' | send POST /v1/copies | grep -q "isn't inside" || fail "a copy from outside the roots"
 
-echo "== drives (the stick is listed; the laptop's own disk isn't)"
-api GET /v1/drives | python3 -c 'import json,sys; [print(" ", d["label"], d["fstype"], d["uuid"], d["mountpoint"]) for d in json.load(sys.stdin)]'
-echo "== browsing the stick (it gets mounted)"
-api GET "/v1/browse?drive=$uuid"
-echo "== three projects"
-api PUT /v1/projects/hello '{"name":"Hello World","mountName":"HelloWorld","source":{"kind":"git","url":"https://github.com/octocat/Hello-World"}}' | field '["source"]'
-api PUT /v1/projects/notes "{\"name\":\"Notes\",\"mountName\":\"Notes\",\"source\":{\"kind\":\"folder\",\"path\":\"$dir/home/Notes\"}}" | field '["source"]'
-api PUT /v1/projects/novel "{\"name\":\"Novel\",\"mountName\":\"Novel\",\"source\":{\"kind\":\"drive\",\"uuid\":\"$uuid\",\"label\":\"WADTRY\",\"fstype\":\"ext4\",\"subpath\":\"Books/Novel\"}}" | field '["source"]'
-launch() { # projects as JSON list, restart
-  id=$(api POST /v1/launches "{\"workspace\":\"tryprojects\",\"projects\":$1,\"restart\":${2:-false}}" | field '["id"]')
-  for _ in $(seq 600); do
-    out=$(api GET "/v1/launches/$id")
-    echo "$out" | grep -q '"status":"\(done\|error\|cancelled\)"' && break
+echo "== install the stack"
+template='{"id":"trypj","owner":"me","name":"Try","description":"","apps":["wadbrowser"],"createdAt":"t","updatedAt":"t"}'
+stack=$(cat <<JSON
+{"version":3,"id":"trypj","owner":"me","order":1,"template":"trypj",
+ "customization":{"name":"Try projects","description":"","wallpaper":{"type":"color","value":"#203040"},"secrets":{"bySlot":{}},
+  "projects":[
+   {"id":"hello","kind":"github","repo":"octocat/Hello-World","as":"Hello"},
+   {"id":"spoon","kind":"github","repo":"octocat/Spoon-Knife","as":"Spoon","setup":"echo set up > .setup-ran"},
+   {"id":"$copy_id","kind":"copy","source":{"machineId":"local","paths":["$dir/home/Notes"]},"as":"Notes","files":2,"bytes":21},
+   {"id":"photos","kind":"copy","source":{"machineId":"local","paths":["$dir/home/Photos"]},"as":"Photos"}]},
+ "createdAt":"t","updatedAt":"t"}
+JSON
+)
+printf '{"wadspace":%s,"template":%s}' "$stack" "$template" | send PUT /v1/wadspaces/trypj >/dev/null
+# Draw on the headless sway, not your session's display.
+api GET /v1/workspaces/trypj | python3 -I -c '
+import json, sys
+w = json.load(sys.stdin)
+w["env"] = [e for e in w["env"] if e[0] != "WADSPACES_WAYLAND"] + [["WADSPACES_WAYLAND", sys.argv[1] + "/wayland-1"]]
+print(json.dumps(w))' "$rt_name" | send PUT /v1/workspaces/trypj >/dev/null
+grep -q "copies/hello:/run/wadspaces-copies/hello:ro" "$XDG_RUNTIME_DIR/containers/systemd/wad-trypj.container" ||
+  fail "the unit doesn't mount the copies"
+grep -q "/config/Desktop" "$XDG_RUNTIME_DIR/containers/systemd/wad-trypj.container" && fail "the unit mounts a project"
+
+launch() { # body; restart
+  local id out
+  id=$(send POST /v1/launches <<<"$1" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d.get("id") or sys.exit(str(d)))')
+  for _ in $(seq 1200); do
+    out=$(curl -sS --unix-socket "$sock" "http://wadd/v1/launches/$id")
+    grep -q '"status":"\(done\|error\|cancelled\)"' <<<"$out" && break
     sleep 0.1
   done
-  echo "$out" | python3 -c '
+  python3 -I -c '
 import json, sys
 l = json.load(sys.stdin)
-print("status:", l["launch"]["status"], l["launch"]["error"] or "")
+print("  status:", l["launch"]["status"], l["launch"]["error"] or "", "| ws:", l["launch"]["wsId"])
 for p in l["launch"]["parts"]: print("  part", p["key"], p["state"], p["message"])
-for line in l["lines"]: print("  |", line)'
+for line in l["lines"]: print("  |", line)' <<<"$out"
 }
-echo "== launch with all three"
-t0=$(date +%s%N); launch '["hello","notes","novel"]'; echo "took $(( ($(date +%s%N) - t0) / 1000000 )) ms"
-echo "== inside the workspace"
-podman exec wad-tryprojects ls /config/Desktop
-podman exec wad-tryprojects cat /config/Desktop/Notes/todo.md /config/Desktop/Novel/one.md /config/Desktop/HelloWorld/README
-podman exec wad-tryprojects cat /run/wadspaces-extra/projects.json | head -5
-echo "== status"
-for p in hello notes novel; do api GET "/v1/projects/$p/status"; done
-echo "== again with one project less: refused while it runs, unless restart"
-api POST /v1/launches '{"workspace":"tryprojects","projects":["hello","notes"]}'
-launch '["hello","notes"]' true | grep -E "status|part hello|stopping|now mounts"
-echo "== and again, unchanged: the clone is fetched, nothing restarts"
-launch '["hello","notes"]' | grep -E "status|part hello|up to date|stopping"
-podman exec wad-tryprojects ls /config/Desktop
-echo "== purge refused while mounted"
-api DELETE '/v1/projects/hello?purge=true'
+
+echo "== open it: the copy from before is made now; the kept clone moves in"
+launch '{"kind":"workspace","workspace":"trypj"}'
+[ -d "$dir/projects/spoon" ] && fail "the kept clone is still on the machine"
+projects_log wad-trypj "Photos: copied in"
+echo "== inside"
+inside wad-trypj 'ls ~/Desktop; echo; head -1 ~/Desktop/Hello/README; cat ~/Desktop/Spoon/wip.md ~/Desktop/Notes/drafts/one.md ~/Desktop/Photos/beach.jpg'
+inside wad-trypj 'cd ~/Desktop/Hello && git status --short --branch | head -1' || fail "Hello isn't a clone"
+inside wad-trypj 'stat -c "%U %n" ~/Desktop/Hello/README ~/Desktop/Notes/todo.md'
+for _ in $(seq 30); do inside wad-trypj 'test -f ~/Desktop/Spoon/.setup-ran' && break; sleep 1; done
+inside wad-trypj 'test -f ~/Desktop/Spoon/.setup-ran' || fail "Spoon's setup didn't run"
+echo "  Spoon's setup ran once"
+
+echo "== restart: Hello a commit behind is fast-forwarded; Spoon (changed) is left; nothing is copied again"
+inside wad-trypj 'cd ~/Desktop/Hello && git reset -q --hard HEAD~1 && rm ~/Desktop/Notes/todo.md'
+api POST /v1/workspaces/trypj/stop >/dev/null
+for _ in $(seq 60); do podman container exists wad-trypj || break; sleep 0.5; done
+launch '{"kind":"workspace","workspace":"trypj"}' | grep -E "status|part"
+projects_log wad-trypj "Spoon has uncommitted changes" | tail -6
+inside wad-trypj 'cd ~/Desktop/Hello && git status --short --branch | head -1'
+inside wad-trypj 'test ! -e ~/Desktop/Notes/todo.md' || fail "Notes was copied in again"
+
+echo "== a throwaway run: cloned and copied afresh, then gone"
+run=$(launch '{"kind":"run","from":"trypj","overrides":{}}' | sed -n 's/.*| ws: \(run-trypj-[a-z0-9]*\).*/\1/p')
+echo "  $run"
+projects_log "wad-$run" "Photos: copied in" | tail -4
+inside "wad-$run" 'ls ~/Desktop'
+api POST "/v1/workspaces/$run/stop" >/dev/null
+
+echo "== a copy in use can't be removed"
+api DELETE "/v1/copies/$copy_id" | grep -q "still has it" || fail "a copy in use was removed"
+api POST /v1/workspaces/trypj/stop >/dev/null
+api DELETE /v1/workspaces/trypj >/dev/null
 echo "== wadd's log"
 grep -iE "warn|error" "$dir/wadd.log" | tail -5 || true
+echo ok

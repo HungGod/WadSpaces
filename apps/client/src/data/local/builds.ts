@@ -26,7 +26,7 @@ export function toLaunchProgress(u: LaunchUpdate): LaunchProgress {
     id: u.id,
     wadspaceId: u.wsId,
     name: u.name,
-    projects: u.projects,
+    projects: u.projects ?? [],
     status: u.status,
     progress: u.progress,
     phase: u.phase,

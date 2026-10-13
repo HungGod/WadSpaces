@@ -13,12 +13,12 @@ use common::{Fake, ws};
 use serde_json::{Value, json};
 use wad_firebase::values::time;
 use wad_firebase::{Functions, Identity};
-use wad_proto::v1::{Display, MountedProject};
+use wad_proto::v1::Display;
 use wadd::cloud::{CloudRelay, Endpoints, Parts, Settings};
 use wadd::display::NullDisplay;
 use wadd::drives::Drives;
 use wadd::events::Bus;
-use wadd::launches::{Elsewhere, Launches};
+use wadd::launches::Launches;
 use wadd::projects::Projects;
 use wadd::registry::{Registry, Settings as RegSettings};
 use wadd::secrets::Secrets;
@@ -88,8 +88,16 @@ async fn env() -> Env {
         reg.clone(),
         bus.clone(),
     ));
+    let copies = Arc::new(wadd::copies::Copies::new(
+        &state,
+        vec![],
+        1000,
+        Arc::new(|| ("local".into(), "Surface".into())),
+        Arc::new(Drives::new(1000, Arc::new(wadd::drives::System), false)),
+        reg.clone(),
+    ));
     let launches =
-        Launches::new(reg.clone(), view.clone(), Arc::new(fake.clone()), projects.clone(), bus.clone(), &state);
+        Launches::new(reg.clone(), view.clone(), Arc::new(fake.clone()), projects.clone(), copies, bus.clone(), &state);
     let secrets = Arc::new(Secrets::new(Arc::new(fake.clone()), &state));
     // GitHub: the owner and two repos.
     let gh_server = wiremock::MockServer::start().await;
@@ -187,9 +195,6 @@ async fn heartbeats_say_only_what_the_rules_allow() {
     let e = linked().await;
     e.view.switch("a").unwrap();
     e.reg.settled("a").await;
-    let mut list = e.reg.workspaces();
-    list[0].projects = vec![MountedProject { id: "p1".into(), mount: "Notes".into(), path: None }];
-    e.reg.set_workspaces(list).await.unwrap();
     e.relay.heartbeat().await.unwrap();
     let doc = e.fb.doc("users/u1/machines/m1").unwrap();
     let mut keys: Vec<&String> = doc.as_object().unwrap().keys().collect();
@@ -197,25 +202,13 @@ async fn heartbeats_say_only_what_the_rules_allow() {
     // name: the function's. images, signins and screen: what the Builder reads.
     assert_eq!(
         keys,
-        [
-            "daemonVersion",
-            "hostname",
-            "images",
-            "lastSeen",
-            "mountedProjects",
-            "name",
-            "screen",
-            "signins",
-            "view",
-            "workspaces"
-        ]
+        ["daemonVersion", "hostname", "images", "lastSeen", "name", "screen", "signins", "view", "workspaces"]
     );
     assert_eq!(
         (doc["images"].clone(), doc["signins"].clone(), doc["screen"].clone()),
         (json!([]), json!([]), Value::Null)
     );
     assert_eq!(doc["view"], "workspace:a");
-    assert_eq!(doc["mountedProjects"], json!(["p1"]));
     assert_eq!(doc["workspaces"][0]["phase"], "ready");
     assert_eq!(doc["workspaces"][0]["container"], "running");
     assert!(doc["lastSeen"].as_str().unwrap().ends_with('Z'));
@@ -319,22 +312,6 @@ async fn relinking_keeps_the_machine_for_its_owner_and_forgets_for_another() {
     );
     assert!(!e.fake.0.lock().unwrap().secrets.contains_key("github_token"));
     assert!(e.fb.doc("users/u1/machines/m1").is_none()); // u1's entry went with it
-}
-
-#[tokio::test]
-async fn projects_open_on_other_machines() {
-    let e = linked().await;
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
-    e.fb.put(
-        "users/u1/machines/desk",
-        json!({"name": "Desk PC", "lastSeen": time(now - 5000), "mountedProjects": ["p1", "p2"]}),
-    );
-    e.fb.put(
-        "users/u1/machines/old",
-        json!({"hostname": "old-laptop", "lastSeen": time(now - 3_600_000), "mountedProjects": ["p1"]}),
-    );
-    let open = e.relay.open_elsewhere(&["p1".into(), "p3".into()]).await;
-    assert_eq!(open, [("p1".to_string(), vec!["Desk PC".to_string()])]); // not the one that's off, nor itself
 }
 
 #[tokio::test]

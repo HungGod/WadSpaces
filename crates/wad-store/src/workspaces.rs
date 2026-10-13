@@ -5,7 +5,7 @@
 //! the like as loose as that file was.
 
 use serde_json::{Map, Value};
-use wad_proto::v1::{Display, Kind, MountedProject, Workspace, WorkspaceSignIn};
+use wad_proto::v1::{Display, Kind, ProjectKind, Workspace, WorkspaceProject, WorkspaceSignIn};
 
 use crate::Error;
 
@@ -216,42 +216,71 @@ pub fn check_workspaces(list: Vec<Value>) -> Result<Vec<Workspace>, Error> {
     Ok(workspaces)
 }
 
-fn check_projects(v: Option<&Value>, where_: &str) -> Result<Vec<MountedProject>, Error> {
+/// `[{id, kind, mount, repo?, ref?, setup?, from?}]`: a workspace's projects,
+/// each at its own Desktop/<mount>. Entries from before (`{id, mount,
+/// path?}`, what a launch mounted) are dropped: nothing is mounted now.
+fn check_projects(v: Option<&Value>, where_: &str) -> Result<Vec<WorkspaceProject>, Error> {
     let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(vec![]) };
     let list = v.as_array().ok_or_else(|| err(format!("{where_}: projects must be a list")))?;
-    let mut out: Vec<MountedProject> = Vec::new();
+    let mut out: Vec<WorkspaceProject> = Vec::new();
     for p in list {
-        let o = p.as_object();
-        let keys: Vec<&str> = o.map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
-        let shape_ok = o.is_some()
-            && keys.contains(&"id")
-            && keys.contains(&"mount")
-            && keys.iter().all(|k| matches!(*k, "id" | "mount" | "path"));
-        if !shape_ok {
-            return Err(err(format!("{where_}: each project is {{id, mount, path?}}, not {p}")));
+        if p.get("kind").is_none() && p.get("mount").is_some() {
+            continue;
         }
-        let o = o.unwrap();
-        let (id, mount) = (as_text(&o["id"]), as_text(&o["mount"]));
-        let path = match o.get("path") {
-            None => None,
-            Some(Value::String(s)) if s.starts_with('/') && host_path_ok(s) => Some(s.clone()),
-            Some(other) => {
-                return Err(err(format!("{where_}: project path {other} must be absolute, without ':' or '%'")));
-            }
-        };
-        if !wad_core::projects::is_project_id(&id) {
+        let parsed: WorkspaceProject = serde_json::from_value(p.clone()).map_err(|e| {
+            err(format!("{where_}: a project is {{id, kind, mount, repo?, ref?, setup?, from?}} ({e})"))
+        })?;
+        let (id, mount) = (&parsed.id, &parsed.mount);
+        if !wad_core::projects::is_project_id(id) {
             return Err(err(format!("{where_}: project id '{id}' must match ^[A-Za-z0-9_-]{{1,64}}$")));
         }
-        if !wad_core::projects::is_mount(&mount) || mount == "." || mount == ".." {
-            return Err(err(format!("{where_}: project mount '{mount}' must match ^[A-Za-z0-9._-]{{1,64}}$")));
+        if !wad_core::projects::is_mount(mount) || mount == "." || mount == ".." {
+            return Err(err(format!("{where_}: project folder '{mount}' must match ^[A-Za-z0-9._-]{{1,64}}$")));
         }
-        if out.iter().any(|x| x.id == id) {
+        match parsed.kind {
+            ProjectKind::Github => {
+                let repo_ok = parsed.repo.split_once('/').is_some_and(|(o, n)| {
+                    wad_core::projects::is_repo_name(o) && wad_core::projects::is_repo_name(n) && !n.contains('/')
+                });
+                if !repo_ok {
+                    return Err(err(format!("{where_}: {mount}'s repo '{}' isn't owner/name", parsed.repo)));
+                }
+                if parsed.git_ref.as_deref().is_some_and(|r| !wad_core::projects::is_ref(r) || r.contains("..")) {
+                    return Err(err(format!("{where_}: {mount}'s branch isn't one")));
+                }
+                if parsed.setup.len() > 4000 || parsed.setup.contains('\0') {
+                    return Err(err(format!("{where_}: {mount}'s setup command is too long")));
+                }
+            }
+            ProjectKind::Copy => {
+                if let Some(f) = &parsed.from {
+                    let on_drive = f.drive.is_some();
+                    let ok = f.paths.len() <= 64
+                        && f.paths.iter().all(|x| {
+                            !x.contains(char::is_control)
+                                && x.len() <= 4096
+                                && if on_drive {
+                                    !x.starts_with('/') && !x.split('/').any(|part| part == "..")
+                                } else {
+                                    x.starts_with('/') && host_path_ok(x)
+                                }
+                        })
+                        && f.drive.as_ref().is_none_or(|d| wad_core::projects::is_drive_uuid(&d.uuid))
+                        && f.machine_id.len() <= 128
+                        && !f.machine_id.contains(char::is_control);
+                    if !ok {
+                        return Err(err(format!("{where_}: {mount} is copied from paths that aren't")));
+                    }
+                }
+            }
+        }
+        if out.iter().any(|x| &x.id == id) {
             return Err(err(format!("{where_}: project {id} is listed twice")));
         }
-        if out.iter().any(|x| x.mount == mount) {
-            return Err(err(format!("{where_}: two projects are mounted at Desktop/{mount}")));
+        if out.iter().any(|x| &x.mount == mount) {
+            return Err(err(format!("{where_}: two projects are at Desktop/{mount}")));
         }
-        out.push(MountedProject { id, mount, path });
+        out.push(parsed);
     }
     Ok(out)
 }
@@ -345,19 +374,7 @@ pub fn to_yaml(w: &Workspace) -> Value {
     o.insert("volumes".into(), w.volumes.clone().into());
     o.insert("devices".into(), w.devices.clone().into());
     o.insert("shm_size".into(), w.shm_size.clone().map(Value::from).unwrap_or(Value::Null));
-    let projects: Vec<Value> = w
-        .projects
-        .iter()
-        .map(|p| {
-            let mut m = Map::new();
-            m.insert("id".into(), p.id.clone().into());
-            m.insert("mount".into(), p.mount.clone().into());
-            if let Some(path) = &p.path {
-                m.insert("path".into(), path.clone().into());
-            }
-            Value::Object(m)
-        })
-        .collect();
+    let projects: Vec<Value> = w.projects.iter().map(|p| serde_json::to_value(p).expect("a project is JSON")).collect();
     o.insert("projects".into(), projects.into());
     if !w.signins.is_empty() {
         let signins: Vec<Value> = w

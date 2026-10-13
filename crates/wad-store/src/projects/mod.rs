@@ -577,28 +577,37 @@ pub fn purge_dir(projects_dir: &Path, pid: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// One project in a workspace's manifest.
-pub struct ManifestEntry<'a> {
-    pub id: &'a str,
-    pub name: &'a str,
-    pub mount: &'a str,
-    pub setup: &'a str,
-}
-
 /// <state_dir>/extra/<ws>/projects.json: what the image's wadspaces-projects
-/// reads at /run/wadspaces-extra.
-pub fn write_manifest(state_dir: &Path, ws: &str, projects: &[ManifestEntry]) -> std::io::Result<PathBuf> {
+/// reads at /run/wadspaces-extra (version 2): each project's kind and folder,
+/// a GitHub one's repo, branch and setup (with its hash: a changed setup
+/// runs again). Nothing is mounted; the wadspace clones and copies them in.
+pub fn write_manifest(
+    state_dir: &Path,
+    ws: &str,
+    projects: &[wad_proto::v1::WorkspaceProject],
+) -> std::io::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let d = state_dir.join("extra").join(ws);
     std::fs::create_dir_all(&d)?;
     std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755))?;
     let list: Vec<Value> = projects
         .iter()
-        .map(|p| json!({"id": p.id, "name": p.name, "mount": p.mount, "setup": p.setup, "setupHash": setup_hash(p.setup)}))
+        .map(|p| {
+            let mut e = json!({"id": p.id, "kind": p.kind, "mount": p.mount, "name": p.mount});
+            if p.kind == wad_proto::v1::ProjectKind::Github {
+                e["repo"] = p.repo.clone().into();
+                if let Some(r) = &p.git_ref {
+                    e["ref"] = r.clone().into();
+                }
+                e["setup"] = p.setup.clone().into();
+                e["setupHash"] = setup_hash(&p.setup).into();
+            }
+            e
+        })
         .collect();
     let path = d.join("projects.json");
     let tmp = d.join(".projects.json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(&json!({"version": 1, "projects": list})).expect("json") + "\n")?;
+    std::fs::write(&tmp, serde_json::to_string_pretty(&json!({"version": 2, "projects": list})).expect("json") + "\n")?;
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644))?;
     std::fs::rename(&tmp, &path)?;
     Ok(path)

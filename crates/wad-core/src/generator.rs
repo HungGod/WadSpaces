@@ -35,15 +35,18 @@ pub fn wadbrowser_conf(spec: &Value) -> Option<String> {
     ))
 }
 
-/// Where wadd keeps project folders and each workspace's projects.json.
-pub const PROJECTS_DIR: &str = "/var/lib/wadspaces-projects";
+/// Where wadd keeps each workspace's extra folder (projects.json and the
+/// rest) and the copies wadspaces take in.
 pub const STATE_DIR: &str = "/var/lib/wadspaces";
+/// Where a wadspace sees the copies it takes in: `<COPIES_ROOT>/<project id>`.
+pub const COPIES_ROOT: &str = "/run/wadspaces-copies";
 
 /// Rootless podman (wadd under your own systemd, on a laptop): the
 /// container's root is you and its uid 1000 a subordinate id, so abc (PUID
-/// 1000) couldn't write your project folders. These maps put you at uid 1000
-/// inside instead and keep the rest of the usual 65536 ids. (keep-id would
-/// too, but its passwd entry stops the image's init moving abc onto that uid.)
+/// 1000) couldn't write the folders you own (a sign-in's). These maps put
+/// you at uid 1000 inside instead and keep the rest of the usual 65536 ids.
+/// (keep-id would too, but its passwd entry stops the image's init moving
+/// abc onto that uid.)
 const SUBORDINATE_IDS: u32 = 65536;
 
 fn id_maps(uid: u32) -> Vec<String> {
@@ -54,8 +57,8 @@ fn id_maps(uid: u32) -> Vec<String> {
 
 /// wadd's quadlet unit for a workspace (wad-<id>.container). `rootless_uid`:
 /// the host user to map to uid 1000 inside (rootless podman only).
-pub fn quadlet(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: Option<u32>) -> String {
-    workspace_unit(&one_line(w), projects_dir, state_dir, rootless_uid)
+pub fn quadlet(w: &Value, state_dir: &str, rootless_uid: Option<u32>) -> String {
+    workspace_unit(&one_line(w), state_dir, rootless_uid)
 }
 
 /// The spec with every text on one line: control characters in a value (a
@@ -73,7 +76,7 @@ fn one_line(v: &Value) -> Value {
 }
 
 /// The workspace's unit.
-fn workspace_unit(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: Option<u32>) -> String {
+fn workspace_unit(w: &Value, state_dir: &str, rootless_uid: Option<u32>) -> String {
     let native = w.get("display").and_then(Value::as_str) == Some("host");
     let id = js::field(w, "id");
     let container_name = match w.get("container_name").filter(|c| js::truthy(c)) {
@@ -113,16 +116,13 @@ fn workspace_unit(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: 
     for v in js::strs(w, "volumes") {
         lines.push(format!("Volume={v}"));
     }
-    // Projects: each folder read-write on the Desktop, then the directory with
-    // projects.json. A folder or drive project is the user's own path: never
-    // relabelled (no :z), so the container runs without SELinux separation.
-    let projects = js::arr(w, "projects");
-    for p in projects {
-        let mount = js::field(p, "mount");
-        match p.get("path").filter(|x| js::truthy(x)) {
-            Some(path) => lines.push(format!("Volume={}:/config/Desktop/{mount}:rw", js::string(path))),
-            None => lines.push(format!("Volume={projects_dir}/{}:/config/Desktop/{mount}:rw,z", js::field(p, "id"))),
-        }
+    // Projects aren't mounted: the wadspace clones them, or copies them in,
+    // into its own /config. What it copies from is wadd's copy of the files,
+    // read-only (a copy's, or a GitHub project's clone from when wadd kept
+    // them on the machine, for it to start from).
+    for p in js::arr(w, "projects") {
+        let id = js::field(p, "id");
+        lines.push(format!("Volume={state_dir}/copies/{id}:{COPIES_ROOT}/{id}:ro,z"));
     }
     // Saved sign-ins: each its folder on the host (`path`, wadd's), read-write
     // and shared with the other wadspaces that use it (:z, not :Z).
@@ -132,7 +132,7 @@ fn workspace_unit(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: 
         lines.push(format!("Volume={path}:{}/{}:rw,z", crate::signins::MOUNT_ROOT, js::field(s, "id")));
     }
     // Its extra folder, always: projects.json, signins.json and the wallpaper
-    // it's started with (a wadspace's is mounted, not in its image).
+    // it's started with (a wadspace's is handed over, not in its image).
     lines.push(format!("Volume={state_dir}/extra/{id}:/run/wadspaces-extra:ro,z"));
     // The kiosk session's sway (uid 1000) is the compositor it draws on.
     if native {
@@ -141,7 +141,7 @@ fn workspace_unit(w: &Value, projects_dir: &str, state_dir: &str, rootless_uid: 
         // the same runtime dir.
         lines.push("Environment=PULSE_SERVER=unix:/run/wadspaces-display/pulse/native".into());
     }
-    if native || projects.iter().any(|p| p.get("path").is_some_and(js::truthy)) {
+    if native {
         lines.push("SecurityLabelDisable=true".into());
     }
     for d in js::strs(w, "devices") {
@@ -174,10 +174,9 @@ mod tests {
         let w = json!({
             "id": "writing", "name": "Writing", "image": "localhost/wadspaces-writing:latest", "display": "host",
             "env": {"PUID": "1000", "TZ": "Pacific/Fiji"}, "secrets": ["github_token"], "devices": ["/dev/dri"],
-            "shm_size": "1g", "projects": [{"id": "p1", "mount": "Notes"}],
+            "shm_size": "1g", "projects": [{"id": "p1", "kind": "github", "mount": "Notes", "repo": "HungGod/Notes"}],
         });
-        let got =
-            super::quadlet(&w, "/home/u/.local/share/wadspaces-projects", "/home/u/.local/state/wadspaces", Some(1000));
+        let got = super::quadlet(&w, "/home/u/.local/state/wadspaces", Some(1000));
         assert_eq!(got, include_str!("../../../fixtures/quadlet/wad-writing-rootless.container"));
     }
 
@@ -191,7 +190,7 @@ mod tests {
                 {"id": "vscode-c3d4", "app": "vscode", "path": "/var/lib/wadspaces-signins/vscode-c3d4"},
             ],
         });
-        let got = super::quadlet(&w, super::PROJECTS_DIR, super::STATE_DIR, None);
+        let got = super::quadlet(&w, super::STATE_DIR, None);
         assert_eq!(got, include_str!("../../../fixtures/quadlet/wad-writing-signins.container"));
     }
 }

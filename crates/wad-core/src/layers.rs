@@ -12,7 +12,9 @@
 //!                  <id>:latest, from when this layer was "customization".)
 //!   Customization  the wadspace's own: name, wallpaper, projects and keys
 //!                  (saved sign-ins). No image: wadd hands those over when
-//!                  it starts. Kept in the wadspace document (version 3).
+//!                  it starts, and the wadspace clones its GitHub projects
+//!                  and copies in the rest (nothing is mounted). Kept in the
+//!                  wadspace document (version 3).
 //!
 //! What a wadspace ends up with, which sign-ins it can keep and which secrets
 //! fit them, its desktop and Start menu as the image draws them, each layer's
@@ -868,9 +870,54 @@ pub fn workspace_for(w: &Value, template: &Value, setup: &Value, opts: &Value) -
     out.insert("devices".into(), json!(["/dev/dri"]));
     out.insert("shm_size".into(), "1g".into());
     out.insert("signins".into(), Value::Array(signins));
+    if v3 {
+        out.insert("projects".into(), Value::Array(workspace_projects(own)));
+    }
     out.insert("hotkey".into(), Value::Null);
     out.insert("autostart".into(), false.into());
     Value::Object(out)
+}
+
+/// A stack's projects as wadd takes them: `[{id, kind, mount, repo?, ref?,
+/// setup?, from?}]`. A GitHub one is cloned by the wadspace; a copy is
+/// copied in once (`from`: where its files are, for a machine that hasn't
+/// copied them yet). Anything else is left out.
+fn workspace_projects(custom: &Value) -> Vec<Value> {
+    let mut out = Vec::new();
+    for p in js::arr(custom, "projects") {
+        let mut e = Obj::new();
+        e.insert("id".into(), s(p, "id").into());
+        match s(p, "kind") {
+            "github" => {
+                e.insert("kind".into(), "github".into());
+                e.insert("mount".into(), s(p, "as").into());
+                e.insert("repo".into(), s(p, "repo").into());
+                if !s(p, "ref").is_empty() {
+                    e.insert("ref".into(), s(p, "ref").into());
+                }
+                if !s(p, "setup").is_empty() {
+                    e.insert("setup".into(), s(p, "setup").into());
+                }
+            }
+            "copy" => {
+                e.insert("kind".into(), "copy".into());
+                e.insert("mount".into(), s(p, "as").into());
+                let src = &p["source"];
+                let mut from = Obj::new();
+                if !s(src, "machineId").is_empty() {
+                    from.insert("machineId".into(), s(src, "machineId").into());
+                }
+                if src.get("drive").is_some_and(Value::is_object) {
+                    from.insert("drive".into(), src["drive"].clone());
+                }
+                from.insert("paths".into(), json!(strs(src, "paths")));
+                e.insert("from".into(), Value::Object(from));
+            }
+            _ => continue,
+        }
+        out.push(Value::Object(e));
+    }
+    out
 }
 
 // ------------------------------------------------------ version 2 → 3

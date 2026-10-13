@@ -39,9 +39,9 @@ const PROJECTS: Project[] = [
 const WADD: WaddSpec[] = [
   { id: "a", name: "A", image: "i", port: 3100 },
   { id: "n", name: "Native", image: "i", display: "host", hotkey: 2, env: { Z: "1", A: "2", M: "x y" }, secrets: ["s1", "s2"], volumes: ["v:/config:z"], devices: ["/dev/dri"], shm_size: "1g", enabled: true, autostart: true },
-  { id: "p", name: "Projects", image: "i", port: 3101, container_name: "custom", container_port: 8000, projects: [{ id: "wrtvault0000000000ab", mount: "Writing" }, { id: "dr", mount: "Photos", path: "/run/media/photos" }] },
+  { id: "p", name: "Projects", image: "i", port: 3101, container_name: "custom", container_port: 8000, projects: [{ id: "wrtvault0000000000ab", kind: "github", mount: "Writing", repo: "HungGod/Writing" }, { id: "copy-abc", kind: "copy", mount: "Photos" }] },
   { id: "q", name: "Quotes: \"yes\" #1", image: "ghcr.io/x/y:latest", port: 3102, hotkey: null, icon: null, env: { TRUE: "true", NUM: "3100", COLON: "a:b", SPACE: "a b", EMPTY: "", NULLISH: "null", YES: "yes", HASH: "#x" }, shm_size: null },
-  { id: "h", name: "Host projects", image: "i", display: "host", projects: [{ id: "x1", mount: "X" }] },
+  { id: "h", name: "Host projects", image: "i", display: "host", projects: [{ id: "x1", kind: "github", mount: "X", repo: "o/x" }] },
 ];
 
 const DRAFTS: ProjectDraft[] = [

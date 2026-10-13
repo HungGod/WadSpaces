@@ -135,12 +135,13 @@ export interface BuildUpdate extends BuildSummary {
   lines: string[];
 }
 
-/** A launch on this machine (wadd/launches.py): the image and projects, then the start. */
+/** A launch on this machine: the image and the copies it takes in, then the start. */
 export interface LaunchSummary {
   id: string;
   wsId: string;
   name: string;
-  projects: string[];
+  /** What a launch mounted, from before projects were cloned and copied in (none now). */
+  projects?: string[];
   restart: boolean;
   status: "queued" | "running" | "done" | "error" | "cancelled";
   progress: number;

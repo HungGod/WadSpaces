@@ -88,9 +88,9 @@ export interface WaddSpec {
   devices?: string[];
   shm_size?: string | null;
   autostart?: boolean;
-  /** Set by wadd when it launches with projects (wadd/launches.py), never by the app.
-   *  `path`: a folder or drive project, mounted where it is. */
-  projects?: { id: string; mount: string; path?: string }[];
+  /** Its projects (from its design): GitHub repos it clones and copies it
+   *  takes in, each at ~/Desktop/<mount>. Nothing is mounted. */
+  projects?: { id: string; kind: "github" | "copy"; mount: string; repo?: string; ref?: string; setup?: string }[];
   /** The saved sign-ins its apps use (from its design): `app` is the app's
    *  id, `web` a web app's (a WadBrowser profile). */
   signins?: WaddSignIn[];
