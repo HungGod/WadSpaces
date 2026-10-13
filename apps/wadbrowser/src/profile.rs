@@ -8,7 +8,9 @@
 //! machine, mounted into each wadspace that uses it (so signing in once
 //! covers all of them). wadd lists them in /run/wadspaces-extra/signins.json;
 //! such an app's windows get profile `signin-<id>`, whose data is that
-//! folder. Its cache stays this wadspace's own.
+//! folder. Its cache stays this wadspace's own. WadBrowser's own windows (not
+//! a web app's) do the same with the sign-in that lists `@browser`: the key
+//! of the group the browser is in.
 //!
 //! A profile named `ephemeral-…` keeps nothing at all ("Don't save" in a
 //! WadBrowser setup): its cookies and storage live in memory and go when its
@@ -29,6 +31,8 @@ pub const DEFAULT: &str = "default";
 const SIGNIN: &str = "signin-";
 const EPHEMERAL: &str = "ephemeral-";
 const SIGNINS: &str = "/run/wadspaces-extra/signins.json";
+/// The browser itself in a sign-in's apps (wad-core's BROWSER_APP).
+const BROWSER: &str = "@browser";
 
 /// A saved web sign-in this wadspace mounts: its id, folder and web apps.
 #[derive(Debug, serde::Deserialize)]
@@ -68,6 +72,17 @@ fn signins() -> &'static [WebSignIn] {
 pub fn for_app(app_id: &str) -> Option<String> {
     let id = app_id.strip_prefix("wadspaces-webapp-")?;
     signins().iter().find(|s| s.apps.iter().any(|a| a == id)).map(|s| format!("{SIGNIN}{}", s.id))
+}
+
+/// The profile WadBrowser's own windows (not a web app's) use: the saved
+/// sign-in that lists the browser, else `default`.
+pub fn browser() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| browser_of(signins()).unwrap_or_else(|| DEFAULT.into()))
+}
+
+fn browser_of(all: &[WebSignIn]) -> Option<String> {
+    all.iter().find(|s| s.apps.iter().any(|a| a == BROWSER)).map(|s| format!("{SIGNIN}{}", s.id))
 }
 
 /// A saved sign-in's profile (only while this wadspace mounts it).
@@ -186,5 +201,18 @@ mod tests {
         // the window quietly using the default profile.
         assert_eq!(super::for_signin(Some("gone"), "gmail"), "ephemeral-gmail");
         assert!(!super::is_ephemeral("default") && !super::is_ephemeral("signin-x"));
+    }
+
+    #[test]
+    fn the_browser_signs_in_with_its_groups_key() {
+        let m: super::Manifest = serde_json::from_str(
+            r#"{"signins": [
+                {"id": "mail", "web": true, "apps": ["gmail"], "dir": "/x/mail"},
+                {"id": "work", "web": true, "apps": ["github", "@browser"], "dir": "/x/work"}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(super::browser_of(&m.signins).as_deref(), Some("signin-work"));
+        assert_eq!(super::browser_of(&m.signins[..1]), None);
     }
 }

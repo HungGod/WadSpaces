@@ -51,8 +51,14 @@ pub struct Opts {
 }
 
 impl Opts {
+    /// Its profile: as asked, else a web app's `default`, or for WadBrowser's
+    /// own windows the browser's key (profile::browser).
     pub fn profile(&self) -> &str {
-        self.profile.as_deref().unwrap_or(profile::DEFAULT)
+        match (&self.profile, &self.app_id) {
+            (Some(p), _) => p,
+            (None, Some(_)) => profile::DEFAULT,
+            (None, None) => profile::browser(),
+        }
     }
 
     /// Where Home and a new tab go: the app's start page, the configured

@@ -42,7 +42,9 @@ surface of their own, which the compositor blends over the page.
   is the sign-in's folder that wadd mounts at
   `/run/wadspaces-signins/<id>` (listed in
   `/run/wadspaces-extra/signins.json`), shared with every wadspace whose
-  apps use it; its cache stays the wadspace's own. A web app in a setup
+  apps use it; its cache stays the wadspace's own. WadBrowser's own windows
+  do the same with the sign-in listing `@browser` (the key of the group the
+  browser is in, in the Builder's Customization). A web app in a setup
   with no saved sign-in gets an **ephemeral** profile (WebKit's ephemeral
   data manager): nothing of it reaches the disk, and it's forgotten when its
   last window closes.
