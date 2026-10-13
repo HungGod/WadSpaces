@@ -107,6 +107,8 @@ interface AppState {
   /** Installs a stack and builds what its image needs; whether it went (a toast says why not). */
   buildStack: (id: string) => Promise<boolean>;
   saveBrowser: (b: New<BrowserSetup>) => Promise<BrowserSetup>;
+  /** Renames a saved sign-in, and the name the wadspaces using it keep for it. */
+  renameSignIn: (id: string, name: string) => Promise<void>;
   /** New sign-ins a draft names, made now (online: an id the machine makes it under). */
   createSignIns: (list: { name: string; kind: SecretKind }[]) => Promise<SignInRef[]>;
   /** Deleted softly, with Undo. Refused while live documents are built on it. */
@@ -318,6 +320,18 @@ export const useApp = create<AppState>((set, get) => {
       const saved = await backend.saveExtensions({ ...e, id: prev?.id ?? freeId(e.name, extensions), owner: prev?.owner ?? backend.owner(), createdAt: prev?.createdAt ?? now(), updatedAt: now() });
       put("extensions", saved);
       return saved;
+    },
+    renameSignIn: async (id, name) => {
+      await backend.updateSignIn(id, { name });
+      await get().loadSignIns();
+      // Wadspaces keep a key as {id, name}: the name, everywhere it's kept.
+      const swap = <K extends SignInRef | undefined>(k: K): K => (k && k.id === id ? ({ ...k, name } as K) : k);
+      for (const w of alive(get().wadspaces)) {
+        const sec = w.customization?.secrets;
+        if (!sec || ![...Object.values(sec.bySlot), ...(sec.groups ?? []).flatMap((g) => (g.key ? [g.key] : []))].some((k) => k.id === id && k.name !== name)) continue;
+        const secrets = { ...sec, bySlot: Object.fromEntries(Object.entries(sec.bySlot).map(([k, v]) => [k, swap(v)])), ...(sec.groups && { groups: sec.groups.map((g) => ({ ...g, key: swap(g.key) })) }) };
+        await get().saveWadspace({ ...w, customization: { ...w.customization!, secrets } });
+      }
     },
     saveWadspace: async (w) => {
       const { wadspaces } = get();

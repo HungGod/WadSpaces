@@ -254,3 +254,13 @@ describe("Home", () => {
     await waitFor(() => expect([...document.querySelectorAll(".wb .stack .stack-name")].map((e) => e.textContent)).toEqual(["Cosmic Bodybuilding", "VanuaAcademy"]));
   });
 });
+
+describe("Secrets", () => {
+  it("renames a sign-in, and the name the wadspaces using it keep", async () => {
+    await open("/secrets");
+    await act(() => useApp.getState().renameSignIn("s-github", "GitHub (me)"));
+    expect(fake.signIns.find((s) => s.id === "s-github")?.name).toBe("GitHub (me)");
+    const keys = (await fake.listWadspaces()).flatMap((w) => (w.version === 3 ? (w.customization?.secrets.groups ?? []).flatMap((g) => (g.key ? [g.key] : [])) : []));
+    expect(keys.filter((k) => k.id === "s-github").map((k) => k.name)).toEqual(["GitHub (me)"]);
+  });
+});

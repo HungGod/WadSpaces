@@ -52,7 +52,7 @@ export default function SecretsPage() {
     setRenaming(null);
     if (!n || n === s.name) return;
     try {
-      await backend.updateSignIn(s.id, { name: n });
+      await useApp.getState().renameSignIn(s.id, n);
     } catch (e) {
       toast({ title: "Couldn't rename it", body: (e as Error).message, tone: "error" });
     }

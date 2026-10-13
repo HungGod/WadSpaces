@@ -2453,6 +2453,49 @@ body.is-dragging .wb .delete-area .bucket.drop-ok {
 .wb .mod-tile.blank {
   cursor: pointer;
 }
+/* In the light theme a blank module is a light placeholder, like the slots a
+   drag shows ("Extensions goes here"): not a desktop yet, so not a dark one.
+   Its screen goes back to the page's tokens (captured on .wb). */
+[data-theme="light"] .wb {
+  --page-fg: var(--fg);
+  --page-muted: var(--muted);
+  --page-faint: var(--faint);
+  --page-line: var(--line);
+  --page-line-strong: var(--line-strong);
+}
+[data-theme="light"] .wb .mod.blank-mod .screen {
+  --fg: var(--page-fg);
+  --muted: var(--page-muted);
+  --faint: var(--page-faint);
+  --line: var(--page-line);
+  --line-strong: var(--page-line-strong);
+  --k-template: #1679b8;
+  --k-ext: #4d7a00;
+  --k-cz: #d81b60;
+  color: var(--fg);
+  color-scheme: light;
+}
+[data-theme="light"] .wb .mod.blank-mod .screen-extensions {
+  background: color-mix(in srgb, var(--k-ext) 6%, #fff);
+}
+/* The blank wallpaper is inline: !important to swap it. */
+[data-theme="light"] .wb .mod.blank-mod .screen-customization {
+  background: color-mix(in srgb, var(--k-cz) 5%, #fff) !important;
+  opacity: 1;
+}
+[data-theme="light"] .wb .mod.blank-mod .taskbar {
+  background: transparent;
+  border-top: 1px dashed var(--line-strong);
+}
+[data-theme="light"] .wb .mod.blank-mod :is(.win.blank, .tray.prompt) {
+  background: rgb(255 255 255 / 0.7);
+}
+[data-theme="light"] .wb .blank-grab:hover .win.blank {
+  background: color-mix(in srgb, var(--k-ext) 10%, #fff);
+}
+[data-theme="light"] .wb .blank-grab:hover .tray.prompt {
+  background: color-mix(in srgb, var(--k-cz) 10%, #fff);
+}
 
 /* Names are unique per kind: a taken one turns the field red and says why. */
 .wb .name-edit {
@@ -2649,6 +2692,24 @@ body.is-dragging .wb .bucket-row .bucket-delete.drop-ok {
 body.is-dragging .wb .bucket-row .bucket-build.drop-ok {
   border-color: var(--accent);
   background: rgb(36 54 8 / 0.96);
+}
+/* The same, light. */
+[data-theme="light"] body.is-dragging .wb .bucket-row .bucket {
+  background: rgb(255 255 255 / 0.94);
+}
+[data-theme="light"] body.is-dragging .wb .bucket-row .bucket-delete {
+  border-color: color-mix(in srgb, var(--k-cz) 50%, transparent);
+}
+[data-theme="light"] body.is-dragging .wb .bucket-row .bucket-build {
+  border-color: color-mix(in srgb, var(--k-ext) 50%, transparent);
+}
+[data-theme="light"] body.is-dragging .wb .bucket-row .bucket-delete.drop-ok {
+  border-color: var(--k-cz);
+  background: color-mix(in srgb, var(--k-cz) 12%, #fff);
+}
+[data-theme="light"] body.is-dragging .wb .bucket-row .bucket-build.drop-ok {
+  border-color: var(--k-ext);
+  background: color-mix(in srgb, var(--k-ext) 14%, #fff);
 }
 .wb .bucket-row .bucket.drop-no,
 .wb .bucket-row .bucket.drop-could {
@@ -3003,6 +3064,9 @@ body.is-dragging .wb .bucket-row .bucket-build.drop-ok {
   border: 1.5px solid var(--k-cz);
   background: var(--accent-2-soft);
   color: #ffc1d6;
+}
+[data-theme="light"] .wb .key-btn.set {
+  color: var(--k-cz);
 }
 .wb .key-menu {
   position: absolute;

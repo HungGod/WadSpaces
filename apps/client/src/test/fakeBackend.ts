@@ -274,7 +274,14 @@ export class FakeBackend implements Backend {
     this.emit("signins");
     return s;
   }
-  updateSignIn = nope("updateSignIn");
+  async updateSignIn(id: string, patch: { name?: string; paths?: string[] }) {
+    const s = this.signIns.find((x) => x.id === id);
+    if (!s) throw new Error(`no sign-in ${id}`);
+    if (patch.name && this.signIns.some((x) => x.id !== id && x.name.toLowerCase() === patch.name!.toLowerCase())) throw new Error(`there's a sign-in called ${patch.name} already`);
+    Object.assign(s, patch);
+    this.emit("signins");
+    return s;
+  }
   signOutSignIn = nope("signOutSignIn");
   deleteSignIn = nope("deleteSignIn");
   async listSecrets(): Promise<WaddSecret[]> {

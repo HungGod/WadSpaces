@@ -509,11 +509,16 @@ function KeyPicker({ kind, value, defaultName, onSet }: { kind: SecretKind; valu
   const keys = useApp.getState().knownSignIns();
   const stacks = useBoard((s) => s.stacks);
   const existing = keysOfKind(keys, stacks, kind).filter((k) => k.id !== value?.id);
+  // The machine's name for it: renamed elsewhere (the Secrets page), a wadspace may still keep the old one.
+  const shown = (value && keys.find((k) => k.id === value.id)?.name) ?? value?.name ?? "";
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    // Esc closes the menu only, not the whole editor (caught before the editor's own listener).
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && (e.stopImmediatePropagation(), setOpen(false));
     addEventListener("mousedown", away);
-    return () => removeEventListener("mousedown", away);
+    addEventListener("keydown", esc, true);
+    return () => (removeEventListener("mousedown", away), removeEventListener("keydown", esc, true));
   }, [open]);
   const pick = (r: SecretRef | null) => {
     onSet(r);
@@ -526,7 +531,7 @@ function KeyPicker({ kind, value, defaultName, onSet }: { kind: SecretKind; valu
   const stop = () => (setRenaming(null), setProblem(""));
   const rename = (keepOnClash: boolean) => {
     if (!value || renaming === null) return;
-    if (!renaming.trim() || renaming.trim() === value.name) return stop();
+    if (!renaming.trim() || renaming.trim() === shown) return stop();
     const why = useBoard.getState().renameKey(value.id, renaming);
     if (why) return keepOnClash ? setProblem(why) : stop();
     renameInDraft(value.id, renaming.trim());
@@ -561,13 +566,13 @@ function KeyPicker({ kind, value, defaultName, onSet }: { kind: SecretKind; valu
         className={`key-btn${value ? " set" : ""}`}
         // The name renames the key; the key icon (or No key) opens the menu.
         onClick={(e) => {
-          if (value && (e.target as HTMLElement).closest(".secret-name")) return (setOpen(false), setRenaming(value.name));
+          if (value && (e.target as HTMLElement).closest(".secret-name")) return (setOpen(false), setRenaming(shown));
           setOpen((o) => !o);
         }}
         title={value ? `${SECRET_KIND_LABEL[kind]} · click the name to rename it, the key for more` : SECRET_KIND_LABEL[kind]}
       >
         <KeyRound size={13} />
-        <span className={`secret-name${value ? " renamable" : ""}`}>{value ? value.name : "No key"}</span>
+        <span className={`secret-name${value ? " renamable" : ""}`}>{value ? shown : "No key"}</span>
       </button>
       {open && (
         <div className="key-menu">
