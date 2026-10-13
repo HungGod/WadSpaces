@@ -8,6 +8,7 @@ import { AddFromGithub, GITHUB_NEW, GithubTokenCallout, NewRepoDialog, NewRepoOn
 import { AddDriveDialog, AddFolderDialog } from "@/components/HostFolders";
 import { Badge, Button, Dropdown, EmptyState, IconButton, PageHeader } from "@/components/ui";
 import { backend } from "@/data";
+import { wadspaceName } from "@/data/layers";
 import type { GithubStatus } from "@/data/backend";
 import { sourceLabel, sourcePath, type Project, type ProjectStatus } from "@core/projects";
 import { useApp } from "@/lib/store";
@@ -57,7 +58,10 @@ export default function ProjectsPage() {
     return backend.subscribe((t) => t === "github" && checkGithub());
   }, [checkGithub]);
 
-  const name = (wsId: string) => wadspaces.find((w) => w.id === wsId)?.name ?? wsId;
+  const name = (wsId: string) => {
+    const w = wadspaces.find((x) => x.id === wsId);
+    return w ? wadspaceName(w) : wsId;
+  };
 
   const newRepo = () => {
     if (offline) return setCreating(true);
@@ -137,7 +141,7 @@ export default function ProjectsPage() {
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {projects.map((p) => {
             const st = status[p.id];
-            const defaults = wadspaces.filter((w) => !w.deletedAt && w.projects.includes(p.id));
+            const defaults = wadspaces.filter((w) => !w.deletedAt && w.customization?.projects.some((x) => x.id === p.id));
             const where = sourcePath(p.source);
             return (
               <div key={p.id} className="flex flex-col rounded-2xl border border-line bg-surface/70 p-4 transition-colors hover:border-line-strong">
@@ -184,10 +188,10 @@ export default function ProjectsPage() {
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {offline && st && <FolderState p={p} st={st} />}
-                  {offline && st?.mountedIn.map((id) => <Badge key={id}>Mounted in {name(id)}</Badge>)}
+                  {offline && st?.mountedIn.filter((id) => !defaults.some((w) => w.id === id)).map((id) => <Badge key={id}>In {name(id)}</Badge>)}
                   {defaults.map((w) => (
                     <Badge key={w.id} tone="accent-2">
-                      Default for {w.name}
+                      In {wadspaceName(w)}
                     </Badge>
                   ))}
                 </div>

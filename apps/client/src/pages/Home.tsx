@@ -1,19 +1,18 @@
 // Home: a greeting and the numbers (wadspaces, running, machines online),
 // Jump back in (the last launch again, a focus session's too), what's running
-// now (to show or stop), and your templates as the Builder stacks them, each
-// opening its picker there.
+// now (to show or stop), and your wadspaces as the Builder's board has them,
+// each opening its stack there.
 import { Link, useNavigate } from "react-router";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { ArrowRight, GraduationCap, Play, Radio, Square, Timer, Wand2 } from "lucide-react";
 import clsx from "clsx";
-import { stacks, type Wadspace } from "@core/layers";
+import type { Wadspace } from "@core/layers";
 import { Page } from "@/components/Page";
 import { Thumb } from "@/components/Thumb";
 import { Badge, Button } from "@/components/ui";
-import { openStack, TemplateStack } from "@/components/wadbuilder/StepTemplate";
 import { backend } from "@/data";
-import { DEFAULT_BROWSER_APPS, DEFAULT_BROWSERS, type RunItem } from "@/data/layers";
+import { DEFAULT_BROWSER_APPS, DEFAULT_BROWSERS, wadspaceName, type RunItem } from "@/data/layers";
 import { timeAgo, uptime } from "@/lib/format";
 import { openFocusWindow, openWadspace } from "@/lib/launch";
 import { alive, isLocked, useApp } from "@/lib/store";
@@ -100,7 +99,7 @@ export default function HomePage() {
                 <div key={c.id} className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-2 pr-4">
                   {w ? <Thumb w={w} className="!w-24 rounded-xl" /> : <div className="aspect-video w-24 rounded-xl bg-surface-2" />}
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-display font-semibold">{w?.name ?? c.wadspaceId}</div>
+                    <div className="truncate font-display font-semibold">{w ? wadspaceName(w) : c.wadspaceId}</div>
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-muted">
                       <span className="size-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" />
                       {m.label} · {c.onScreen ? "on screen" : c.mode === "stream" ? "streamed display" : "in the background"} · up {uptime(c.startedAt)}
@@ -125,37 +124,33 @@ export default function HomePage() {
           )}
         </section>
 
-        <YourTemplates />
+        <YourWadspaces />
       </div>
     </Page>
   );
 }
 
-/** Your template stacks, as Step 1 shows them (four at most): each opens its picker in the Builder. */
-function YourTemplates() {
-  const templates = useApp((s) => s.templates);
-  const customizations = useApp((s) => s.customizations);
+/** Your wadspaces as the board has them (four at most): each opens its stack there. */
+function YourWadspaces() {
   const wadspaces = useApp((s) => s.wadspaces);
   const navigate = useNavigate();
-  const all = stacks({ templates, customizations, wadspaces });
+  const all = alive(wadspaces)
+    .filter((w) => w.customization)
+    .sort((a, b) => a.order - b.order);
   return (
     <section>
-      <SectionHead title="Your templates" href="/builder" cta="All in the Builder" />
+      <SectionHead title="Your wadspaces" href="/builder" cta="All in the Builder" />
       <div className="grid gap-x-6 gap-y-8 md:grid-cols-2 xl:grid-cols-4">
-        {all.slice(0, 4).map((s) => (
-          <TemplateStack
-            key={s.template.id}
-            stack={s}
-            onOpen={() => {
-              openStack(s);
-              navigate("/builder");
-            }}
-          />
+        {all.slice(0, 4).map((w) => (
+          <button key={w.id} type="button" onClick={() => navigate(`/builder?stack=${encodeURIComponent(w.id)}`)} className="group block text-left" aria-label={`Open ${wadspaceName(w)} in the Builder`}>
+            <Thumb w={w} className="rounded-2xl shadow-deep ring-1 ring-line-strong transition-transform group-hover:-translate-y-0.5" />
+            <div className="mt-2 truncate font-display font-semibold">{wadspaceName(w)}</div>
+          </button>
         ))}
         {!all.length && (
           <Link to="/builder" className="flex aspect-[16/10] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong text-muted hover:border-accent/60 hover:text-fg">
             <Wand2 className="size-7" />
-            <span className="text-sm font-semibold">Build your own template</span>
+            <span className="text-sm font-semibold">Build your first wadspace</span>
           </Link>
         )}
       </div>
@@ -219,7 +214,7 @@ function JumpBackIn() {
   const isFocus = session.kind === "focus";
   const machine = machines.find((m) => m.id === session.machineId);
   const offline = !!machine && machine.status !== "online";
-  const names = [...spaces.map((w) => w.name), ...items.filter((i) => i.kind !== "wadspace").map((i) => (i.kind === "browser" ? i.config.name : "Terminal"))];
+  const names = [...spaces.map((w) => wadspaceName(w)), ...items.filter((i) => i.kind !== "wadspace").map((i) => (i.kind === "browser" ? i.config.name : "Terminal"))];
   const title = names.length === 1 ? names[0] : `${names.length} together`;
   const sameFocus = !!focus && isFocus && focus.wadspaceIds.join() === session.wadspaceIds.join();
   const mins = session.minutes ?? 25;
@@ -242,7 +237,7 @@ function JumpBackIn() {
           <Badge>{machine?.label ?? "This machine"}</Badge>
         </div>
         <h3 className="mt-2 truncate font-display text-2xl font-bold tracking-tight">{title}</h3>
-        <p className="mt-1 line-clamp-2 text-sm text-muted">{names.length > 1 ? names.join(" · ") : spaces[0]?.description || "On the machine"}</p>
+        <p className="mt-1 line-clamp-2 text-sm text-muted">{names.length > 1 ? names.join(" · ") : spaces[0]?.customization?.description || "On the machine"}</p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {sameFocus ? (
             <Button variant="primary" onClick={openFocusWindow}>

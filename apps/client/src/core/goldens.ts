@@ -8,7 +8,7 @@
 // wallpapers) are {"$bytes": base64}. A function that throws gives {"err"}.
 import type { WaddSpec } from "./spec";
 import type { Project, ProjectDraft } from "./projects";
-import type { BrowserSetup, Customization, KeyGroup, Setup, Template, Wadspace, WadspaceV3 } from "./layers";
+import type { BrowserSetup, Extensions, KeyGroup, Setup, Template, Wadspace, WadspaceV2 } from "./layers";
 
 export interface Case {
   fn: string;
@@ -110,7 +110,7 @@ const SETUPS: Setup[] = [
   },
   { templateId: "writing", browserMode: "browser", webapps: [webapp("Gmail", "https://mail.google.com")], extensions: ["anthropic.claude-code"], tools: ["python"], autostart: ["app:obsidian"] },
 ];
-const C = (id: string, setup: Setup, extra: Partial<Customization> = {}): Customization => ({
+const C = (id: string, setup: Setup, extra: Partial<Extensions> = {}): Extensions => ({
   ...setup,
   id,
   owner: "me",
@@ -120,9 +120,9 @@ const C = (id: string, setup: Setup, extra: Partial<Customization> = {}): Custom
   updatedAt: "2026-03-01",
   ...extra,
 });
-const CUSTOMIZATIONS: Customization[] = [C("dev-plus", SETUPS[1], { name: "Dev plus" }), C("notes-plus", SETUPS[2], { createdAt: "2026-02-01" }), C("old-c", SETUPS[1], { deletedAt: "2026-04-01" })];
-const ref = (id: string, kind = "web") => ({ id, name: `${id}-name`, kind }) as Wadspace["secrets"][string];
-const W2 = (id: string, base: Wadspace["base"], extra: Partial<Wadspace> = {}): Wadspace => ({
+const CUSTOMIZATIONS: Extensions[] = [C("dev-plus", SETUPS[1], { name: "Dev plus" }), C("notes-plus", SETUPS[2], { createdAt: "2026-02-01" }), C("old-c", SETUPS[1], { deletedAt: "2026-04-01" })];
+const ref = (id: string, kind = "web") => ({ id, name: `${id}-name`, kind }) as WadspaceV2["secrets"][string];
+const W2 = (id: string, base: WadspaceV2["base"], extra: Partial<WadspaceV2> = {}): WadspaceV2 => ({
   version: 2,
   id,
   owner: "me",
@@ -136,7 +136,7 @@ const W2 = (id: string, base: Wadspace["base"], extra: Partial<Wadspace> = {}): 
   updatedAt: "2026-05-01",
   ...extra,
 });
-const WADSPACES: Wadspace[] = [
+const WADSPACES: WadspaceV2[] = [
   W2("novel", { kind: "template", id: "writing" }, { secrets: { "app:obsidian": ref("s-obs", "obsidian") }, wallpaper: { type: "image", value: "data:image/jpeg;base64,/9j/" } }),
   W2("work", { kind: "customization", id: "dev-plus" }, {
     secrets: { "web:github": ref("s-gh"), "web:google-cloud": ref("s-g"), "ext:anthropic.claude-code": ref("s-cc", "vscode-claude-code") },
@@ -160,8 +160,8 @@ const CHAINED: Template[] = [
   T("loop2", ["krita", "obs"], { parent: "looped" }),
 ];
 const LIB3 = { templates: [...TEMPLATES, ...CHAINED], extensions: CUSTOMIZATIONS };
-const S3 = (id: string, extra: Partial<WadspaceV3>): WadspaceV3 => ({ version: 3, id, owner: "me", order: 1, createdAt: "2026-07-01", updatedAt: "2026-07-01", ...extra });
-const STACKS: WadspaceV3[] = [
+const S3 = (id: string, extra: Partial<Wadspace>): Wadspace => ({ version: 3, id, owner: "me", order: 1, createdAt: "2026-07-01", updatedAt: "2026-07-01", ...extra });
+const STACKS: Wadspace[] = [
   S3("work3", {
     template: "dev",
     extensions: "dev-plus",

@@ -1,38 +1,29 @@
 // What can be done with a wadspace, wherever it's listed (the Machines page's
-// rows, its details drawer): open it, customize it for a run, edit it in the
-// Builder or start a new one from it, look at its details, delete it.
+// rows, its details drawer): open it, customize it for a run, edit it on the
+// Builder's board (its stack, or a copy of it beside it), look at its
+// details, delete it.
 import { useNavigate } from "react-router";
 import { Copy, Info, Lock, MoreHorizontal, Pencil, Play, SlidersHorizontal, Trash2 } from "lucide-react";
 import type { Wadspace } from "@core/layers";
-import { useDraft } from "@/components/wadbuilder/draft";
 import { Dropdown, IconButton } from "@/components/ui";
 import { clockTime } from "@/lib/format";
 import { openWadspace } from "@/lib/launch";
 import { isLocked, useApp } from "@/lib/store";
+import { wadspaceName } from "@/data/layers";
 import { useUi } from "@/lib/ui";
 
 /** The actions, for menus and buttons alike. */
 export function useWadspaceActions(w: Wadspace) {
   const navigate = useNavigate();
   const { openDetails, openLauncher } = useUi();
-  const lib = () => {
-    const { templates, customizations } = useApp.getState();
-    return { templates, customizations };
-  };
   return {
     open: () => void openWadspace(w),
     customize: () => openLauncher({ customize: w.id }),
-    edit: () => {
-      useDraft.getState().edit(w, lib());
-      navigate("/builder");
-    },
-    copy: () => {
-      useDraft.getState().copy(w, lib());
-      navigate("/builder");
-    },
+    edit: () => navigate(`/builder?stack=${encodeURIComponent(w.id)}`),
+    copy: () => navigate(`/builder?stack=${encodeURIComponent(w.id)}&copy=1`),
     details: () => openDetails(w.id),
     remove: () => {
-      if (!confirm(`Delete ${w.name}?`)) return;
+      if (!confirm(`Delete ${wadspaceName(w)}?`)) return;
       useApp
         .getState()
         .remove("wadspace", w.id)

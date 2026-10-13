@@ -1,20 +1,24 @@
 // The WadSpaces Client's state: who's signed in, the Builder's documents
-// (templates, customizations, wadspaces, WadBrowser setups) and the layer
-// images on the launch machine, the machines, projects and saved sign-ins,
-// builds and launches as they run, and the toasts and notices that report on
-// them. The backend's events reload just what changed.
+// (templates, Extensions layers, wadspaces (the board's stacks), WadBrowser
+// setups) and the layer images on the launch machine, the machines,
+// projects and saved sign-ins, builds and launches as they run, and the
+// toasts and notices that report on them. The backend's events reload just
+// what changed.
 //
-// The Builder's actions live here too: saving a layer, deleting softly (with
-// Undo; "Recently deleted" restores or deletes for good), building a layer's
-// image and launching the launcher's pick.
+// The documents' actions live here too: saving one, deleting softly (with
+// Undo; "Recently deleted" restores or deletes for good), installing a stack
+// and building its layers' images, and launching the launcher's pick. A
+// library from before stacks is moved to them when it's loaded
+// (data/migrate.ts).
 import { create } from "zustand";
 import { backend, type Topic } from "@/data";
 import type { BuildProgress, LaunchProgress } from "@/data/backend";
 import type { Project } from "@core/projects";
-import { type BrowserSetup, type Customization, type LayerKey, type SignInRef, type Template, type Wadspace } from "@core/layers";
+import { stackImageKey, type BrowserSetup, type Extensions, type LayerKey, type SignInRef, type Template, type Wadspace } from "@core/layers";
 import type { SecretKind } from "@core/layers";
 import type { LayerLibrary } from "@/data/backend";
-import { byLayer, imageState, type ImageRow, type ImageState, type RunItem } from "@/data/layers";
+import { byLayer, imageState, wadspaceName, type ImageRow, type ImageState, type RunItem } from "@/data/layers";
+import { applied, migration } from "@/data/migrate";
 import type { WaddSignIn } from "./wadd";
 import type { BuildJob } from "./build";
 import type { LaunchJob } from "./launch";
@@ -34,7 +38,7 @@ interface Toast {
 }
 
 /** The Builder's four kinds of document. */
-export type LayerKind = "template" | "customization" | "wadspace" | "browser";
+export type LayerKind = "template" | "extensions" | "wadspace" | "browser";
 
 /** A document to save: its id (a new one gets one from its name), the rest the store fills in. */
 export type New<T> = Omit<T, "id" | "owner" | "createdAt" | "updatedAt"> & { id?: string };
@@ -64,7 +68,8 @@ interface AppState {
   notices: Notice[];
   // The Builder's documents, deleted ones included (`deletedAt`): see `alive`.
   templates: Template[];
-  customizations: Customization[];
+  extensions: Extensions[];
+  /** The board's stacks. */
   wadspaces: Wadspace[];
   browsers: BrowserSetup[];
   /** The layer images on the launch machine. */
@@ -81,7 +86,8 @@ interface AppState {
   loadLastSession: () => Promise<void>;
   loadProjects: () => Promise<void>;
   loadSignIns: () => Promise<void>;
-  /** The Builder's documents (and, the first time, the starter templates). */
+  /** The Builder's documents (and, the first time, the starter templates; a
+   *  library from before stacks is moved to them). */
   loadLayers: () => Promise<void>;
   loadWadspaces: () => Promise<void>;
   loadImages: () => Promise<void>;
@@ -93,9 +99,13 @@ interface AppState {
   knownSignIns: () => SignInRef[];
 
   saveTemplate: (t: New<Template>) => Promise<Template>;
-  saveCustomization: (c: New<Customization>) => Promise<Customization>;
-  /** Saves (and, on a machine, installs) the wadspace. */
-  saveWadspace: (w: New<Omit<Wadspace, "version">>) => Promise<Wadspace>;
+  saveExtensions: (e: New<Extensions>) => Promise<Extensions>;
+  /** Saves a stack (a new one goes at the board's end). Installing it is `install`'s. */
+  saveWadspace: (w: New<Omit<Wadspace, "version" | "order">> & { order?: number }) => Promise<Wadspace>;
+  /** Installs a stack on the launch machine as it is now. */
+  install: (id: string) => Promise<void>;
+  /** Installs a stack and builds what its image needs; whether it went (a toast says why not). */
+  buildStack: (id: string) => Promise<boolean>;
   saveBrowser: (b: New<BrowserSetup>) => Promise<BrowserSetup>;
   /** New sign-ins a draft names, made now (online: an id the machine makes it under). */
   createSignIns: (list: { name: string; kind: SecretKind }[]) => Promise<SignInRef[]>;
@@ -156,42 +166,43 @@ export const freeId = (name: string, taken: { id: string }[]) => {
 };
 
 /** What's built on a document: the names, for a refusal ("Writing setup, Cosmic"). */
-function dependents(s: Pick<AppState, "customizations" | "wadspaces">, kind: LayerKind, id: string, includeDeleted: boolean) {
+function dependents(s: Pick<AppState, "templates" | "extensions" | "wadspaces">, kind: LayerKind, id: string, includeDeleted: boolean) {
   const pick = <T extends { deletedAt?: string | null }>(l: T[]) => (includeDeleted ? l : alive(l));
+  const gone = (x: { deletedAt?: string | null }) => (x.deletedAt ? " (recently deleted)" : "");
   if (kind === "template")
     return [
-      ...pick(s.customizations).filter((c) => c.templateId === id),
-      ...pick(s.wadspaces).filter((w) => w.base.kind === "template" && w.base.id === id),
-    ].map((x) => x.name + (x.deletedAt ? " (recently deleted)" : ""));
-  if (kind === "customization")
-    return pick(s.wadspaces)
-      .filter((w) => w.base.kind === "customization" && w.base.id === id)
-      .map((w) => w.name + (w.deletedAt ? " (recently deleted)" : ""));
+      ...pick(s.templates).filter((t) => t.parent === id).map((t) => t.name + gone(t)),
+      ...pick(s.extensions).filter((c) => c.templateId === id).map((c) => c.name + gone(c)),
+      ...pick(s.wadspaces).filter((w) => w.template === id).map((w) => wadspaceName(w) + gone(w)),
+    ];
+  if (kind === "extensions") return pick(s.wadspaces).filter((w) => w.extensions === id).map((w) => wadspaceName(w) + gone(w));
   return [];
 }
 
-const LIST: Record<LayerKind, "templates" | "customizations" | "wadspaces" | "browsers"> = {
+const LIST: Record<LayerKind, "templates" | "extensions" | "wadspaces" | "browsers"> = {
   template: "templates",
-  customization: "customizations",
+  extensions: "extensions",
   wadspace: "wadspaces",
   browser: "browsers",
 };
 
+/** A document's name, for a toast. */
+const nameOf = (kind: LayerKind, d: { name?: string }) => (kind === "wadspace" ? wadspaceName(d as Wadspace) : (d.name ?? ""));
+
 export const useApp = create<AppState>((set, get) => {
   /** Puts a saved document in its list. */
-  const put = <K extends "templates" | "customizations" | "wadspaces" | "browsers">(list: K, d: AppState[K][number]) => {
+  const put = <K extends "templates" | "extensions" | "wadspaces" | "browsers">(list: K, d: AppState[K][number]) => {
     const cur = get()[list] as { id: string }[];
     set({ [list]: cur.some((x) => x.id === d.id) ? cur.map((x) => (x.id === d.id ? d : x)) : [...cur, d] } as Partial<AppState>);
   };
   const patchLayer = async (kind: LayerKind, id: string, deletedAt: string | null) => {
-    const lib = get().layerLib();
     const saved =
       kind === "template"
         ? await backend.patchTemplate(id, { deletedAt })
-        : kind === "customization"
-          ? await backend.patchCustomization(id, { deletedAt })
+        : kind === "extensions"
+          ? await backend.patchExtensions(id, { deletedAt })
           : kind === "wadspace"
-            ? await backend.patchWadspace(id, { deletedAt }, lib)
+            ? await backend.patchWadspace(id, { deletedAt })
             : await backend.patchBrowser(id, { deletedAt });
     put(LIST[kind], saved as never);
   };
@@ -213,7 +224,7 @@ export const useApp = create<AppState>((set, get) => {
     launches: [],
     notices: [],
     templates: [],
-    customizations: [],
+    extensions: [],
     wadspaces: [],
     browsers: [],
     images: {},
@@ -233,21 +244,30 @@ export const useApp = create<AppState>((set, get) => {
     loadLayers: async () => {
       // A library seen the first time gets the starter templates (once).
       await backend.createStarters().catch(() => {});
-      const [templates, customizations, wadspaces, browsers, machineScreen] = await Promise.all([
+      const [templates, extensions, customizations, stored, browsers, machineScreen] = await Promise.all([
         backend.listTemplates(),
-        backend.listCustomizations(),
+        backend.listExtensions().catch(() => []),
+        backend.listOldCustomizations().catch(() => []),
         backend.listWadspaces(),
         backend.listBrowsers(),
         backend.machineScreen().catch(() => get().machineScreen),
       ]);
-      set({ templates, customizations, wadspaces, browsers, machineScreen });
+      const projects = backend.caps.projects && stored.some((w) => w.version === 2) ? await backend.listProjects().catch(() => []) : [];
+      const m = migration({ templates, customizations, extensions, wadspaces: stored, projects });
+      if (!m) {
+        set({ templates, extensions, wadspaces: stored.filter((w): w is Wadspace => w.version === 3), browsers, machineScreen });
+      } else {
+        // Shown as moved at once; written behind (and moved again next time if a write fails).
+        set({ templates, ...applied(stored, extensions, m), browsers, machineScreen });
+        void moveToStacks(m);
+      }
       await get().loadImages();
     },
-    loadWadspaces: async () => set({ wadspaces: await backend.listWadspaces() }),
+    loadWadspaces: async () => set({ wadspaces: (await backend.listWadspaces()).filter((w): w is Wadspace => w.version === 3) }),
     loadImages: async () => set({ images: byLayer(await backend.listImages().catch(() => [])) }),
     layerLib: () => {
-      const { templates, customizations, wadspaces, browsers } = get();
-      return { templates, customizations, wadspaces, browsers };
+      const { templates, extensions, wadspaces, browsers } = get();
+      return { templates, extensions, wadspaces, browsers };
     },
     imageState: (key) => {
       const building = new Set([...get().builds.filter((b) => b.status === "building" && b.layer).map((b) => b.layer!), ...(backend.buildingLayers?.() ?? [])]);
@@ -256,7 +276,11 @@ export const useApp = create<AppState>((set, get) => {
     knownSignIns: () => {
       const { signIns, wadspaces, browsers } = get();
       const out = new Map<string, SignInRef>(signIns.map((s) => [s.id, { id: s.id, name: s.name, kind: (s.app === "wadbrowser" ? "web" : s.app) as SecretKind }]));
-      for (const d of [...alive(wadspaces), ...alive(browsers)]) for (const r of Object.values(d.secrets)) if (!out.has(r.id)) out.set(r.id, r);
+      const keys = [
+        ...alive(wadspaces).flatMap((w) => [...Object.values(w.customization?.secrets.bySlot ?? {}), ...(w.customization?.secrets.groups ?? []).flatMap((g) => (g.key ? [g.key] : []))]),
+        ...alive(browsers).flatMap((b) => Object.values(b.secrets)),
+      ];
+      for (const r of keys) if (!out.has(r.id)) out.set(r.id, r);
       return [...out.values()];
     },
     loadMachines: async () => {
@@ -288,28 +312,46 @@ export const useApp = create<AppState>((set, get) => {
       put("templates", saved);
       return saved;
     },
-    saveCustomization: async (c) => {
-      const { customizations } = get();
-      const prev = c.id ? customizations.find((x) => x.id === c.id) : undefined;
-      const saved = await backend.saveCustomization({ ...c, id: prev?.id ?? freeId(c.name, customizations), owner: prev?.owner ?? backend.owner(), createdAt: prev?.createdAt ?? now(), updatedAt: now() });
-      put("customizations", saved);
+    saveExtensions: async (e) => {
+      const { extensions } = get();
+      const prev = e.id ? extensions.find((x) => x.id === e.id) : undefined;
+      const saved = await backend.saveExtensions({ ...e, id: prev?.id ?? freeId(e.name, extensions), owner: prev?.owner ?? backend.owner(), createdAt: prev?.createdAt ?? now(), updatedAt: now() });
+      put("extensions", saved);
       return saved;
     },
     saveWadspace: async (w) => {
       const { wadspaces } = get();
       const prev = w.id ? wadspaces.find((x) => x.id === w.id) : undefined;
-      const next: Wadspace = {
+      const next = {
         ...w,
-        version: 2,
-        id: prev?.id ?? freeId(w.name, wadspaces),
+        version: 3,
+        id: prev?.id ?? freeId(w.customization?.name || w.draftTemplate?.name || "wadspace", wadspaces),
         owner: prev?.owner ?? backend.owner(),
+        order: w.order ?? prev?.order ?? Math.max(0, ...wadspaces.map((x) => x.order)) + 1,
         createdAt: prev?.createdAt ?? now(),
         updatedAt: now(),
-      };
-      const lib = get().layerLib();
-      const saved = await backend.saveWadspace(next, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== next.id), next] });
+      } as Wadspace;
+      const saved = await backend.saveWadspace(next);
       put("wadspaces", saved);
       return saved;
+    },
+    install: async (id) => {
+      const w = get().wadspaces.find((x) => x.id === id);
+      if (!w) throw new Error("That wadspace is gone.");
+      await backend.installWadspace(w, get().layerLib());
+    },
+    buildStack: async (id) => {
+      const w = get().wadspaces.find((x) => x.id === id);
+      if (!w) return false;
+      try {
+        await get().install(id);
+      } catch (e) {
+        get().toast({ title: `Couldn't build ${wadspaceName(w)}`, body: (e as Error).message, tone: "error" });
+        return false;
+      }
+      const key = stackImageKey(w);
+      if (key && !["built", "building"].includes(get().imageState(key))) await get().build(key);
+      return true;
     },
     saveBrowser: async (b) => {
       const { browsers } = get();
@@ -329,29 +371,29 @@ export const useApp = create<AppState>((set, get) => {
     },
     remove: async (kind, id) => {
       const s = get();
-      const doc = (s[LIST[kind]] as { id: string; name: string }[]).find((x) => x.id === id);
+      const doc = (s[LIST[kind]] as { id: string; name?: string }[]).find((x) => x.id === id);
       if (!doc) return;
       const deps = dependents(s, kind, id, false);
       if (deps.length) throw new Error(`${deps.join(", ")} ${deps.length === 1 ? "is" : "are"} built on it: delete ${deps.length === 1 ? "that" : "those"} first.`);
       await patchLayer(kind, id, now());
-      get().toast({ title: `Deleted ${doc.name}`, body: "It's in Recently deleted in the Builder.", action: { label: "Undo", onClick: () => void get().restore(kind, id) } });
+      get().toast({ title: `Deleted ${nameOf(kind, doc)}`, body: "It's in Recently deleted in the Builder.", action: { label: "Undo", onClick: () => void get().restore(kind, id) } });
     },
     restore: async (kind, id) => {
       const s = get();
-      // A wadspace or customization comes back with what it's built on.
+      // A stack, Extensions layer or template comes back with what it's built on.
+      const restoreTemplate = async (tid: string | undefined) => {
+        for (let t = s.templates.find((x) => x.id === tid); t; t = s.templates.find((x) => x.id === t!.parent)) {
+          if (t.deletedAt) await patchLayer("template", t.id, null);
+        }
+      };
       if (kind === "wadspace") {
         const w = s.wadspaces.find((x) => x.id === id);
-        if (w?.base.kind === "customization") {
-          const c = s.customizations.find((x) => x.id === w.base.id);
-          if (c?.deletedAt) await get().restore("customization", c.id);
-        }
-        const tid = w?.base.kind === "template" ? w.base.id : s.customizations.find((c) => c.id === w?.base.id)?.templateId;
-        if (tid && s.templates.find((t) => t.id === tid)?.deletedAt) await patchLayer("template", tid, null);
+        const e = s.extensions.find((x) => x.id === w?.extensions);
+        if (e?.deletedAt) await patchLayer("extensions", e.id, null);
+        await restoreTemplate(w?.template);
       }
-      if (kind === "customization") {
-        const c = s.customizations.find((x) => x.id === id);
-        if (c && s.templates.find((t) => t.id === c.templateId)?.deletedAt) await patchLayer("template", c.templateId, null);
-      }
+      if (kind === "extensions") await restoreTemplate(s.extensions.find((x) => x.id === id)?.templateId);
+      if (kind === "template") await restoreTemplate(s.templates.find((x) => x.id === id)?.parent);
       await patchLayer(kind, id, null);
     },
     purge: async (kind, id) => {
@@ -360,8 +402,8 @@ export const useApp = create<AppState>((set, get) => {
       if (kind === "template") {
         await backend.deleteTemplate(id);
         await backend.deleteImage(`template:${id}`).catch(() => {});
-      } else if (kind === "customization") {
-        await backend.deleteCustomization(id);
+      } else if (kind === "extensions") {
+        await backend.deleteExtensions(id);
         await backend.deleteImage(`custom:${id}`).catch(() => {});
       } else if (kind === "wadspace") await backend.deleteWadspace(id);
       else await backend.deleteBrowser(id);
@@ -429,7 +471,7 @@ export const useApp = create<AppState>((set, get) => {
         id: l.id,
         wadspaceId: l.wadspaceId,
         name: l.name,
-        projects: l.projects,
+        projects: l.projects ?? [],
         status: l.status,
         progress: l.progress,
         phase: l.phase,
@@ -472,7 +514,7 @@ function follow() {
     // The pages that show the repo list listen for it themselves.
     github: async () => {},
     templates: async () => useApp.setState({ templates: await backend.listTemplates() }),
-    customizations: async () => useApp.setState({ customizations: await backend.listCustomizations() }),
+    extensions: async () => useApp.setState({ extensions: await backend.listExtensions() }),
     browsers: async () => useApp.setState({ browsers: await backend.listBrowsers() }),
     images: () => s().loadImages(),
   };
@@ -482,6 +524,22 @@ function follow() {
 }
 
 const active = (l: Pick<LaunchJob, "status">) => l.status === "queued" || l.status === "running";
+
+/** Writes a library's move to stacks: the Extensions layers to their new
+ *  collection (then the old documents go), then the stacks. A write that
+ *  fails is said once; the next load moves what's left. */
+async function moveToStacks(m: NonNullable<ReturnType<typeof migration>>) {
+  try {
+    for (const e of m.extensions) await backend.saveExtensions(e);
+    for (const id of m.dropCustomizations) await backend.deleteOldCustomization(id);
+    for (const w of m.wadspaces) await backend.saveWadspace(w);
+  } catch (e) {
+    useApp.getState().notify({
+      title: "Your wadspaces aren't moved to stacks yet",
+      body: `They show as stacks here, but saving them failed: ${(e as Error).message}`,
+    });
+  }
+}
 
 /** A launch finished: refresh what it changed; a good one clears itself from the sidebar. */
 function onLaunchFinished(job: LaunchJob) {

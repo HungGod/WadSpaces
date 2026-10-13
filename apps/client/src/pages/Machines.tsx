@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
+import { wadspaceName } from "@/data/layers";
 import { MachineDiagnostics } from "@/components/MachineDiagnostics";
 import { ContainerControls, ContainerStatus } from "@/components/manager/ContainerControls";
 import { WadspaceActions } from "@/components/manager/WadspaceActions";
@@ -258,7 +259,7 @@ function Containers({ m }: { m: Machine }) {
               {ws ? <Thumb w={ws} className="!w-28 rounded-xl" /> : <div className="aspect-video w-28 rounded-xl bg-surface-2" />}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate font-medium">{ws?.name ?? c.wadspaceId}</span>
+                  <span className="truncate font-medium">{ws ? wadspaceName(ws) : c.wadspaceId}</span>
                   {c.hotkey ? (
                     <Badge>
                       <Keyboard className="size-3" /> Super+{c.hotkey}

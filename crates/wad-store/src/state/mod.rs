@@ -19,11 +19,13 @@ pub fn truthy(v: &Value) -> bool {
 
 /// Fields projects had when they were Syncthing folders: dropped on sight.
 const OLD_FIELDS: &[&str] = &["holders", "ignore", "folderId"];
-/// The library's collections: the Builder's layers (templates,
-/// customizations, wadspaces), saved WadBrowser setups, and `meta` (what the
+/// The library's collections: the Builder's layers (templates, extensions,
+/// wadspaces: its stacks), saved WadBrowser setups, and `meta` (what the
 /// library knows of itself: whether its starter templates were made).
-/// Drafts from before the layers are gone (`discard_drafts`).
-pub const COLLECTIONS: &[&str] = &["wadspaces", "templates", "customizations", "browsers", "meta"];
+/// `customizations` is the Extensions layers' from before they were called
+/// that: WadSpaces moves them to `extensions` and empties it. Drafts from
+/// before the layers are gone (`discard_drafts`).
+pub const COLLECTIONS: &[&str] = &["wadspaces", "templates", "extensions", "customizations", "browsers", "meta"];
 
 #[derive(Debug, Clone)]
 pub struct State {

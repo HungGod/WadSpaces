@@ -1,5 +1,5 @@
-// Small pieces the Builder's steps share: section headings, a layer image's
-// state and its Build button, and choice cards.
+// Small pieces the launcher and the wadspace drawer share: section headings,
+// a layer image's state and its Build button, and choice cards.
 import { Hammer, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import { imageRef, type LayerKey } from "@core/layers";
@@ -24,7 +24,7 @@ export function useImageState(key: LayerKey | null): ImageState {
   useApp((s) => s.builds);
   useApp((s) => s.images);
   useApp((s) => s.templates);
-  useApp((s) => s.customizations);
+  useApp((s) => s.extensions);
   return key ? useApp.getState().imageState(key) : "never";
 }
 

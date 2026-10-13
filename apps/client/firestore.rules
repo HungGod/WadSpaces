@@ -65,7 +65,9 @@ service cloud.firestore {
     match /users/{uid} {
       // The Builder's layers (src/core/layers.ts) and saved WadBrowser setups:
       // the owner's alone (public templates come later). The owner's machines
-      // read them, to build a layer's image or launch a setup.
+      // read them, to build a layer's image or launch a setup. A template may
+      // build on another (`parent`); Extensions layers were "customizations"
+      // before they had that name: those are read, moved and deleted.
       function layerId(id) { return id.matches('^[a-z0-9][a-z0-9-]{0,62}$'); }
       function shortList(l) { return l is list && l.size() <= 200; }
       function common(d) {
@@ -76,9 +78,10 @@ service cloud.firestore {
           && (!("deletedAt" in d) || d.deletedAt == null || d.deletedAt is string);
       }
       function validTemplate(d) {
-        return d.keys().hasOnly(["owner", "name", "description", "apps", "starter", "createdAt", "updatedAt", "deletedAt"])
+        return d.keys().hasOnly(["owner", "name", "description", "apps", "parent", "starter", "createdAt", "updatedAt", "deletedAt"])
           && common(d)
           && d.get("apps", null) is list && d.apps.size() >= 1 && d.apps.size() <= 40
+          && (!("parent" in d) || (d.parent is string && layerId(d.parent)))
           && (!("starter" in d) || d.starter == true);
       }
       function validSetup(d) {
@@ -86,7 +89,7 @@ service cloud.firestore {
           && shortList(d.get("webapps", null)) && shortList(d.get("extensions", null))
           && shortList(d.get("tools", null)) && shortList(d.get("autostart", null));
       }
-      function validCustomization(d) {
+      function validExtensions(d) {
         return d.keys().hasOnly(["owner", "name", "description", "templateId", "browserMode", "webapps", "extensions", "tools", "autostart", "createdAt", "updatedAt", "deletedAt"])
           && common(d) && d.get("templateId", null) is string && layerId(d.templateId) && validSetup(d);
       }
@@ -101,10 +104,15 @@ service cloud.firestore {
         allow update: if isOwner(uid) && validTemplate(request.resource.data) && keeps(["owner", "createdAt"]);
         allow delete: if isOwner(uid);
       }
+      match /extensions/{eid} {
+        allow read: if isOwner(uid) || isOwnersMachine(uid);
+        allow create: if isOwner(uid) && layerId(eid) && validExtensions(request.resource.data);
+        allow update: if isOwner(uid) && validExtensions(request.resource.data) && keeps(["owner", "createdAt"]);
+        allow delete: if isOwner(uid);
+      }
+      // From before Extensions had that name: read and deleted once moved.
       match /customizations/{cid} {
         allow read: if isOwner(uid) || isOwnersMachine(uid);
-        allow create: if isOwner(uid) && layerId(cid) && validCustomization(request.resource.data);
-        allow update: if isOwner(uid) && validCustomization(request.resource.data) && keeps(["owner", "createdAt"]);
         allow delete: if isOwner(uid);
       }
       match /browsers/{bid} {

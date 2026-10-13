@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ExternalLink, KeyRound, Minus, Plus } from "lucide-react";
 import clsx from "clsx";
 import { runLine, SECRET_KINDS, type AppDef } from "@core/catalog/catalog";
-import { Badge, Button, Modal } from "../ui";
+import { Badge, Button, Modal } from "./ui";
 
 /** The base image's feature scripts (images/base/.../features), read when shown. */
 const SCRIPTS = import.meta.glob("@features/*.sh", { query: "?raw", import: "default" }) as Record<string, () => Promise<string>>;

@@ -6,28 +6,28 @@
 //
 // Pick any mix, then launch, or launch in focus mode for a set time. A
 // wadspace or a WadBrowser can be customized first (the sliders): only what a
-// run changes (a wadspace's background, folders and secrets; WadBrowser's
-// mode, web apps and their sign-ins), then saved, or run once and thrown away.
-// The terminal has nothing to customize.
+// run changes (a wadspace's background and keys; WadBrowser's mode, web apps
+// and their sign-ins), then saved, or run once and thrown away. The terminal
+// has nothing to customize.
 //
 // Online, it launches on the machine picked in its header (the account's
 // default machine), through the relay.
 import { useState } from "react";
 import { Check, Lock, Play, Plus, SlidersHorizontal, Timer, Trash2, X } from "lucide-react";
 import clsx from "clsx";
-import { browserSlots, desktopFor, imageKey, knownWebapps, named, opensFolders, resolve, slotsFor, webappIcon, webappId, type BrowserSetup, type SignInRef, type Wadspace, type WebApp } from "@core/layers";
+import { browserSlots, desktopFor, knownWebapps, named, resolveStack, slotsFor, webappIcon, webappId, type BrowserSetup, type SignInRef, type Wadspace, type WebApp } from "@core/layers";
 import { backend } from "@/data";
-import { DEFAULT_BROWSERS, type BrowserConfig, type RunItem, type RunOverrides } from "@/data/layers";
+import { DEFAULT_BROWSERS, layerOf, wadspaceName, type BrowserConfig, type RunItem, type RunOverrides } from "@/data/layers";
 import { clockTime } from "@/lib/format";
 import { TARGET } from "@/lib/machine";
 import { alive, useApp } from "@/lib/store";
 import { DesktopThumb } from "../desktop/DesktopThumb";
 import { Badge, Button, IconButton, Input, Label, Modal, Textarea } from "../ui";
 import { WallpaperPicker } from "../WallpaperPicker";
-import { asChoices, fromSaved, resolveSlots, signInRefs, type SlotChoice, type WadspaceDraft } from "./draft";
+import { BLANK_WALLPAPER } from "../desktop/wallpapers";
 import { Choice, Heading, useImageState } from "./parts";
-import { ProjectsPanel } from "./ProjectsPanel";
-import { SecretSlots } from "./StepConstruct";
+import { SecretSlots } from "./SecretSlots";
+import { asChoices, resolveSlots, signInRefs, type SlotChoice } from "./slots";
 
 const PRESETS = [25, 50, 90, 120];
 const fmtMinutes = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`);
@@ -87,7 +87,8 @@ function Flow({ onClose, customize }: { onClose: () => void; customize?: string 
   const allBrowsers = useApp((s) => s.browsers);
   const remove = useApp((s) => s.remove);
   const launch = useApp((s) => s.launch);
-  const wadspaces = alive(all);
+  // Stacks that are wadspaces: those with a customization.
+  const wadspaces = alive(all).filter((w) => w.customization);
   const browsers = alive(allBrowsers);
   const [picked, setPicked] = useState<string[]>([]);
   const [once, setOnce] = useState<Entry[]>([]);
@@ -103,7 +104,7 @@ function Flow({ onClose, customize }: { onClose: () => void; customize?: string 
     ...wadspaces.map((w) => ({
       id: `w:${w.id}`,
       item: { kind: "wadspace" as const, wadspaceId: w.id },
-      label: w.name,
+      label: wadspaceName(w),
     })),
     ...once.filter((e) => e.item.kind === "wadspace"),
   ];
@@ -147,7 +148,7 @@ function Flow({ onClose, customize }: { onClose: () => void; customize?: string 
         onRun={(overrides) =>
           addOnce({
             item: { kind: "wadspace", wadspaceId: customizing.w.id, overrides },
-            label: `${customizing.w.name} (run)`,
+            label: `${wadspaceName(customizing.w)} (run)`,
           })
         }
         onSaved={(w) => {
@@ -220,7 +221,7 @@ function Flow({ onClose, customize }: { onClose: () => void; customize?: string 
       <MachinePicker />
       <div className="max-h-[62vh] space-y-6 overflow-y-auto pr-1">
         <section>
-          <Heading hint="Each its own desktop. Customize one to change its background, folders or secrets for a run.">Wadspaces</Heading>
+          <Heading hint="Each its own desktop. Customize one to change its background or keys for a run.">Wadspaces</Heading>
           {spaces.length ? (
             <div className="grid gap-2 sm:grid-cols-2">
               {spaces.map((e) => {
@@ -312,18 +313,17 @@ function Check2({ on }: { on: boolean }) {
 
 function SpaceCard({ entry, w, on, onToggle, onCustomize, onRemove }: { entry: Entry; w: Wadspace; on: boolean; onToggle: () => void; onCustomize?: () => void; onRemove?: () => void }) {
   const templates = useApp((s) => s.templates);
-  const customizations = useApp((s) => s.customizations);
-  const projects = useApp((s) => s.projects);
-  const state = useImageState(imageKey(w.base));
-  const r = resolve({ templates, customizations }, w.base);
+  const extensions = useApp((s) => s.extensions);
+  const state = useImageState(layerOf(w));
+  const r = resolveStack({ templates, extensions }, w);
   const o = entry.item.kind === "wadspace" ? entry.item.overrides : undefined;
-  const mounted = (o?.projects ?? w.projects).flatMap((id) => projects.find((p) => p.id === id) ?? []);
-  const folders = `${mounted.length} folder${mounted.length === 1 ? "" : "s"}`;
-  const note = state === "built" ? folders : state === "building" ? `${folders} · its image is building` : `${folders} · its image builds first`;
+  const projects = (w.customization?.projects ?? []).map((p) => ({ id: p.id, name: p.as }));
+  const count = `${projects.length} project${projects.length === 1 ? "" : "s"}`;
+  const note = state === "built" ? count : state === "building" ? `${count} · its image is building` : `${count} · its image builds first`;
   return (
     <div className={clsx("flex items-center gap-3 rounded-2xl p-2 ring-1 transition-all", on ? "bg-accent-soft ring-2 ring-accent" : "bg-surface-2 ring-line hover:ring-line-strong")}>
       <button type="button" disabled={!r} onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-pressed={on}>
-        <DesktopThumb items={r ? desktopFor(r.template, r.setup, mounted) : []} wallpaper={o?.wallpaper ?? w.wallpaper} zoom={2} className="aspect-video w-24 shrink-0 rounded-xl" />
+        <DesktopThumb items={r ? desktopFor(r.template, r.setup, projects) : []} wallpaper={o?.wallpaper ?? w.customization?.wallpaper ?? BLANK_WALLPAPER} zoom={2} className="aspect-video w-24 shrink-0 rounded-xl" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-medium">{entry.label}</span>
           <span className="block truncate text-[11px] text-muted">{r ? note : "Its template is gone"}</span>
@@ -336,7 +336,7 @@ function SpaceCard({ entry, w, on, onToggle, onCustomize, onRemove }: { entry: E
         <Check2 on={on} />
       </button>
       {onCustomize && (
-        <IconButton label={`Customize ${w.name}`} onClick={onCustomize} disabled={!r}>
+        <IconButton label={`Customize ${wadspaceName(w)}`} onClick={onCustomize} disabled={!r}>
           <SlidersHorizontal className="size-4" />
         </IconButton>
       )}
@@ -425,76 +425,65 @@ function useBusy() {
   return { busy, run };
 }
 
-/** A wadspace's construction options for a run: name, background, folders and secrets. Save it as a new wadspace, or run it once. */
+/** A wadspace's own options for a run: its background, and its keys by slot (WadBrowser's key groups stay
+ *  its own). Save it as a new wadspace (a copy of its stack, at the board's end), or run it once. */
 export function WadspaceRun({ w, onCancel, onRun, onSaved }: { w: Wadspace; onCancel: () => void; onRun: (o: RunOverrides) => void; onSaved: (w: Wadspace) => void }) {
   const templates = useApp((s) => s.templates);
-  const customizations = useApp((s) => s.customizations);
+  const extensions = useApp((s) => s.extensions);
   const wadspaces = useApp((s) => s.wadspaces);
   useApp((s) => s.signIns);
   const saveWadspace = useApp((s) => s.saveWadspace);
   const { busy, run } = useBusy();
-  const [d, setD] = useState<WadspaceDraft>(() => ({
-    ...fromSaved(w),
-    id: undefined,
-    name: "",
-  }));
-  const r = resolve({ templates, customizations }, w.base);
-  const slots = r ? slotsFor(r.template, r.setup) : [];
-  // New secrets are named after the run's name, else the wadspace's.
-  const forSlots = { name: d.name.trim() || w.name, secrets: d.secrets };
+  const c = w.customization!;
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState(c.description);
+  const [wallpaper, setWallpaper] = useState(c.wallpaper);
+  const [secrets, setSecrets] = useState<Record<string, SlotChoice>>(() => asChoices(c.secrets.bySlot));
+  const r = resolveStack({ templates, extensions }, w);
+  // WadBrowser's keys are its groups (the wadspace's): only the other slots here.
+  const slots = r ? slotsFor(r.template, r.setup).filter((sl) => !sl.key.startsWith("web:")) : [];
+  // New keys are named after the run's name, else the wadspace's.
+  const forSlots = { name: name.trim() || c.name, secrets };
   const resolved = resolveSlots(forSlots, slots, useApp.getState().knownSignIns());
   const { problems } = resolved;
-  const taken = !!d.name.trim() && named(d.name, wadspaces);
-  const set = (patch: Partial<WadspaceDraft>) => setD((x) => ({ ...x, ...patch }));
+  const taken = !!name.trim() && wadspaces.some((x) => !x.deletedAt && x.customization && x.customization.name.trim().toLowerCase() === name.trim().toLowerCase());
 
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
         <SlidersHorizontal className="size-5 text-accent" />
         <div>
-          <div className="text-sm font-semibold">Customize {w.name}</div>
-          <div className="text-xs text-muted">Its construction options for this run. Its apps and image stay as they are.</div>
+          <div className="text-sm font-semibold">Customize {c.name}</div>
+          <div className="text-xs text-muted">Its background and keys for this run. Its apps, projects and image stay as they are.</div>
         </div>
       </div>
       <div className="max-h-[56vh] space-y-6 overflow-y-auto pr-1">
         <section className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label>Name</Label>
-            <Input value={d.name} onChange={(e) => set({ name: e.target.value })} placeholder="Needed to save it as a new wadspace" aria-label="New wadspace name" />
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Needed to save it as a new wadspace" aria-label="New wadspace name" />
             {taken && <p className="mt-1 text-xs text-danger">There&apos;s a wadspace called that already.</p>}
           </div>
           <div>
             <Label>Description</Label>
-            <Textarea value={d.description} onChange={(e) => set({ description: e.target.value })} rows={1} />
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={1} />
           </div>
         </section>
         <section className="max-w-xl">
           <Heading>Background</Heading>
-          <WallpaperPicker value={d.wallpaper} onChange={(wallpaper) => set({ wallpaper })} />
+          <WallpaperPicker value={wallpaper} onChange={setWallpaper} />
         </section>
         <section>
-          <Heading
-            hint={
-              r && !opensFolders(r.template)
-                ? `Mounted at ~/Desktop/<folder>. Nothing in ${r.template.name} opens a folder in a window, so they get no desktop icon.`
-                : "Mounted at ~/Desktop/<folder>, each a folder on the desktop."
-            }
-          >
-            Folders
-          </Heading>
-          <ProjectsPanel value={d.projects} onChange={(projects) => set({ projects })} />
-        </section>
-        <section>
-          <Heading hint="New and saved ones are kept on the machine. Don't save: sign in inside the app, and nothing is kept.">Secrets</Heading>
+          <Heading hint="New and saved ones are kept on the machine. Don't save: sign in inside the app, and nothing is kept.">Keys</Heading>
           {slots.length ? (
             <SecretSlots
               slots={slots}
               draft={forSlots}
               dontSave="Sign in inside the app; nothing is saved on the machine (a throwaway run forgets it when it closes)."
-              onSlot={(key: string, c: SlotChoice) => set({ secrets: { ...d.secrets, [key]: c } })}
+              onSlot={(key: string, ch: SlotChoice) => setSecrets((x) => ({ ...x, [key]: ch }))}
             />
           ) : (
-            <p className="text-xs text-muted">Nothing in it keeps a sign-in.</p>
+            <p className="text-xs text-muted">Nothing in it keeps a key of its own (WadBrowser&apos;s keys are its groups&apos;).</p>
           )}
         </section>
       </div>
@@ -503,26 +492,22 @@ export function WadspaceRun({ w, onCancel, onRun, onSaved }: { w: Wadspace; onCa
           variant="secondary"
           disabled={!!problems.length || busy}
           onClick={run("start the run", async () => {
-            const secrets = await signInRefs(resolved);
-            onRun({ wallpaper: d.wallpaper, projects: d.projects, secrets });
+            onRun({ wallpaper, bySlot: await signInRefs(resolved) });
           })}
         >
           <Play className="size-4" /> Throwaway run
         </Button>
         <Button
           variant="primary"
-          disabled={!d.name.trim() || taken || !!problems.length || busy}
-          title={!d.name.trim() ? "Name it to save it" : undefined}
+          disabled={!name.trim() || taken || !!problems.length || busy}
+          title={!name.trim() ? "Name it to save it" : undefined}
           onClick={run("save it", async () => {
-            const secrets = await signInRefs(resolved);
+            const bySlot = await signInRefs(resolved);
+            const { id: _id, order: _order, owner: _owner, createdAt: _c, updatedAt: _u, ...stack } = w;
             onSaved(
               await saveWadspace({
-                name: d.name.trim(),
-                description: d.description.trim(),
-                base: w.base,
-                wallpaper: d.wallpaper,
-                projects: d.projects,
-                secrets,
+                ...stack,
+                customization: { ...c, name: name.trim(), description: description.trim(), wallpaper, secrets: { ...c.secrets, bySlot } },
               }),
             );
           })}
@@ -537,7 +522,7 @@ export function WadspaceRun({ w, onCancel, onRun, onSaved }: { w: Wadspace; onCa
 /** A WadBrowser run: with an address bar or Focus, web apps to open, and their sign-ins (shared or their own). Save the setup to launch later, or run it once. */
 function BrowserRun({ base, savedId, onCancel, onRun, onSaved }: { base: BrowserConfig; savedId?: string; onCancel: () => void; onRun: (c: BrowserConfig) => void; onSaved: (c: BrowserSetup) => void }) {
   const browsers = useApp((s) => s.browsers);
-  const customizations = useApp((s) => s.customizations);
+  const extensions = useApp((s) => s.extensions);
   useApp((s) => s.signIns);
   const saveBrowser = useApp((s) => s.saveBrowser);
   const { busy, run } = useBusy();
@@ -561,7 +546,7 @@ function BrowserRun({ base, savedId, onCancel, onRun, onSaved }: { base: Browser
   const { problems } = resolved;
   const takenBy = [...browsers, ...DEFAULT_BROWSERS];
   const taken = (n: string, except?: string) => !!n.trim() && named(n, takenBy, except);
-  const known = knownWebapps(alive(customizations), alive(browsers)).filter((w) => !webapps.some((x) => x.url === w.url));
+  const known = knownWebapps(alive(extensions), alive(browsers)).filter((w) => !webapps.some((x) => x.url === w.url));
   const config = (id: string, n: string, secrets: Record<string, SignInRef>): BrowserConfig => ({ id, name: n, mode, webapps, secrets });
 
   const add = (w: Omit<WebApp, "id">) => {

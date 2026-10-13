@@ -36,7 +36,7 @@ import {
 import { toLaunchProgress, toProgress } from "./builds";
 import { lastSession, onboarded } from "./store";
 import { WaddLayerDocs, WaddMachine } from "./layers";
-import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
+import type { BrowserSetup, Extensions, LayerKey, Template, Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch } from "../backend";
 import type { RunItem } from "../layers";
 
@@ -57,6 +57,7 @@ export class LocalBackend implements Backend {
     localBuild: false, // set by init() when this wadd can build
     history: false, // set by init() when this wadd keeps run history
     projects: false, // set by init() when this wadd has projects
+    copies: false, // set by init() along with projects: this wadd makes copies
     tailnet: false, // set by init() when Tailscale is installed here
     signins: false, // set by init() when this wadd keeps saved sign-ins
   };
@@ -91,6 +92,7 @@ export class LocalBackend implements Backend {
     this.caps.localBuild = f.builds && f.layers;
     this.caps.history = f.runs;
     this.caps.projects = f.projects;
+    this.caps.copies = f.projects;
     this.caps.signins = f.signins;
     this.tailnet = f.tailnet;
     this.tailnetAt = Date.now();
@@ -114,35 +116,39 @@ export class LocalBackend implements Backend {
     this.emit("templates");
     this.emit("images");
   }
-  listCustomizations() {
+  listExtensions() {
+    return this.docs.extensions.list();
+  }
+  saveExtensions(e: Extensions) {
+    return this.docs.extensions.put(e).then((x) => (this.emit("extensions"), x));
+  }
+  patchExtensions(id: string, patch: LayerPatch) {
+    return this.docs.extensions.patch(id, patch).then((x) => (this.emit("extensions"), x));
+  }
+  async deleteExtensions(id: string) {
+    await this.machine.deleteImage(`custom:${id}`);
+    await this.docs.extensions.remove(id);
+    this.emit("extensions");
+    this.emit("images");
+  }
+  listOldCustomizations() {
     return this.docs.customizations.list();
   }
-  saveCustomization(c: Customization) {
-    return this.docs.customizations.put(c).then((x) => (this.emit("customizations"), x));
-  }
-  patchCustomization(id: string, patch: LayerPatch) {
-    return this.docs.customizations.patch(id, patch).then((x) => (this.emit("customizations"), x));
-  }
-  async deleteCustomization(id: string) {
-    await this.machine.deleteImage(`custom:${id}`);
-    await this.docs.customizations.remove(id);
-    this.emit("customizations");
-    this.emit("images");
+  deleteOldCustomization(id: string) {
+    return this.docs.customizations.remove(id);
   }
   listWadspaces() {
     return this.docs.wadspaces.list();
   }
-  /** Kept in the library and installed here. */
-  async saveWadspace(w: Wadspace, lib: LayerLibrary) {
-    const saved = await this.docs.wadspaces.put(w);
-    await this.machine.install(saved, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== w.id), saved] });
+  async saveWadspace(w: Wadspace) {
+    const saved = (await this.docs.wadspaces.put(w)) as Wadspace;
     this.emit("wadspaces");
     return saved;
   }
-  async patchWadspace(id: string, patch: LayerPatch, lib: LayerLibrary) {
-    const saved = await this.docs.wadspaces.patch(id, patch);
-    // Its old image gone (its layers built): it runs on them from now on.
-    if ("legacyImage" in patch) await this.machine.install(saved, lib);
+  /** Deleted softly: off this machine too (it's installed again when it's built or launched). */
+  async patchWadspace(id: string, patch: LayerPatch) {
+    const saved = (await this.docs.wadspaces.patch(id, patch)) as Wadspace;
+    if (patch.deletedAt) await this.machine.uninstall(id);
     this.emit("wadspaces");
     return saved;
   }
@@ -150,6 +156,16 @@ export class LocalBackend implements Backend {
     await this.machine.uninstall(id);
     await this.docs.wadspaces.remove(id);
     this.emit("wadspaces");
+  }
+  async installWadspace(w: Wadspace, lib: LayerLibrary) {
+    await this.machine.install(w, lib);
+    this.emit("machines");
+  }
+  makeCopy(paths: string[]) {
+    return this.machine.makeCopy(paths);
+  }
+  deleteCopy(id: string) {
+    return this.machine.deleteCopy(id);
   }
   listBrowsers() {
     return this.docs.browsers.list();
@@ -397,7 +413,7 @@ export class LocalBackend implements Backend {
     return wadd.drives();
   }
 
-  async browseFolders(q: { path?: string; drive?: string }) {
+  async browseFolders(q: { path?: string; drive?: string; files?: boolean }) {
     this.needProjects();
     return wadd.browse(q);
   }

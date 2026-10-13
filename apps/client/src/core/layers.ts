@@ -11,10 +11,7 @@
 //                  localhost/wadspaces-custom-<id>:latest).
 //   Customization  the wadspace's own: name, wallpaper, projects and keys
 //                  (saved sign-ins). No image: wadd hands them over at start.
-//
-// (`Customization` below is still the Extensions layer's document, and
-// `Wadspace` the version 2 document, until the Builder moves to stacks:
-// `WadspaceV3`.)
+
 import { call } from "./wasm";
 
 /** A wadspace's background: a gradient or colour (CSS), or a picture (a URL). */
@@ -72,7 +69,8 @@ export interface Setup {
   autostart: string[];
 }
 
-export interface Customization extends Setup {
+/** An Extensions layer: a template's apps set up (its `templateId`). */
+export interface Extensions extends Setup {
   id: string;
   owner: string;
   name: string;
@@ -82,14 +80,14 @@ export interface Customization extends Setup {
   deletedAt?: string;
 }
 
-/** Where a wadspace comes from. */
+/** Where a version 2 wadspace came from (its template, or what's now an Extensions layer). */
 export interface BaseRef {
   kind: "template" | "customization";
   id: string;
 }
 
-/** A wadspace: no image of its own; its wallpaper, projects and secrets are mounted at start. */
-export interface Wadspace {
+/** A wadspace from before stacks (version 2): read once, to move it to one (migrateV2). */
+export interface WadspaceV2 {
   version: 2;
   id: string;
   owner: string;
@@ -146,8 +144,8 @@ export interface StackCustomization {
   secrets: StackKeys;
 }
 
-/** A wadspace as a stack (version 3): a template (the top of its chain), maybe Extensions, and its Customization. */
-export interface WadspaceV3 {
+/** A wadspace: a stack of a template (the top of its chain), maybe Extensions, and its Customization. */
+export interface Wadspace {
   version: 3;
   id: string;
   owner: string;
@@ -217,15 +215,24 @@ export interface MenuCategory {
 
 export interface Library {
   templates: Template[];
-  customizations: Customization[];
+  extensions: Extensions[];
 }
 
-export interface Stack {
+/** What a stack is built from: its chain of templates (bottom first; the top one its `template`), and its setup. */
+export interface Resolved {
+  chain: Template[];
   template: Template;
-  /** Its customizations, oldest first, each with the wadspaces built on it. */
-  customizations: { customization: Customization; wadspaces: Wadspace[] }[];
-  /** Wadspaces built on the template itself. */
-  wadspaces: Wadspace[];
+  setup: Setup;
+  extensions?: Extensions;
+}
+
+/** The workspace a stack installs as (wad-core's workspace_for): enough of it to read its sign-ins. */
+export interface WaddWorkspace {
+  id: string;
+  name: string;
+  image: string;
+  signins: { id: string; app: string; web?: boolean; name: string; kind: string; slot: string }[];
+  [k: string]: unknown;
 }
 
 /** A layer's build folder, as wadd builds it. `sha` labels the built image. */
@@ -260,19 +267,14 @@ export interface SecretUser {
 export const signInKinds = (): SecretKind[] => call("signInKinds");
 
 export const emptySetup = (templateId: string): Setup => call("emptySetup", templateId);
-/** Just the setup part of a customization. */
+/** Just the setup part of an Extensions layer. */
 export const setupOf = (c: Partial<Setup>): Setup => call("setupOf", c);
 export const sameSetup = (a: Partial<Setup>, b: Partial<Setup>): boolean => call("sameSetup", a, b);
 /** A web app's id from its name: "Google Cloud" → "google-cloud". */
 export const webappId = (name: string): string => call("webappId", name);
 /** A web app's icon: bundled for a site the catalog knows, else the site's favicon. */
 export const webappIcon = (url: string): string => call("webappIcon", url);
-export const imageKey = (base: BaseRef): LayerKey => call("imageKey", base);
 export const imageRef = (key: LayerKey): string => call("imageRef", key);
-
-/** What a base has, with its template, or null when either is gone. */
-export const resolve = (lib: Library, base: BaseRef): { template: Template; setup: Setup; customization?: Customization } | null =>
-  call("resolve", lib, base);
 
 /** The sign-ins a template with this setup can keep, in desktop order. */
 export const slotsFor = (template: Template, setup: Setup): Slot[] => call("slotsFor", template, setup);
@@ -285,8 +287,6 @@ export const defaultBrowserSecretName = (setupName: string, slot: Slot): string 
 /** Whether a secret can go in a slot (only its own kind). */
 export const fits = (secret: { kind: string }, slot: { kind: string }): boolean => call("fits", secret, slot);
 export const kindOfSlotKey = (key: string): SecretKind | null => call("kindOfSlotKey", key);
-/** Who uses each saved sign-in, by its id. */
-export const secretUse = (wadspaces: Wadspace[], browsers: BrowserSetup[]): Record<string, SecretUser[]> => call("secretUse", wadspaces, browsers);
 
 /** Whether anything in the template opens folders in a window (else projects get no desktop icon). */
 export const opensFolders = (template: Template): boolean => call("opensFolders", template);
@@ -304,55 +304,43 @@ export const isExtensionId = (id: string): boolean => call("isExtensionId", id);
 
 /** A template's Dockerfile: FROM its parent's image (null: the base), adding its own apps. */
 export const templateDockerfile = (t: Template, parent: Template | null = null): string => call("templateDockerfile", t, parent);
-export const extensionsDockerfile = (c: Customization, t: Template): string => call("extensionsDockerfile", c, t);
+export const extensionsDockerfile = (c: Extensions, t: Template): string => call("extensionsDockerfile", c, t);
 /** A template's build folder and the sha its image is labelled with. */
 export const templateLayer = (t: Template, parent: Template | null = null): Layer => call("templateLayer", t, parent);
 /** An Extensions layer's build folder (FROM its template's image) and its sha. */
-export const extensionsLayer = (c: Customization, t: Template): Layer => call("extensionsLayer", c, t);
+export const extensionsLayer = (c: Extensions, t: Template): Layer => call("extensionsLayer", c, t);
 
 /** A template and what it builds on, bottom first. */
 export const chainOf = (lib: { templates: Template[] }, templateId: string): Template[] => call("chainOf", lib, templateId);
 /** Why a chain (bottom first) can't be built, or null. */
 export const chainOk = (chain: Template[]): string | null => call("chainOk", chain);
 /** What a stack is built from, or null with no template. */
-export const resolveStack = (
-  lib: { templates: Template[]; extensions: Customization[] },
-  w: Pick<WadspaceV3, "template" | "extensions">,
-): { chain: Template[]; template: Template; setup: Setup; extensions?: Customization } | null => call("resolveStack", lib, w);
+export const resolveStack = (lib: Library, w: Pick<Wadspace, "template" | "extensions">): Resolved | null => call("resolveStack", lib, w);
 /** The image a stack runs: its Extensions', else its template's ("" with neither). */
-export const stackImageKey = (w: Pick<WadspaceV3, "template" | "extensions">): LayerKey | "" => call("stackImageKey", w);
+export const stackImageKey = (w: Pick<Wadspace, "template" | "extensions">): LayerKey | "" => call("stackImageKey", w);
 /** WadBrowser's apps that keep keys: "browser" and "web:<id>" (none without WadBrowser). */
 export const keyItems = (template: Template, setup: Setup): string[] => call("keyItems", template, setup);
 /** WadBrowser's key groups, tidied (apps in no group join the first with members). */
 export const keyGroupsOf = (template: Template, setup: Setup, groups: KeyGroup[] | undefined): KeyGroup[] =>
   call("keyGroupsOf", template, setup, groups ?? null);
-/** A version 2 wadspace as a stack (others come back as they are); `order` is the caller's. */
+/** A version 2 wadspace as a stack (others come back as they are); `order` is the caller's. `lib`:
+ *  the documents as they were (`customizations`: the Extensions layers). */
 export const migrateV2 = (
-  w: Wadspace | WadspaceV3,
-  lib: Library,
+  w: WadspaceV2 | Wadspace,
+  lib: { templates: Template[]; customizations: Extensions[] },
   projects: { id: string; name: string; mountName: string; setup: string; source: unknown }[],
-): Omit<WadspaceV3, "order"> & { order?: number } => call("migrateV2", w, lib, projects);
+): Omit<Wadspace, "order"> & { order?: number } => call("migrateV2", w, lib, projects);
 /** "jpg" for a JPEG picture, else "png": how wadd stores the wallpaper. */
 export const wallpaperExt = (w: Wallpaper): "png" | "jpg" => call("wallpaperExt", w);
-/** What wadd mounts when the wadspace starts, for the Image tab. */
-export const runSummary = (
-  w: Pick<Wadspace, "wallpaper" | "projects" | "secrets">,
-  projects: { id: string; name: string; mountName: string }[],
-  slots: Slot[],
-): string[] => call("runSummary", w, projects, slots);
 /** The wadd workspace a wadspace installs as (its image, env, /config, sign-ins). */
-export const workspaceFor = (w: Wadspace | WadspaceV3, template: Template, setup: Setup, opts: { tz?: string; secrets?: string[] }): Record<string, unknown> =>
+export const workspaceFor = (w: Wadspace, template: Template, setup: Setup, opts: { tz?: string; secrets?: string[] }): WaddWorkspace =>
   call("workspaceFor", w, template, setup, opts);
 
 /** Web apps used anywhere already, to add in a click. */
-export const knownWebapps = (customizations: Setup[], browsers: { webapps: WebApp[] }[]): WebApp[] => call("knownWebapps", customizations, browsers);
+export const knownWebapps = (extensions: Setup[], browsers: { webapps: WebApp[] }[]): WebApp[] => call("knownWebapps", extensions, browsers);
 /** Whether a name is taken in this list (but `except`). */
 export const named = (name: string, taken: { name: string; id?: string }[], except?: string): boolean =>
   call("named", name, taken, ...(except ? [except] : []));
-/** Each template with what's built on it (deleted ones left out). */
-export const stacks = (lib: Library & { wadspaces: Wadspace[] }): Stack[] => call("stacks", lib);
-/** A template or customization name already in use (but `except`). */
-export const nameTaken = (name: string, lib: Library, except?: string): boolean => call("nameTaken", name, lib, ...(except ? [except] : []));
 
 /** What another setup has to bring into this template, and why parts don't fit. */
 export const importable = (from: Setup, template: Template): Record<ImportPart, { count: number; ok: boolean; why?: string }> =>

@@ -223,6 +223,8 @@ export interface WaddListing {
   path: string | null;
   parent: string | null;
   dirs: { name: string; path: string }[];
+  /** Its files, when asked for. */
+  files?: { name: string; path: string }[];
 }
 
 export interface Metrics {
@@ -347,14 +349,19 @@ export const wadd = {
     call<WaddProject>("POST", "/api/github/repos", body),
   // Folders and drives on this machine, for folder and drive projects
   drives: () => call<WaddDrive[]>("GET", "/api/drives"),
-  /** 403 outside the folders wadd lets you pick from. */
-  browse: (q: { path?: string; drive?: string }) => {
+  /** 403 outside the folders wadd lets you pick from. `files`: its files too. */
+  browse: (q: { path?: string; drive?: string; files?: boolean }) => {
     const qs = new URLSearchParams();
     if (q.drive) qs.set("drive", q.drive);
     if (q.path) qs.set("path", q.path);
+    if (q.files) qs.set("files", "true");
     const s = qs.toString();
     return call<WaddListing>("GET", `/api/fs/browse${s ? `?${s}` : ""}`);
   },
+  /** A copy of files on this machine for wadspaces to take in: one folder's contents, or each path by name. */
+  makeCopy: (paths: string[]) => call<{ id: string; files: number; bytes: number }>("POST", "/api/copies", { paths }),
+  /** Refused (409) while a wadspace here has it. */
+  deleteCopy: (id: string) => call("DELETE", `/api/copies/${encodeURIComponent(id)}`),
   // Tailscale on this machine (wadd/tailnet.py)
   tailnet: () => call<TailnetStatus>("GET", "/api/tailnet"),
   tailnetLogin: () => call<{ url: string | null; online?: boolean }>("POST", "/api/tailnet/login"),
@@ -370,7 +377,7 @@ export const wadd = {
   /** The layer images here. */
   images: () => call<ImageRow[]>("GET", "/v1/images"),
   /** Builds a layer's image (its template first when needed). */
-  buildLayer: (req: { layer: string; template: unknown; customization: unknown }) => call<{ id: string }>("POST", "/v1/images/build", req),
+  buildLayer: (req: { layer: string; template: unknown; parents: unknown[]; extensions: unknown }) => call<{ id: string }>("POST", "/v1/images/build", req),
   deleteImage: (layer: string) => call("DELETE", `/v1/images/${encodeURIComponent(layer)}`),
   /** Installs (or updates) a wadspace as a workspace on its layer's image. */
   installWadspace: (id: string, body: unknown) => call<{ restartRequired: boolean }>("PUT", `/v1/wadspaces/${encodeURIComponent(id)}`, body),
@@ -414,7 +421,7 @@ export const wadd = {
 };
 
 /** The library's collections in wadd (`/v1/library/{collection}`). */
-export type LibraryCollection = "wadspaces" | "templates" | "customizations" | "browsers" | "meta";
+export type LibraryCollection = "wadspaces" | "templates" | "extensions" | "customizations" | "browsers" | "meta";
 
 /** wadd's event stream (`state`, `build`, `launch`, …): `on(event, data)` for
  *  each one, `onDrop()` when the stream drops (it reconnects by itself).

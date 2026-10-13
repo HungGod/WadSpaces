@@ -362,7 +362,7 @@ impl RsWadd {
             (Get, ["api", "drives"]) => self.v1(Get, "/v1/drives", None).await?,
             (Get, ["api", "fs", "browse"]) => {
                 let qs: Vec<String> =
-                    ["path", "drive"].iter().filter_map(|k| q.get(*k).map(|v| format!("{k}={v}"))).collect();
+                    ["path", "drive", "files"].iter().filter_map(|k| q.get(*k).map(|v| format!("{k}={v}"))).collect();
                 self.v1(
                     Get,
                     &format!("/v1/browse{}", if qs.is_empty() { String::new() } else { format!("?{}", qs.join("&")) }),
@@ -380,6 +380,11 @@ impl RsWadd {
             }
             (Delete, ["api", "launches", id]) => {
                 launch_py(&self.v1(Delete, &format!("/v1/launches/{}", enc(id)), None).await?)
+            }
+            (Post, ["api", "copies"]) => self.v1(Post, "/v1/copies", Some(&b)).await?,
+            (Delete, ["api", "copies", id]) => {
+                self.v1(Delete, &format!("/v1/copies/{}", enc(id)), None).await?;
+                json!({"ok": true})
             }
             (Get, ["api", "library", c]) => self.v1(Get, &format!("/v1/library/{}", enc(c)), None).await?,
             (Put, ["api", "library", c, id]) => {

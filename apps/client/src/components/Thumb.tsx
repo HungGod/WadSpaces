@@ -1,7 +1,8 @@
 // A wadspace's picture on cards and in the drawer: the desktop its layers
-// give, on its own background, with its project folders.
+// give, on its own background, with its projects' folders.
 import clsx from "clsx";
-import { desktopFor, resolve, type Wadspace } from "@core/layers";
+import { desktopFor, resolveStack, type Wadspace } from "@core/layers";
+import { BLANK_WALLPAPER } from "./desktop/wallpapers";
 import { useApp } from "@/lib/store";
 import { DesktopThumb } from "./desktop/DesktopThumb";
 
@@ -10,9 +11,8 @@ const ZOOM = 1.6;
 
 export function Thumb({ w, className, zoom = ZOOM }: { w: Wadspace; className?: string; zoom?: number }) {
   const templates = useApp((s) => s.templates);
-  const customizations = useApp((s) => s.customizations);
-  const projects = useApp((s) => s.projects);
-  const r = resolve({ templates, customizations }, w.base);
-  const mounted = w.projects.flatMap((id) => projects.find((p) => p.id === id) ?? []);
-  return <DesktopThumb items={r ? desktopFor(r.template, r.setup, mounted) : []} wallpaper={w.wallpaper} zoom={zoom} className={clsx("aspect-video w-full", className)} />;
+  const extensions = useApp((s) => s.extensions);
+  const r = resolveStack({ templates, extensions }, w);
+  const projects = (w.customization?.projects ?? []).map((p) => ({ id: p.id, name: p.as }));
+  return <DesktopThumb items={r ? desktopFor(r.template, r.setup, projects) : []} wallpaper={w.customization?.wallpaper ?? BLANK_WALLPAPER} zoom={zoom} className={clsx("aspect-video w-full", className)} />;
 }

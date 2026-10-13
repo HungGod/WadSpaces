@@ -23,7 +23,8 @@ import { WadspaceDrawer } from "./WadspaceDrawer";
 import { Tour } from "./Tour";
 import { ActivityTray, BuildLog, LaunchLog } from "./ActivityTray";
 import { ProfileNotices } from "./ProfileNotices";
-import { LaunchDialog } from "./wadbuilder/Launcher";
+import { LaunchDialog } from "./launcher/Launcher";
+import { wadspaceName } from "@/data/layers";
 
 const NAV = [
   { href: "/", label: "Home", icon: Home },
@@ -219,7 +220,10 @@ function FocusBanner() {
   const wadspaces = useApp((s) => s.wadspaces);
   const remaining = useFocusRemaining();
   const active = focus && remaining > 0;
-  const names = focus?.wadspaceIds.map((id) => ({ id, name: wadspaces.find((w) => w.id === id)?.name ?? "Unknown" })) ?? [];
+  const names = focus?.wadspaceIds.map((id) => ({ id, name: (() => {
+      const w = wadspaces.find((x) => x.id === id);
+      return w ? wadspaceName(w) : "Unknown";
+    })() })) ?? [];
   const pct = focus ? 1 - remaining / (focus.endsAt - focus.startedAt) : 0;
 
   return (

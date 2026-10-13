@@ -1,21 +1,20 @@
-// The new user's tour through the Builder: the Builder in the sidebar, a
-// template stack (Step 1), customizing it and Import (Step 2), constructing a
-// wadspace and its secrets (Step 3), the live preview, then the Launch
-// button. Where it got to is kept per user, so a reload resumes it.
+// The new user's tour through the Builder: the Builder in the sidebar, the
+// board and its stacks, + Create (a new stack), the Build bucket, then the
+// Launch button. Where it got to is kept per user, so a reload resumes it.
 import { create } from "zustand";
 import { backend } from "@/data";
 
-export type TourStep = "nav" | "stack" | "customize" | "construct" | "preview" | "launch";
+export type TourStep = "nav" | "board" | "create" | "build" | "launch";
 /** What the Builder and launcher tell the tour. */
-export type TourEvent = "stack-opened" | "customization-saved" | "wadspace-saved" | "launcher-opened";
+export type TourEvent = "stack-created" | "build-started" | "launcher-opened";
 
-export const ORDER: TourStep[] = ["nav", "stack", "customize", "construct", "preview", "launch"];
+export const ORDER: TourStep[] = ["nav", "board", "create", "build", "launch"];
 const key = (user: string) => `ws-tour:${user}`;
 
 interface TourState {
   user: string | null;
   step: TourStep | null;
-  /** Steps whose action the user has done (e.g. saved a customization). */
+  /** Steps whose action the user has done (e.g. made a stack). */
   completed: Partial<Record<TourStep, boolean>>;
   /** Start (or resume) the tour for a user. */
   start: (user: string, resume?: boolean) => void;
@@ -64,13 +63,14 @@ export const useTour = create<TourState>((set, get) => ({
     save(user, nextStep);
   },
 
-  // Opening a stack and opening the launcher move on; saving in Steps 2 and 3
-  // marks those done (the user may keep going, then hit Next).
+  // Making a stack and building one move on; opening the launcher finishes.
   signal: (e) => {
     const { step, completed } = get();
-    if (step === "stack" && e === "stack-opened") get().next();
-    if (step === "customize" && e === "customization-saved") set({ completed: { ...completed, customize: true } });
-    if (step === "construct" && e === "wadspace-saved") get().next();
+    if (step === "create" && e === "stack-created") {
+      set({ completed: { ...completed, create: true } });
+      get().next();
+    }
+    if (step === "build" && e === "build-started") get().next();
     if (step === "launch" && e === "launcher-opened") get().finish();
   },
 

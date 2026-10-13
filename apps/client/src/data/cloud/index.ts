@@ -43,7 +43,7 @@ import { currentAuthUser, onAuthUser, signOut } from "./auth";
 import { auth, db } from "./firebase";
 import { ONLINE_WITHIN_MS, createEnrollCode, sendCommand, type CommandType, type RelayWorkspace } from "./relay";
 import { FirestoreLayerDocs, RelayMachine, toWadspace } from "./layers";
-import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
+import type { BrowserSetup, Extensions, LayerKey, Template, Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch } from "../backend";
 import type { RunItem } from "../layers";
 
@@ -65,6 +65,7 @@ export class CloudBackend implements Backend {
     localBuild: false,
     history: false,
     projects: true,
+    copies: false,
     tailnet: false,
     signins: false,
   };
@@ -323,33 +324,43 @@ export class CloudBackend implements Backend {
   async deleteTemplate(id: string) {
     await this.docs.remove("templates", id);
   }
-  listCustomizations() {
-    return this.docs.list<Customization>("customizations");
+  listExtensions() {
+    return this.docs.list<Extensions>("extensions");
   }
-  saveCustomization(c: Customization) {
-    return this.docs.put("customizations", c);
+  saveExtensions(e: Extensions) {
+    return this.docs.put("extensions", e);
   }
-  patchCustomization(id: string, patch: LayerPatch) {
-    return this.docs.patch<Customization>("customizations", id, patch);
+  patchExtensions(id: string, patch: LayerPatch) {
+    return this.docs.patch<Extensions>("extensions", id, patch);
   }
-  async deleteCustomization(id: string) {
-    await this.docs.remove("customizations", id);
+  async deleteExtensions(id: string) {
+    await this.docs.remove("extensions", id);
+  }
+  listOldCustomizations() {
+    return this.docs.list<Extensions>("customizations");
+  }
+  deleteOldCustomization(id: string) {
+    return this.docs.remove("customizations", id);
   }
   async listWadspaces() {
     await this.loaded;
-    return [...this.owned].filter(([, d]) => d.version === 2).map(([id, d]) => toWadspace(id, d));
+    return [...this.owned].filter(([, d]) => d.version === 2 || d.version === 3).map(([id, d]) => toWadspace(id, d));
   }
-  /** In the account; it reaches a machine when it's launched there. */
+  /** In the account; it reaches a machine when it's built or launched there. */
   saveWadspace(w: Wadspace) {
     return this.docs.putWadspace(w);
   }
   async patchWadspace(id: string, patch: LayerPatch) {
     const cur = this.owned.get(id);
     if (!cur) throw new Error("It's gone.");
-    return this.docs.patchWadspace(id, toWadspace(id, cur), patch);
+    return this.docs.patchWadspace(id, toWadspace(id, cur) as Wadspace, patch);
   }
   async deleteWadspace(id: string) {
     await this.docs.removeWadspace(id);
+  }
+  /** On the default machine, through the relay. */
+  installWadspace(w: Wadspace, lib: LayerLibrary) {
+    return this.relay.install(w, lib);
   }
   listBrowsers() {
     return this.docs.list<BrowserSetup>("browsers");

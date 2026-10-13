@@ -3,10 +3,9 @@
 import { useLocation, useNavigate } from "react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, Check, Sparkles, X } from "lucide-react";
+import { ArrowRight, Sparkles, X } from "lucide-react";
 import clsx from "clsx";
 import { useApp } from "@/lib/store";
-import { useDraft } from "@/components/wadbuilder/draft";
 import { useTour, type TourStep } from "@/lib/tour";
 
 interface StepDef {
@@ -22,14 +21,13 @@ interface StepDef {
 
 const STEPS: Record<TourStep, StepDef> = {
   nav: { targets: ['[data-tour="nav-builder"]'], placement: ["right"], blocking: true, builder: false },
-  stack: { targets: ['[data-tour="stack"]'], placement: ["right", "below"], blocking: true, builder: true },
-  customize: { targets: ['[data-tour="step-customize"]', '[data-tour="import"]'], placement: ["right"], blocking: false, builder: true },
-  construct: { targets: ['[data-tour="secrets"]'], placement: ["right"], blocking: false, builder: true },
-  preview: { targets: ['[data-tour="preview"]'], placement: ["left", "below"], blocking: false, builder: true },
+  board: { targets: ['[data-tour="board"]'], placement: ["below", "left"], blocking: false, builder: true },
+  create: { targets: ['[data-tour="create"]'], placement: ["below", "left"], blocking: false, builder: true },
+  build: { targets: ['[data-tour="build"]'], placement: ["above", "right"], blocking: false, builder: true },
   launch: { targets: ['[data-tour="launcher"]'], placement: ["right", "above"], blocking: true, builder: false },
 };
 
-const NUMBERED: TourStep[] = ["stack", "customize", "construct", "preview", "launch"];
+const NUMBERED: TourStep[] = ["board", "create", "build", "launch"];
 const PAD = 8;
 const CARD_W = 340;
 
@@ -58,14 +56,10 @@ export function Tour() {
   const [cardH, setCardH] = useState(220);
   const card = useRef<HTMLDivElement>(null);
   const def = step ? STEPS[step] : null;
-  const draftStep = useDraft((s) => s.step);
-
-  // Step 0 finishes by opening the Builder; Steps 2 and 3 by moving on in it.
+  // Step 0 finishes by opening the Builder.
   useEffect(() => {
     if (step === "nav" && pathname.startsWith("/builder")) next();
-    if (step === "stack" && draftStep !== "template") next();
-    if (step === "customize" && draftStep === "construct") next();
-  }, [step, pathname, next, draftStep]);
+  }, [step, pathname, next]);
 
   // Follow the target elements every frame (they move with layout, scrolling and resizes).
   useEffect(() => {
@@ -105,10 +99,10 @@ export function Tour() {
   const primary =
     step === "nav"
       ? { label: "Open the Builder", onClick: () => navigate("/builder") }
-      : step === "customize"
-        ? { label: completed[step] ? "Next step" : "Skip this step", onClick: next, ready: !!completed[step] }
-        : step === "construct" || step === "preview"
-          ? { label: "Next step", onClick: next, ready: true }
+      : step === "board"
+        ? { label: "Next step", onClick: next, ready: true }
+        : step === "create" || step === "build"
+          ? { label: completed[step] ? "Next step" : "Skip this step", onClick: next, ready: !!completed[step] }
           : null;
 
   // ---- Card placement ----
@@ -202,11 +196,6 @@ export function Tour() {
               <h3 className="font-display text-lg font-bold tracking-tight">{content.title}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-muted">{content.body}</p>
               {content.tip && <p className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted ring-1 ring-line">{content.tip}</p>}
-              {step === "customize" && completed[step] && (
-                <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-fg dark:text-accent">
-                  <Check className="size-3.5" /> Saved: its image is building. On to Step 3.
-                </p>
-              )}
               <div className="mt-5 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-1.5">
                   {NUMBERED.map((s, i) => (
@@ -242,30 +231,23 @@ function copy(step: TourStep, name: string): { title: string; body: string; tip?
     case "nav":
       return {
         title: `Welcome to WadSpaces, ${name}!`,
-        body: "Wadspaces are made in the Builder, in three steps: a template (apps), how they're set up, then the wadspace itself. Let's make your first one.",
+        body: "Wadspaces are made in the Builder, as stacks of modules: a template (its apps), maybe Extensions (how they're set up), then its Customization (name, background, projects and keys). Let's make your first one.",
       };
-    case "stack":
+    case "board":
       return {
-        title: "Choose your template",
-        body: "Each stack is a template, with your customizations of it and the wadspaces built from them on top. Click one to start from it.",
-        tip: "Writing and Dev are here to start with. Build your own from the catalog with the dashed card.",
+        title: "The board",
+        body: "Each stack is a wadspace. Drag a module (and what's on it) onto another stack to copy it there, Shift+drag to take just one, or drop it between stacks for a new one. Click a module to edit it.",
+        tip: "A template can sit on another whose apps it all has: it builds on that one's image.",
       };
-    case "customize":
+    case "create":
       return {
-        title: "Set its apps up",
-        body: "Pick WadBrowser's web apps, VS Code's extensions, tools and what opens at boot. Changes are saved as a customization under a new name: an image of its own, built on the template's.",
-        tip: "Import brings parts of another customization in: its web apps, extensions or tools.",
+        title: "Make a stack",
+        body: "+ Create puts a new stack at the end of the board with a blank template. Click it to pick its apps.",
       };
-    case "construct":
+    case "build":
       return {
-        title: "Make it a wadspace",
-        body: "Name it, pick a background and project folders, and a secret for each app that keeps a sign-in: a new one, one you've saved, or Don't save (sign in inside, keep nothing).",
-        tip: "Pick the same secret for two web apps and they share one sign-in.",
-      };
-    case "preview":
-      return {
-        title: "Try it here",
-        body: "The desktop as its image will show it, at your machine's screen size. Double-click icons and try the Start button. The Image tab shows the layers it's built from.",
+        title: "Build it",
+        body: "The Build bucket builds every stack that needs it (or drop one stack on it). Its images are built on your machine; a stack shows when it's out of date.",
       };
     case "launch":
       return {

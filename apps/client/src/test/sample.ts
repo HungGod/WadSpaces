@@ -1,9 +1,11 @@
-// The sample library for the app's tests, on the fake
-// backend: the starters (Writing, Dev), a customization of Dev with web apps
-// and Claude Code, a wadspace on each kind of base, a saved WadBrowser setup,
-// saved sign-ins (some shared) and the layer images built. Sign-in names are
-// made up (images/examples has the real VanuaAcademy's).
-import { extensionsLayer, templateLayer, webappId, type BrowserSetup, type Customization, type SignInRef, type Template, type Wadspace } from "@core/layers";
+// The sample library for the app's tests, on the fake backend: the starters
+// (Writing, Dev), an Extensions layer on Dev with web apps and Claude Code, a
+// stack on each (Cosmic on Writing, VanuaAcademy on the Extensions), a saved
+// WadBrowser setup, saved sign-ins (some shared) and the layer images built.
+// `legacyBackend` has the same library as it was before stacks (version 2),
+// to move. Sign-in names are made up (images/examples has the real
+// VanuaAcademy's).
+import { extensionsLayer, templateLayer, webappId, type BrowserSetup, type Extensions, type SignInRef, type Template, type Wadspace, type WadspaceV2 } from "@core/layers";
 import type { Project } from "@core/projects";
 import { FakeBackend } from "./fakeBackend";
 
@@ -29,7 +31,7 @@ export function sampleBackend(target: "offline" | "online" | "machine" = "offlin
   const b = new FakeBackend({ target });
   const writing: Template = { id: "writing", owner: "me", name: "Writing", description: "Obsidian, for notes and long-form writing.", apps: ["obsidian"], starter: true, createdAt: at(30), updatedAt: at(30) };
   const dev: Template = { id: "dev", owner: "me", name: "Dev", description: "WadBrowser and VS Code, for building things.", apps: ["wadbrowser", "vscode"], starter: true, createdAt: at(30), updatedAt: at(30) };
-  const vanuaDev: Customization = {
+  const vanuaDev: Extensions = {
     id: "vanua-academy-dev",
     owner: "me",
     name: "VanuaAcademy Dev",
@@ -52,36 +54,43 @@ export function sampleBackend(target: "offline" | "online" | "machine" = "offlin
     updatedAt: at(12),
   };
   const cosmic: Wadspace = {
-    version: 2,
+    version: 3,
     id: "cosmic-bodybuilding",
     owner: "me",
-    name: "Cosmic Bodybuilding",
-    description: "Writing Cosmic Bodybuilding.",
-    base: { kind: "template", id: "writing" },
-    wallpaper: { type: "image", value: "/wallpapers/cosmic-bodybuilding.png" },
-    projects: ["writing"],
-    secrets: {},
+    order: 1,
+    template: "writing",
+    customization: {
+      name: "Cosmic Bodybuilding",
+      description: "Writing Cosmic Bodybuilding.",
+      wallpaper: { type: "image", value: "/wallpapers/cosmic-bodybuilding.png" },
+      projects: [{ id: "writing", kind: "github", repo: "HungGod/Writing", as: "Writing" }],
+      secrets: { bySlot: {} },
+    },
     createdAt: at(9),
     updatedAt: at(9),
   };
   const vanua: Wadspace = {
-    version: 2,
+    version: 3,
     id: "vanua-academy",
     owner: "me",
-    name: "VanuaAcademy",
-    description: "Building Vanua Academy.",
-    base: { kind: "customization", id: vanuaDev.id },
-    wallpaper: { type: "image", value: "/wallpapers/vanua-academy.png" },
-    projects: ["vanua-academy"],
-    secrets: {
-      "ext:anthropic.claude-code": SIGNINS.claudeCode,
-      "web:github": SIGNINS.github,
-      "web:claude": SIGNINS.claude,
-      "web:google-firebase": SIGNINS.google,
-      "web:google-cloud": SIGNINS.google,
-      "web:gmail": SIGNINS.workspace,
-      "web:google-drive": SIGNINS.workspace,
-      "web:google-workspace": SIGNINS.workspace,
+    order: 2,
+    template: "dev",
+    extensions: vanuaDev.id,
+    customization: {
+      name: "VanuaAcademy",
+      description: "Building Vanua Academy.",
+      wallpaper: { type: "image", value: "/wallpapers/vanua-academy.png" },
+      projects: [{ id: "vanua-academy", kind: "github", repo: "HungGod/VanuaAcademy", as: "VanuaAcademy", setup: "npm ci" }],
+      secrets: {
+        bySlot: { "ext:anthropic.claude-code": SIGNINS.claudeCode },
+        groups: [
+          { id: "all", members: ["browser"] },
+          { id: "g-s-github", members: ["web:github"], key: SIGNINS.github },
+          { id: "g-s-claude", members: ["web:claude"], key: SIGNINS.claude },
+          { id: "g-s-google", members: ["web:google-firebase", "web:google-cloud"], key: SIGNINS.google },
+          { id: "g-s-workspace", members: ["web:gmail", "web:google-drive", "web:google-workspace"], key: SIGNINS.workspace },
+        ],
+      },
     },
     createdAt: at(5),
     updatedAt: at(5),
@@ -98,17 +107,50 @@ export function sampleBackend(target: "offline" | "online" | "machine" = "offlin
     updatedAt: at(4),
   };
   for (const t of [writing, dev]) b.templates.set(t.id, t);
-  b.customizations.set(vanuaDev.id, vanuaDev);
+  b.extensions.set(vanuaDev.id, vanuaDev);
   for (const w of [cosmic, vanua]) b.wadspaces.set(w.id, w);
   b.browsers.set(vanuaMail.id, vanuaMail);
   b.startersCreated = true;
   b.signIns = Object.values(SIGNINS).map((s) => ({ id: s.id, name: s.name, app: s.kind, paths: [], createdAt: 0, size: 0, changedAt: null, usedBy: [], inUse: [] }));
-  const project = (id: string, name: string): Project => ({ id, name, mountName: name, source: { kind: "folder", path: `/home/me/${name}` }, setup: "", deleted: false, createdAt: 0, updatedAt: 0 }) as Project;
-  b.projects = [project("writing", "Writing"), project("vanua-academy", "VanuaAcademy")];
-  // The images built: the starters' and the customization's, on Dev's.
+  const project = (id: string, name: string): Project => ({ id, name, mountName: name, source: { kind: "git", url: `https://github.com/HungGod/${name}` }, setup: "", deleted: false, createdAt: 0, updatedAt: 0 }) as Project;
+  b.projects = [project("writing", "Writing"), { ...project("vanua-academy", "VanuaAcademy"), setup: "npm ci" }];
+  // The images built: the starters' and the Extensions', on Dev's.
   const tw = { layer: "template:writing" as const, ref: "localhost/wadspaces-template-writing:latest", id: "img-writing", dockerfileSha: templateLayer(writing).sha, builtAt: Date.parse(at(29)) / 1000, sizeMb: 1650, from: "base" };
   const td = { layer: "template:dev" as const, ref: "localhost/wadspaces-template-dev:latest", id: "img-dev", dockerfileSha: templateLayer(dev).sha, builtAt: Date.parse(at(29)) / 1000, sizeMb: 2400, from: "base" };
   const cv = { layer: "custom:vanua-academy-dev" as const, ref: "localhost/wadspaces-custom-vanua-academy-dev:latest", id: "img-vanua-dev", dockerfileSha: extensionsLayer(vanuaDev, dev).sha, builtAt: Date.parse(at(12)) / 1000, sizeMb: 2650, from: "img-dev" };
   for (const row of [tw, td, cv]) b.images.set(row.layer, row);
+  return b;
+}
+
+/** The sample library as it was before stacks: the Extensions layer kept as a
+ *  customization, and version 2 wadspaces (Cosmic's project a folder here). */
+export function legacyBackend(): FakeBackend {
+  const b = sampleBackend();
+  const vanuaDev = b.extensions.get("vanua-academy-dev")!;
+  b.extensions.clear();
+  b.customizations.set(vanuaDev.id, vanuaDev);
+  const old = (w: Wadspace, base: WadspaceV2["base"], secrets: WadspaceV2["secrets"]): WadspaceV2 => ({
+    version: 2,
+    id: w.id,
+    owner: w.owner,
+    name: w.customization!.name,
+    description: w.customization!.description,
+    base,
+    wallpaper: w.customization!.wallpaper,
+    projects: w.customization!.projects.map((p) => p.id),
+    secrets,
+    createdAt: w.createdAt,
+    updatedAt: w.updatedAt,
+  });
+  const cosmic = b.wadspaces.get("cosmic-bodybuilding") as Wadspace;
+  const vanua = b.wadspaces.get("vanua-academy") as Wadspace;
+  const groups = vanua.customization!.secrets.groups!;
+  const web = Object.fromEntries(groups.flatMap((g) => (g.key ? g.members.map((m) => [m, g.key!]) : [])));
+  b.wadspaces.set(cosmic.id, old(cosmic, { kind: "template", id: "writing" }, {}));
+  b.wadspaces.set(vanua.id, old(vanua, { kind: "customization", id: vanuaDev.id }, { ...vanua.customization!.secrets.bySlot, ...web }));
+  b.projects = [
+    { ...b.projects[0], source: { kind: "folder", machineId: "local", machineName: "Here", path: "/home/me/Writing" } } as Project,
+    b.projects[1],
+  ];
   return b;
 }

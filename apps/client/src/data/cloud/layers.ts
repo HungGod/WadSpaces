@@ -2,10 +2,12 @@
 // machine's side through the cloud relay.
 //
 //   users/{uid}/templates/{id}        a template (the owner's; public ones come later)
-//   users/{uid}/customizations/{id}   a customization
+//   users/{uid}/extensions/{id}       an Extensions layer
+//   users/{uid}/customizations/{id}   one from before they had that name (moved on load)
 //   users/{uid}/browsers/{id}         a saved WadBrowser setup
-//   wadspaces/{id}                    a wadspace (version 2; top level, with owner and
-//                                     an empty sharedWith, as before)
+//   wadspaces/{id}                    a wadspace: one of the board's stacks (version 3;
+//                                     version 2 until it's moved); top level, with
+//                                     owner and an empty sharedWith, as before
 //   profiles/{uid}.startersCreated    the starter templates were made once
 //
 // The machine's images, sign-ins (names only) and screen come in its
@@ -13,21 +15,24 @@
 // launch are relay commands (wadd's cloud.rs runs them).
 import { collection, deleteDoc, doc, getDoc, onSnapshot, setDoc, updateDoc, type DocumentData, type Unsubscribe } from "firebase/firestore";
 import { STARTERS } from "@core/catalog/catalog";
-import { imageKey, type BrowserSetup, type Customization, type LayerKey, type Template, type Wadspace } from "@core/layers";
+import { stackImageKey, type BrowserSetup, type Extensions, type LayerKey, type Template, type Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch, Topic } from "../backend";
-import { byLayer, imageState, installBody, launchItem, layerRequest, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
+import { byLayer, imageState, installBody, launchItem, layerRequest, notReady, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
+import type { StoredWadspace } from "../migrate";
 import { db } from "./firebase";
 import { commandResult, sendCommand, type RelayImage, type RelayScreen, type RelaySignIn } from "./relay";
 
 // Firestore rejects undefined; drop it.
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
-type Coll = "templates" | "customizations" | "browsers";
+type Coll = "templates" | "extensions" | "customizations" | "browsers";
 
 /** The documents, kept current by listeners while signed in. */
 export class FirestoreLayerDocs {
   readonly templates = new Map<string, Template>();
-  readonly customizations = new Map<string, Customization>();
+  readonly extensions = new Map<string, Extensions>();
+  /** Extensions layers from before they had that name (moved on load). */
+  readonly customizations = new Map<string, Extensions>();
   readonly browsers = new Map<string, BrowserSetup>();
   private unsubs: Unsubscribe[] = [];
   private uid: string | null = null;
@@ -40,11 +45,12 @@ export class FirestoreLayerDocs {
     this.unsubs.forEach((u) => u());
     this.unsubs = [];
     this.templates.clear();
+    this.extensions.clear();
     this.customizations.clear();
     this.browsers.clear();
     this.uid = uid;
     if (!uid) return;
-    let pending = 3;
+    let pending = 4;
     let done!: () => void;
     this.loaded = new Promise((r) => (done = r));
     const watch = <T,>(name: Coll, into: Map<string, T>) => {
@@ -62,13 +68,14 @@ export class FirestoreLayerDocs {
             into.clear();
             for (const d of snap.docs) into.set(d.id, { ...d.data(), id: d.id } as T);
             settle();
-            this.emit(name);
+            if (name !== "customizations") this.emit(name);
           },
           settle,
         ),
       );
     };
     watch("templates", this.templates);
+    watch("extensions", this.extensions);
     watch("customizations", this.customizations);
     watch("browsers", this.browsers);
   }
@@ -101,7 +108,7 @@ export class FirestoreLayerDocs {
     await deleteDoc(doc(db, "users", this.need(), name, id));
   }
 
-  /** A v2 wadspace at the top level (its owner's), as the rules want it. */
+  /** A stack at the top level (its owner's), as the rules want it. */
   async putWadspace(w: Wadspace): Promise<Wadspace> {
     const { id, ...rest } = w;
     await setDoc(doc(db, "wadspaces", id), clean({ ...rest, owner: this.need(), sharedWith: [] }));
@@ -137,10 +144,10 @@ export class FirestoreLayerDocs {
   }
 }
 
-/** A v2 wadspace document as the app has it. */
-export function toWadspace(id: string, d: DocumentData): Wadspace {
-  const { sharedWith: _s, sharedNames: _n, ownerName: _o, ...rest } = d;
-  return { ...(rest as Omit<Wadspace, "id">), id };
+/** A wadspace document as the app has it. */
+export function toWadspace(id: string, d: DocumentData): StoredWadspace {
+  const { sharedNames: _n, ownerName: _o, ...rest } = d;
+  return { ...(rest as Omit<StoredWadspace, "id">), id } as StoredWadspace;
 }
 
 /** The default machine as the Builder sees it, from its heartbeat; what it
@@ -181,11 +188,13 @@ export class RelayMachine {
     return String(r.buildId ?? cmd);
   }
 
-  /** A wadspace on the machine as it is now: the documents and the wallpaper drawn here. */
+  /** A stack on the machine as it is now: the documents and the wallpaper drawn here. */
   async install(w: Wadspace, lib: LayerLibrary): Promise<void> {
+    const why = notReady(w, lib);
+    if (why) throw new Error(why);
     const { uid, mid } = this.need();
     const body = installBody(w, lib, timeZone());
-    const cmd = await sendCommand(uid, mid, "install", w.id, clean({ ...body, wallpaper: await wallpaperUpload(w.wallpaper) }));
+    const cmd = await sendCommand(uid, mid, "install", w.id, clean({ ...body, wallpaper: await wallpaperUpload(w.customization!.wallpaper) }));
     await commandResult(uid, mid, cmd);
   }
 
@@ -199,11 +208,10 @@ export class RelayMachine {
       const w = lib.wadspaces.find((x) => x.id === id);
       if (!w) continue;
       await this.install(w, lib);
-      const key = imageKey(w.base);
-      if (["never", "changed"].includes(imageState(key, lib, images, this.building()))) await this.build(key, lib);
+      const key = stackImageKey(w);
+      if (key && ["never", "changed"].includes(imageState(key, lib, images, this.building()))) await this.build(key, lib);
     }
-    const projectsOf = (id: string) => lib.wadspaces.find((w) => w.id === id)?.projects ?? [];
-    const launchItems = await Promise.all(items.map((it, i) => launchItem(it, { background: i > 0, projectsOf })));
+    const launchItems = await Promise.all(items.map((it, i) => launchItem(it, { background: i > 0, lib })));
     const cmd = await sendCommand(uid, mid, "launch-run", undefined, clean({ items: launchItems, focusMinutes }));
     const r = await commandResult(uid, mid, cmd);
     return (r.workspaces as string[]) ?? [];

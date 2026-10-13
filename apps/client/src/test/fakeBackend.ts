@@ -1,8 +1,10 @@
 // An in-memory backend for the WadSpaces Client's tests: the Builder's
 // documents, layer images that build when asked (or on `finishBuilds`),
-// launches recorded instead of run, and saved sign-ins.
-import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
-import { extensionsLayer, templateLayer } from "@core/layers";
+// stacks installed and copies made on "the machine", launches recorded
+// instead of run, and saved sign-ins.
+import type { BrowserSetup, Extensions, LayerKey, Template, Wadspace } from "@core/layers";
+import { chainOf, extensionsLayer, templateLayer } from "@core/layers";
+import type { StoredWadspace } from "@/data/migrate";
 import type { Project, ProjectDraft } from "@core/projects";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
 import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser } from "@/lib/types";
@@ -20,11 +22,17 @@ export interface FakeLaunch {
 
 export class FakeBackend implements Backend {
   readonly target: "offline" | "online" | "machine";
-  readonly caps: Caps = { sharing: false, localBuild: true, history: false, projects: true, tailnet: false, signins: true };
+  readonly caps: Caps = { sharing: false, localBuild: true, history: false, projects: true, copies: true, tailnet: false, signins: true };
 
   templates = new Map<string, Template>();
-  customizations = new Map<string, Customization>();
-  wadspaces = new Map<string, Wadspace>();
+  extensions = new Map<string, Extensions>();
+  /** Extensions layers from before they had that name. */
+  customizations = new Map<string, Extensions>();
+  wadspaces = new Map<string, StoredWadspace>();
+  /** Stacks installed on "the machine", as they were then. */
+  installed = new Map<string, Wadspace>();
+  /** Copies made on "the machine": their paths. */
+  copies = new Map<string, string[]>();
   browsers = new Map<string, BrowserSetup>();
   images = new Map<LayerKey, ImageRow>();
   /** Layer builds asked for, oldest first. */
@@ -68,21 +76,27 @@ export class FakeBackend implements Backend {
     this.images.delete(`template:${id}`);
     this.emit("templates");
   }
-  async listCustomizations() {
+  async listExtensions() {
+    return [...this.extensions.values()];
+  }
+  async saveExtensions(e: Extensions) {
+    this.extensions.set(e.id, e);
+    this.emit("extensions");
+    return e;
+  }
+  async patchExtensions(id: string, patch: LayerPatch) {
+    return this.patchIn(this.extensions, id, patch, "extensions");
+  }
+  async deleteExtensions(id: string) {
+    this.extensions.delete(id);
+    this.images.delete(`custom:${id}`);
+    this.emit("extensions");
+  }
+  async listOldCustomizations() {
     return [...this.customizations.values()];
   }
-  async saveCustomization(c: Customization) {
-    this.customizations.set(c.id, c);
-    this.emit("customizations");
-    return c;
-  }
-  async patchCustomization(id: string, patch: LayerPatch) {
-    return this.patchIn(this.customizations, id, patch, "customizations");
-  }
-  async deleteCustomization(id: string) {
+  async deleteOldCustomization(id: string) {
     this.customizations.delete(id);
-    this.images.delete(`custom:${id}`);
-    this.emit("customizations");
   }
   async listWadspaces() {
     return [...this.wadspaces.values()];
@@ -93,11 +107,25 @@ export class FakeBackend implements Backend {
     return w;
   }
   async patchWadspace(id: string, patch: LayerPatch) {
-    return this.patchIn(this.wadspaces, id, patch, "wadspaces");
+    if (patch.deletedAt) this.installed.delete(id);
+    return this.patchIn(this.wadspaces, id, patch, "wadspaces") as Wadspace;
   }
   async deleteWadspace(id: string) {
     this.wadspaces.delete(id);
+    this.installed.delete(id);
     this.emit("wadspaces");
+  }
+  async installWadspace(w: Wadspace) {
+    if (!w.template || !w.customization?.name.trim()) throw new Error("It needs a template and a named customization.");
+    this.installed.set(w.id, w);
+  }
+  async makeCopy(paths: string[]) {
+    const id = `copy-${++this.seq}`;
+    this.copies.set(id, paths);
+    return { id, files: paths.length, bytes: 100 * paths.length };
+  }
+  async deleteCopy(id: string) {
+    this.copies.delete(id);
   }
   async listBrowsers() {
     return [...this.browsers.values()];
@@ -139,16 +167,18 @@ export class FakeBackend implements Backend {
     return id;
   }
 
-  /** Every build asked for so far, done: their images built from the layers as they are. */
+  /** Every build asked for so far, done: their images built from the layers
+   *  as they are, the templates under them first (each on the one below). */
   finishBuilds() {
     for (const { key, lib, id } of this.pending.splice(0)) {
-      const t = lib.templates.find((x) => x.id === (key.startsWith("template:") ? key.slice(9) : lib.customizations.find((c) => c.id === key.slice(7))?.templateId));
-      if (!t) continue;
-      const tRow = this.images.get(`template:${t.id}`) ?? this.built(`template:${t.id}`, templateLayer(t).sha, "base");
-      if (key.startsWith("custom:")) {
-        const c = lib.customizations.find((x) => x.id === key.slice(7))!;
-        this.built(key, extensionsLayer(c, t).sha, tRow.id);
-      } else this.built(key, templateLayer(t).sha, "base");
+      const e = key.startsWith("custom:") ? lib.extensions.find((c) => c.id === key.slice(7)) : undefined;
+      const chain = chainOf(lib, key.startsWith("template:") ? key.slice(9) : (e?.templateId ?? ""));
+      if (!chain.length) continue;
+      let from = "base";
+      chain.forEach((t, i) => {
+        from = this.built(`template:${t.id}`, templateLayer(t, chain[i - 1] ?? null).sha, from).id;
+      });
+      if (e) this.built(key, extensionsLayer(e, chain[chain.length - 1]).sha, from);
       this.buildListeners.forEach((fn) => fn({ id, wadspaceId: key, name: key, status: "done", progress: 1, from: 0, lines: [], layer: key }));
     }
     this.emit("images");

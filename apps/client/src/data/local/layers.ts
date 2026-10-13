@@ -1,16 +1,19 @@
 // The Builder's layers on this machine, through wadd: the documents in its
-// library (/v1/library: templates, customizations, wadspaces with version 2,
-// browsers, and `meta` for the starter templates' flag), and what's done
-// with them here: a wadspace installed on its layer's image with its
-// wallpaper, layer images built and listed, the launcher's pick launched.
+// library (/v1/library: templates, extensions, wadspaces (the board's
+// stacks, and version 2 ones until they're moved), browsers, `meta` for the
+// starter templates' flag, and `customizations`, the Extensions layers from
+// before they had that name), and what's done with them here: a stack
+// installed on its layer's image with its wallpaper, layer images built and
+// listed, the launcher's pick launched.
 //
 // The offline backend uses all of it; the machine app only the machine half
 // (its documents are the account's).
 import { STARTERS } from "@core/catalog/catalog";
-import { imageKey, type BrowserSetup, type Customization, type LayerKey, type Template, type Wadspace } from "@core/layers";
+import { stackImageKey, type BrowserSetup, type Extensions, type LayerKey, type Template, type Wadspace } from "@core/layers";
 import { wadd, type LibraryCollection } from "@/lib/wadd";
 import type { LayerLibrary, LayerPatch } from "../backend";
-import { byLayer, imageState, installBody, launchItem, layerRequest, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
+import { byLayer, imageState, installBody, launchItem, layerRequest, notReady, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
+import type { StoredWadspace } from "../migrate";
 
 type Doc = { id: string };
 
@@ -63,14 +66,16 @@ class Collection<T extends Doc> {
   }
 }
 
-const isV2 = (w: { version?: number }) => w.version === 2;
+const isStack = (w: { version?: number }) => w.version === 2 || w.version === 3;
 
 /** The Builder's documents in wadd's library. */
 export class WaddLayerDocs {
   readonly templates = new Collection<Template>("templates");
-  readonly customizations = new Collection<Customization>("customizations");
-  /** The `wadspaces` collection also holds designs from before the layers: those are left out. */
-  readonly wadspaces = new Collection<Wadspace>("wadspaces", isV2);
+  readonly extensions = new Collection<Extensions>("extensions");
+  /** The Extensions layers from before they had that name (moved on load). */
+  readonly customizations = new Collection<Extensions>("customizations");
+  /** Stacks, and version 2 wadspaces until they're moved (designs from before the layers are left out). */
+  readonly wadspaces = new Collection<StoredWadspace>("wadspaces", isStack);
   readonly browsers = new Collection<BrowserSetup>("browsers");
 
   constructor(private readonly owner: () => string) {}
@@ -98,10 +103,12 @@ export class WaddMachine {
   /** Layers building here now (from build events). */
   readonly building = new Set<string>();
 
-  /** Installs or updates a wadspace here, with its wallpaper drawn now. */
+  /** Installs or updates a stack here, with its wallpaper drawn now. */
   async install(w: Wadspace, lib: LayerLibrary): Promise<void> {
+    const why = notReady(w, lib);
+    if (why) throw new Error(why);
     await wadd.installWadspace(w.id, installBody(w, lib, timeZone()));
-    await wadd.putWallpaper(w.id, await wallpaperUpload(w.wallpaper));
+    await wadd.putWallpaper(w.id, await wallpaperUpload(w.customization!.wallpaper));
   }
 
   async uninstall(id: string): Promise<void> {
@@ -124,8 +131,8 @@ export class WaddMachine {
     });
   }
 
-  /** The launcher's pick: each wadspace installed as it is now (and its
-   *  layer built when it isn't, which the launch waits for), then all
+  /** The launcher's pick: each stack installed as it is now (and its
+   *  layers built when they aren't, which the launch waits for), then all
    *  launched together. */
   async launch(items: RunItem[], focusMinutes: number | null, lib: LayerLibrary): Promise<string[]> {
     const images = byLayer(await this.images().catch(() => []));
@@ -134,12 +141,23 @@ export class WaddMachine {
       const w = lib.wadspaces.find((x) => x.id === id);
       if (!w) continue;
       await this.install(w, lib);
-      const key = imageKey(w.base);
-      if (imageState(key, lib, images, this.building) !== "built" && !this.building.has(key)) await this.build(key, lib);
+      const key = stackImageKey(w);
+      if (key && imageState(key, lib, images, this.building) !== "built" && !this.building.has(key)) await this.build(key, lib);
     }
-    const projectsOf = (id: string) => lib.wadspaces.find((w) => w.id === id)?.projects ?? [];
-    const launchItems = await Promise.all(items.map((it, i) => launchItem(it, { background: i > 0, projectsOf })));
+    const launchItems = await Promise.all(items.map((it, i) => launchItem(it, { background: i > 0, lib })));
     return wadd.launchBatch(launchItems, focusMinutes);
+  }
+
+  /** A copy of files here, for wadspaces to take in. */
+  makeCopy(paths: string[]) {
+    return wadd.makeCopy(paths);
+  }
+
+  /** A copy nothing uses any more (one a wadspace here still has stays). */
+  async deleteCopy(id: string) {
+    await wadd.deleteCopy(id).catch((e: { status?: number }) => {
+      if (e?.status !== 404 && e?.status !== 409) throw e;
+    });
   }
 
   async screen(): Promise<{ width: number; height: number }> {

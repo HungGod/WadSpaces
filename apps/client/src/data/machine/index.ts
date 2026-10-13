@@ -25,7 +25,7 @@ import type {
 import { CloudBackend } from "../cloud";
 import { LocalBackend } from "../local";
 import type { ProjectDraft } from "@core/projects";
-import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
+import type { BrowserSetup, Extensions, LayerKey, Template, Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch } from "../backend";
 import type { RunItem } from "../layers";
 
@@ -69,33 +69,50 @@ export class MachineBackend implements Backend {
     await this.local.deleteImage(`template:${id}`);
     await this.cloud.deleteTemplate(id);
   }
-  listCustomizations() {
-    return this.cloud.listCustomizations();
+  listExtensions() {
+    return this.cloud.listExtensions();
   }
-  saveCustomization(c: Customization) {
-    return this.cloud.saveCustomization(c);
+  saveExtensions(e: Extensions) {
+    return this.cloud.saveExtensions(e);
   }
-  patchCustomization(id: string, patch: LayerPatch) {
-    return this.cloud.patchCustomization(id, patch);
+  patchExtensions(id: string, patch: LayerPatch) {
+    return this.cloud.patchExtensions(id, patch);
   }
-  async deleteCustomization(id: string) {
+  async deleteExtensions(id: string) {
     await this.local.deleteImage(`custom:${id}`);
-    await this.cloud.deleteCustomization(id);
+    await this.cloud.deleteExtensions(id);
+  }
+  listOldCustomizations() {
+    return this.cloud.listOldCustomizations();
+  }
+  deleteOldCustomization(id: string) {
+    return this.cloud.deleteOldCustomization(id);
   }
   listWadspaces() {
     return this.cloud.listWadspaces();
   }
-  async saveWadspace(w: Wadspace, lib: LayerLibrary) {
-    const saved = await this.cloud.saveWadspace(w);
-    await this.local.machine.install(saved, { ...lib, wadspaces: [...lib.wadspaces.filter((x) => x.id !== w.id), saved] });
-    return saved;
+  saveWadspace(w: Wadspace) {
+    return this.cloud.saveWadspace(w);
   }
-  patchWadspace(id: string, patch: LayerPatch) {
-    return this.cloud.patchWadspace(id, patch);
+  /** Deleted softly: off this machine too (installed again when it's built or launched). */
+  async patchWadspace(id: string, patch: LayerPatch) {
+    const saved = await this.cloud.patchWadspace(id, patch);
+    if (patch.deletedAt) await this.local.machine.uninstall(id);
+    return saved;
   }
   async deleteWadspace(id: string) {
     await this.local.machine.uninstall(id);
     await this.cloud.deleteWadspace(id);
+  }
+  /** Here: this machine is the one it launches on. */
+  installWadspace(w: Wadspace, lib: LayerLibrary) {
+    return this.local.installWadspace(w, lib);
+  }
+  makeCopy(paths: string[]) {
+    return this.local.makeCopy(paths);
+  }
+  deleteCopy(id: string) {
+    return this.local.deleteCopy(id);
   }
   listBrowsers() {
     return this.cloud.listBrowsers();

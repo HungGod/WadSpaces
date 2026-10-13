@@ -4,15 +4,14 @@
 import { useEffect, useState } from "react";
 import { Check, Cloud, KeyRound, LogOut, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Page } from "@/components/Page";
-import { appById, extensionById } from "@core/catalog/catalog";
-import { resolve, secretUse, type SecretUser } from "@core/layers";
 import { ConfirmSignIn, NewSignIn, SignInAppIcon, signInAppName } from "@/components/SignIns";
 import { openMachinePanel } from "@/components/machine/panels";
 import { Badge, Button, EmptyState, IconButton, Input, PageHeader } from "@/components/ui";
 import { backend } from "@/data";
+import { keyUse, wadspaceName } from "@/data/layers";
 import { timeAgo } from "@/lib/format";
 import { hasLocal } from "@/lib/machine";
-import { alive, useApp } from "@/lib/store";
+import { useApp } from "@/lib/store";
 import { formatBytes, type WaddSecret, type WaddSignIn } from "@/lib/wadd";
 
 const ORIGIN: Record<WaddSecret["origin"], string> = {
@@ -40,19 +39,13 @@ export default function SecretsPage() {
     backend.listSecrets().then(setSecrets, () => setSecrets([]));
   }, [loadSignIns]);
 
-  const name = (wsId: string) => wadspaces.find((w) => w.id === wsId)?.name ?? wsId;
-  const use = secretUse(alive(wadspaces), alive(browsers));
-  const templates = useApp((s) => s.templates);
-  const customizations = useApp((s) => s.customizations);
-  /** What in it uses the sign-in: the web app, extension or app its slot is for. */
-  const slotLabel = (u: SecretUser) => {
-    const [kind, id] = u.slot.split(/:(.*)/s);
-    if (kind === "ext") return extensionById(id).name;
-    if (kind === "app") return appById(id)?.name ?? id;
-    const w = wadspaces.find((x) => x.id === u.id);
-    const webapps = u.kind === "browser" ? browsers.find((b) => b.id === u.id)?.webapps : w && resolve({ templates, customizations }, w.base)?.setup.webapps;
-    return webapps?.find((x) => x.id === id)?.name ?? id;
+  const name = (wsId: string) => {
+    const w = wadspaces.find((x) => x.id === wsId);
+    return w ? wadspaceName(w) : wsId;
   };
+  const templates = useApp((s) => s.templates);
+  const extensions = useApp((s) => s.extensions);
+  const use = keyUse({ templates, extensions, wadspaces, browsers });
 
   const rename = async (s: WaddSignIn) => {
     const n = newName.trim();
@@ -167,8 +160,8 @@ export default function SecretsPage() {
                         </Badge>
                       ))}
                       {users.map((u) => (
-                        <Badge key={`${u.kind}/${u.id}/${u.slot}`} tone="accent-2">
-                          {u.name} · {slotLabel(u)}
+                        <Badge key={`${u.kind}/${u.id}/${u.what}`} tone="accent-2">
+                          {u.name} · {u.what}
                         </Badge>
                       ))}
                       {others.map((id) => (

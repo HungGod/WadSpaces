@@ -233,8 +233,10 @@ describe("the Builder's layers and WadBrowser setups", () => {
 
   it("the owner makes, edits, deletes (softly too) and restores them", async () => {
     await assertSucceeds(setDoc(doc(alice(), "users/alice/templates/dev"), { ...t(), starter: true }));
-    await assertSucceeds(setDoc(doc(alice(), "users/alice/customizations/dev-plus"), c()));
+    await assertSucceeds(setDoc(doc(alice(), "users/alice/extensions/dev-plus"), c()));
     await assertSucceeds(setDoc(doc(alice(), "users/alice/browsers/mail"), b()));
+    // A template built on another.
+    await assertSucceeds(setDoc(doc(alice(), "users/alice/templates/game-dev"), { ...t(), name: "Game Dev", parent: "dev", apps: ["wadbrowser", "vscode", "tiled"] }));
     await assertSucceeds(updateDoc(doc(alice(), "users/alice/templates/dev"), { deletedAt: "2026-10-12T00:00:00.000Z" }));
     await assertSucceeds(updateDoc(doc(alice(), "users/alice/templates/dev"), { deletedAt: null }));
     await assertSucceeds(deleteDoc(doc(alice(), "users/alice/browsers/mail")));
@@ -242,9 +244,9 @@ describe("the Builder's layers and WadBrowser setups", () => {
 
   it("they're the owner's: other people get nothing, the owner's machines read", async () => {
     await seed("users/alice/templates/dev", t());
-    await seed("users/alice/customizations/dev-plus", c());
+    await seed("users/alice/extensions/dev-plus", c());
     await seed("users/alice/browsers/mail", b());
-    for (const path of ["users/alice/templates/dev", "users/alice/customizations/dev-plus", "users/alice/browsers/mail"]) {
+    for (const path of ["users/alice/templates/dev", "users/alice/extensions/dev-plus", "users/alice/browsers/mail"]) {
       await assertSucceeds(getDoc(doc(machine("alice", "m1"), path)));
       await assertFails(getDoc(doc(bob(), path)));
       await assertFails(getDoc(doc(machine("bob", "m9"), path)));
@@ -260,12 +262,21 @@ describe("the Builder's layers and WadBrowser setups", () => {
     await assertFails(setDoc(doc(alice(), "users/alice/templates/x"), { ...t(), apps: [] }));
     await assertFails(setDoc(doc(alice(), "users/alice/templates/x"), { ...t(), visibility: "public" })); // no public templates yet
     await assertFails(setDoc(doc(alice(), "users/alice/templates/x"), { ...t(), name: "" }));
-    await assertFails(setDoc(doc(alice(), "users/alice/customizations/x"), { ...c(), browserMode: "kiosk" }));
-    await assertFails(setDoc(doc(alice(), "users/alice/customizations/x"), { ...c(), templateId: "../dev" }));
-    await assertFails(setDoc(doc(alice(), "users/alice/customizations/x"), { ...c(), dockerfile: "FROM x" }));
+    await assertFails(setDoc(doc(alice(), "users/alice/templates/x"), { ...t(), parent: "../dev" }));
+    await assertFails(setDoc(doc(alice(), "users/alice/extensions/x"), { ...c(), browserMode: "kiosk" }));
+    await assertFails(setDoc(doc(alice(), "users/alice/extensions/x"), { ...c(), templateId: "../dev" }));
+    await assertFails(setDoc(doc(alice(), "users/alice/extensions/x"), { ...c(), dockerfile: "FROM x" }));
     await assertFails(setDoc(doc(alice(), "users/alice/browsers/x"), { ...b(), secrets: [] }));
     await seed("users/alice/templates/dev", t());
     await assertFails(updateDoc(doc(alice(), "users/alice/templates/dev"), { createdAt: "now" }));
+  });
+
+  it("Extensions layers from before they had that name are read and deleted, never written", async () => {
+    await seed("users/alice/customizations/dev-plus", c());
+    await assertSucceeds(getDoc(doc(alice(), "users/alice/customizations/dev-plus")));
+    await assertSucceeds(getDoc(doc(machine("alice", "m1"), "users/alice/customizations/dev-plus")));
+    await assertFails(setDoc(doc(alice(), "users/alice/customizations/x"), c()));
+    await assertSucceeds(deleteDoc(doc(alice(), "users/alice/customizations/dev-plus")));
   });
 
   it("the profile notes that the starter templates were made", async () => {

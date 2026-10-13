@@ -13,8 +13,9 @@
 import type { GithubRepo, Project, ProjectDraft, ProjectStatus } from "@core/projects";
 import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser, TailnetStatus } from "@/lib/types";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
-import type { BrowserSetup, Customization, LayerKey, Library, Template, Wadspace } from "@core/layers";
+import type { BrowserSetup, Extensions, LayerKey, Library, Template, Wadspace } from "@core/layers";
 import type { ImageRow, RunItem } from "./layers";
+import type { StoredWadspace } from "./migrate";
 
 export interface Caps {
   /** Share wadspaces with other users. */
@@ -23,8 +24,10 @@ export interface Caps {
   localBuild: boolean;
   /** Container history (runs). */
   history: boolean;
-  /** GitHub repositories cloned onto the machine and mounted into wadspaces at launch. */
+  /** GitHub repositories (projects), which wadspaces clone. */
   projects: boolean;
+  /** Files from this machine copied into wadspaces (wadd makes the copy). */
+  copies: boolean;
   /** Machines reach each other over the user's tailnet (Tailscale). */
   tailnet: boolean;
   /** Saved sign-ins, kept on this machine and mounted into wadspaces. */
@@ -49,7 +52,7 @@ export interface BuildProgress {
   layer?: string | null;
 }
 
-/** One thing a launch gets ready before the wadspace starts: its image, or a project's folder. */
+/** One thing a launch gets ready before the wadspace starts: its image, or a copy it takes in. */
 export interface LaunchPart {
   /** "image", or the project's id. */
   key: string;
@@ -66,8 +69,8 @@ export interface LaunchProgress {
   id: string;
   wadspaceId: string;
   name: string;
-  /** Project ids it mounts. */
-  projects: string[];
+  /** What a launch mounted, from before projects were cloned and copied in (none now). */
+  projects?: string[];
   status: "queued" | "running" | "done" | "error" | "cancelled";
   progress: number;
   phase: string;
@@ -125,6 +128,8 @@ export interface FolderListing {
   path: string | null;
   parent: string | null;
   dirs: { name: string; path: string }[];
+  /** Its files, when they're asked for. */
+  files?: { name: string; path: string }[];
 }
 
 /** What changed, so the store reloads just that. "github": the repo list (pages listen themselves). */
@@ -138,7 +143,7 @@ export type Topic =
   | "signins"
   | "github"
   | "templates"
-  | "customizations"
+  | "extensions"
   | "browsers"
   | "images";
 
@@ -164,24 +169,34 @@ export interface Backend {
   saveTemplate(t: Template): Promise<Template>;
   patchTemplate(id: string, patch: LayerPatch): Promise<Template>;
   deleteTemplate(id: string): Promise<void>;
-  listCustomizations(): Promise<Customization[]>;
-  saveCustomization(c: Customization): Promise<Customization>;
-  patchCustomization(id: string, patch: LayerPatch): Promise<Customization>;
-  deleteCustomization(id: string): Promise<void>;
-  /** Saved on a machine (offline, the machine app): installed there too. */
-  listWadspaces(): Promise<Wadspace[]>;
-  saveWadspace(w: Wadspace, lib: LayerLibrary): Promise<Wadspace>;
-  patchWadspace(id: string, patch: LayerPatch, lib: LayerLibrary): Promise<Wadspace>;
+  listExtensions(): Promise<Extensions[]>;
+  saveExtensions(e: Extensions): Promise<Extensions>;
+  patchExtensions(id: string, patch: LayerPatch): Promise<Extensions>;
+  deleteExtensions(id: string): Promise<void>;
+  /** Extensions layers kept as "customizations" from before they had that
+   *  name: moved to `extensions` on load (data/migrate.ts), then deleted. */
+  listOldCustomizations(): Promise<Extensions[]>;
+  deleteOldCustomization(id: string): Promise<void>;
+  /** The board's stacks (version 2 documents too, until they're moved). */
+  listWadspaces(): Promise<StoredWadspace[]>;
+  /** The document; it's installed on a machine when it's built or launched there. */
+  saveWadspace(w: Wadspace): Promise<Wadspace>;
+  /** Deleted softly (or restored): on a machine, its installed workspace is disabled (or enabled) too. */
+  patchWadspace(id: string, patch: LayerPatch): Promise<Wadspace>;
+  /** For good, and uninstalled from the machine. */
   deleteWadspace(id: string): Promise<void>;
+  /** Installs (or updates) a stack on the launch machine: its layers' image,
+   *  name, background, keys and projects. It needs a template and a customization. */
+  installWadspace(w: Wadspace, lib: LayerLibrary): Promise<void>;
   listBrowsers(): Promise<BrowserSetup[]>;
   saveBrowser(b: BrowserSetup): Promise<BrowserSetup>;
   patchBrowser(id: string, patch: LayerPatch): Promise<BrowserSetup>;
   deleteBrowser(id: string): Promise<void>;
   /** The layer images on the launch machine (online: its heartbeat). */
   listImages(): Promise<ImageRow[]>;
-  /** Builds a layer's image there (a customization's template first when needed): the build's id. */
+  /** Builds a layer's image there (what it builds on first, when needed): the build's id. */
   buildLayer(key: LayerKey, lib: LayerLibrary): Promise<string>;
-  /** Removes a layer's image there (a template or customization deleted for good). */
+  /** Removes a layer's image there (a template or Extensions layer deleted for good). */
   deleteImage(key: LayerKey): Promise<void>;
   /** Starts what the launcher picked, together (a focus session with minutes):
    *  the workspaces' ids. Their images are built first where they need it. */
@@ -266,8 +281,12 @@ export interface Backend {
 
   /** Offline: the drives on this machine, for a drive project. */
   listDrives?(): Promise<HostDrive[]>;
-  /** Offline: a folder's subfolders, on this machine or inside a drive (by uuid). */
-  browseFolders?(q: { path?: string; drive?: string }): Promise<FolderListing>;
+  /** Offline: a folder's subfolders (and with `files`, its files), on this machine or inside a drive (by uuid). */
+  browseFolders?(q: { path?: string; drive?: string; files?: boolean }): Promise<FolderListing>;
+  /** On a machine (caps.copies): a copy of files here for wadspaces to take in. */
+  makeCopy?(paths: string[]): Promise<{ id: string; files: number; bytes: number }>;
+  /** On a machine: a copy no wadspace uses any more, removed. */
+  deleteCopy?(id: string): Promise<void>;
 
   /** Offline: Tailscale on this machine (caps.tailnet). */
   tailnetStatus?(): Promise<TailnetStatus>;

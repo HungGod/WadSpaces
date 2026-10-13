@@ -1,18 +1,10 @@
-// The Builder's work in progress, step to step: what it starts from (Step 1),
-// the setup being customized (Step 2), and the wadspace being constructed
-// (Step 3). Nothing here is saved until a step saves it to the store.
-//
-// Secrets are picked per slot: a new saved sign-in (named for the wadspace
-// unless a name is typed), one already saved of the same kind (by its id), or
-// none. Saving makes the new ones first and keeps a SignInRef per slot.
-import { create } from "zustand";
-import { newSecretName, resolve, setupOf, type BaseRef, type Library, type SecretKind, type Setup, type SignInRef, type Slot, type Wadspace } from "@core/layers";
+// Keys picked per slot, in the launcher's runs and WadBrowser setups: a new
+// saved sign-in (named after the run or setup unless a name is typed), one
+// already saved of the same kind (by its id), or none. Using them makes the
+// new ones first and keeps a SignInRef per slot.
+import { newSecretName, type SecretKind, type SignInRef, type Slot } from "@core/layers";
 import { SECRET_KINDS } from "@core/catalog/catalog";
-import { DEFAULT_WALLPAPER } from "@/components/desktop/wallpapers";
 import { useApp } from "@/lib/store";
-import type { Wallpaper } from "@/lib/types";
-
-export type Step = "template" | "customize" | "construct";
 
 /** What a slot keeps: nothing, a new secret (empty name: the default), or one
  *  already saved (its id), or new for another slot in this draft (its name, no id). */
@@ -22,81 +14,13 @@ export interface SlotChoice {
   id?: string;
 }
 
-export interface WadspaceDraft {
-  id?: string;
-  name: string;
-  description: string;
-  wallpaper: Wallpaper;
-  projects: string[];
-  secrets: Record<string, SlotChoice>;
-}
-
-const blankWadspace = (): WadspaceDraft => ({ name: "", description: "", wallpaper: DEFAULT_WALLPAPER, projects: [], secrets: {} });
-
-interface DraftState {
-  step: Step;
-  /** The template whose stack's picker is open in Step 1 (Home opens it too). */
-  picking: string | null;
-  base: BaseRef | null;
-  setup: Setup | null;
-  wadspace: WadspaceDraft;
-  /** Start from a template or a customization: on to Step 2. */
-  begin: (base: BaseRef, lib: Library) => void;
-  /** Open a saved wadspace, with its base and secrets. Like every start, it begins on Step 2. */
-  edit: (w: Wadspace, lib: Library) => void;
-  /** A new wadspace starting from a saved one: its base, background, projects and secrets, but a name of its own. */
-  copy: (w: Wadspace, lib: Library) => void;
-  /** After saving a customization: the draft now builds on it. */
-  rebase: (base: BaseRef, setup: Setup) => void;
-  setSetup: (patch: Partial<Setup>) => void;
-  setWadspace: (patch: Partial<WadspaceDraft>) => void;
-  setSlot: (key: string, choice: SlotChoice) => void;
-  goto: (step: Step) => void;
-  pick: (templateId: string | null) => void;
-  reset: () => void;
-}
-
-export const useDraft = create<DraftState>((set, get) => ({
-  step: "template",
-  picking: null,
-  base: null,
-  setup: null,
-  wadspace: blankWadspace(),
-  begin: (base, lib) => {
-    const r = resolve(lib, base);
-    if (!r) return;
-    set({ step: "customize", base, setup: r.setup, wadspace: blankWadspace() });
-  },
-  edit: (w, lib) => {
-    const r = resolve(lib, w.base);
-    if (!r) return;
-    set({ step: "customize", base: w.base, setup: r.setup, wadspace: fromSaved(w) });
-  },
-  copy: (w, lib) => {
-    const r = resolve(lib, w.base);
-    if (!r) return;
-    set({ step: "customize", base: w.base, setup: r.setup, wadspace: { ...fromSaved(w), id: undefined, name: "" } });
-  },
-  rebase: (base, setup) => set({ base, setup: setupOf(setup) }),
-  setSetup: (patch) => {
-    const s = get().setup;
-    if (s) set({ setup: { ...s, ...patch } });
-  },
-  setWadspace: (patch) => set({ wadspace: { ...get().wadspace, ...patch } }),
-  setSlot: (key, choice) => set({ wadspace: { ...get().wadspace, secrets: { ...get().wadspace.secrets, [key]: choice } } }),
-  goto: (step) => set({ step }),
-  // Opening a picker goes back to Step 1, where it is; closing one stays put.
-  pick: (picking) => set(picking ? { step: "template", picking } : { picking }),
-  reset: () => set({ step: "template", base: null, setup: null, wadspace: blankWadspace() }),
-}));
-
-export function fromSaved(w: Pick<Wadspace, "id" | "name" | "description" | "wallpaper" | "projects" | "secrets">): WadspaceDraft {
-  return { id: w.id, name: w.name, description: w.description, wallpaper: w.wallpaper, projects: w.projects, secrets: asChoices(w.secrets) };
-}
-
 /** What secret choices hang off: a name (for new secrets' default names) and a choice per slot. A wadspace or a WadBrowser run.
  *  `defaultName` overrides how a new secret is named when none is typed. */
-export type SlotDraft = Pick<WadspaceDraft, "name" | "secrets"> & { defaultName?: (slot: Slot) => string };
+export interface SlotDraft {
+  name: string;
+  secrets: Record<string, SlotChoice>;
+  defaultName?: (slot: Slot) => string;
+}
 
 /** What a new secret is called when no name is typed: <name>-<app id>, unless the draft says otherwise. */
 export const defaultSecretName = (w: SlotDraft, slot: Slot) => w.defaultName?.(slot) ?? newSecretName(w.name, slot);
@@ -113,7 +37,7 @@ export function resolvedName(w: SlotDraft, slot: Slot): string | null {
 }
 
 /** A slot's secret once resolved: a saved one (with its id) or one to make. */
-export interface Resolved {
+export interface ResolvedSlot {
   name: string;
   kind: SecretKind;
   id?: string;
@@ -126,7 +50,7 @@ export function resolveSlots(w: SlotDraft, slots: Slot[], saved: SignInRef[]) {
   const byName = new Map(saved.map((s) => [s.name.toLowerCase(), s]));
   const byId = new Map(saved.map((s) => [s.id, s]));
   const freshNames = new Set(slots.filter((s) => choiceFor(w, s).mode === "new").map((s) => resolvedName(w, s)!.toLowerCase()));
-  const refs: Record<string, Resolved> = {};
+  const refs: Record<string, ResolvedSlot> = {};
   const fresh: { name: string; kind: SecretKind }[] = [];
   const kinds = new Map<string, SecretKind>(saved.map((s) => [s.name.toLowerCase(), s.kind]));
   for (const s of slots) {

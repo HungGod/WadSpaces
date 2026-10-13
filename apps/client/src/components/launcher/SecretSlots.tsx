@@ -1,86 +1,12 @@
-// Step 3: WadSpaces construction. What makes it this wadspace rather than its
-// template: a name, a background, project folders, and secrets for the apps
-// that keep sign-ins. None of it is in an image: it's mounted at start.
+// A key per slot: a new saved sign-in, one already saved of its kind, or
+// none (sign in inside the app; nothing is kept on the machine).
 import { KeyRound, Users } from "lucide-react";
 import clsx from "clsx";
 import { SECRET_KINDS } from "@core/catalog/catalog";
-import { fits, imageKey, opensFolders, resolve, slotsFor, type SignInRef, type Slot } from "@core/layers";
+import { fits, type SignInRef, type Slot } from "@core/layers";
 import { useApp } from "@/lib/store";
-import { useTour } from "@/lib/tour";
-import { ProjectsPanel } from "./ProjectsPanel";
-import { Input, Label, Segmented, Textarea } from "../ui";
-import { WallpaperPicker } from "../WallpaperPicker";
-import { asChoices, choiceFor, defaultSecretName, resolvedName, resolveSlots, signInRefs, useDraft, type SlotChoice, type SlotDraft } from "./draft";
-import { BuildButton, Heading, ImageBadge } from "./parts";
-
-export function StepConstruct() {
-  const base = useDraft((s) => s.base);
-  const setup = useDraft((s) => s.setup);
-  const w = useDraft((s) => s.wadspace);
-  const setWadspace = useDraft((s) => s.setWadspace);
-  const templates = useApp((s) => s.templates);
-  const customizations = useApp((s) => s.customizations);
-  const r = base && resolve({ templates, customizations }, base);
-  if (!r || !setup || !base) return null;
-  const slots = slotsFor(r.template, setup);
-
-  return (
-    <div className="space-y-7 p-5" data-tour="step-construct">
-      <div className="flex items-center gap-3 rounded-2xl bg-surface-2/50 p-3 ring-1 ring-line">
-        <div className="min-w-0 flex-1">
-          <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-faint">Runs on</div>
-          <div className="truncate text-sm font-semibold">{r.customization ? `${r.customization.name} (${r.template.name})` : `${r.template.name} template`}</div>
-          <div className="mt-1">
-            <ImageBadge image={imageKey(base)} />
-          </div>
-        </div>
-        <BuildButton image={imageKey(base)} />
-      </div>
-
-      <section className="space-y-3">
-        <div>
-          <Label>Name</Label>
-          <Input value={w.name} onChange={(e) => setWadspace({ name: e.target.value })} placeholder="e.g. VanuaAcademy" />
-        </div>
-        <div>
-          <Label>Description</Label>
-          <Textarea value={w.description} onChange={(e) => setWadspace({ description: e.target.value })} rows={2} placeholder="What it's for" />
-        </div>
-      </section>
-
-      <section id="wallpaper">
-        <Heading>Background</Heading>
-        <WallpaperPicker value={w.wallpaper} onChange={(wallpaper) => setWadspace({ wallpaper })} />
-      </section>
-
-      <section>
-        <Heading
-          hint={
-            opensFolders(r.template)
-              ? "Mounted read-write at ~/Desktop/<folder> when it starts; each shows as a folder on the desktop that opens in VS Code."
-              : `Mounted read-write at ~/Desktop/<folder> when it starts. Nothing in ${r.template.name} opens a folder in a window, so they get no desktop icon: open them from its apps.`
-          }
-        >
-          Project folders
-        </Heading>
-        <div className="-mx-1">
-          <ProjectsPanel value={w.projects} onChange={(projects) => setWadspace({ projects })} />
-        </div>
-      </section>
-
-      <section data-tour="secrets">
-        <Heading hint="Saved sign-ins, kept on the machine and mounted into this wadspace. Save a new one, or reuse one of the same kind.">Secrets</Heading>
-        {slots.length ? <SecretsPanel slots={slots} /> : <p className="text-xs text-muted">Nothing in this template keeps a sign-in.</p>}
-      </section>
-    </div>
-  );
-}
-
-function SecretsPanel({ slots }: { slots: Slot[] }) {
-  const w = useDraft((s) => s.wadspace);
-  const setSlot = useDraft((s) => s.setSlot);
-  return <SecretSlots slots={slots} draft={w} onSlot={setSlot} />;
-}
+import { Input, Segmented } from "../ui";
+import { choiceFor, defaultSecretName, resolvedName, type SlotChoice, type SlotDraft } from "./slots";
 
 /**
  * A choice per slot: save a new secret, use one of the same kind already
@@ -195,38 +121,4 @@ function SlotRow({ slot, slots, w, saved, sharedWith, dontSave, onChange }: { sl
       )}
     </div>
   );
-}
-
-/** Saving Step 3: the wadspace, and the new secrets it names. */
-export function useConstructSave() {
-  const base = useDraft((s) => s.base);
-  const setup = useDraft((s) => s.setup);
-  const w = useDraft((s) => s.wadspace);
-  const setWadspace = useDraft((s) => s.setWadspace);
-  const templates = useApp((s) => s.templates);
-  const customizations = useApp((s) => s.customizations);
-  const wadspaces = useApp((s) => s.wadspaces);
-  useApp((s) => s.signIns);
-  const saveWadspace = useApp((s) => s.saveWadspace);
-  const r = base && resolve({ templates, customizations }, base);
-  const slots = r && setup ? slotsFor(r.template, setup) : [];
-  const resolved = resolveSlots(w, slots, useApp.getState().knownSignIns());
-  const taken = !!w.name.trim() && wadspaces.some((x) => x.id !== w.id && x.name.trim().toLowerCase() === w.name.trim().toLowerCase());
-  const problems = [...(taken ? [`There's a wadspace called ${w.name.trim()} already.`] : []), ...resolved.problems];
-
-  const save = async () => {
-    if (!base) return null;
-    try {
-      const secrets = await signInRefs(resolved);
-      const saved = await saveWadspace({ id: w.id, name: w.name.trim(), description: w.description.trim(), base, wallpaper: w.wallpaper, projects: w.projects, secrets });
-      // From here on its secrets are saved ones.
-      setWadspace({ id: saved.id, secrets: asChoices(secrets) });
-      useTour.getState().signal("wadspace-saved");
-      return saved;
-    } catch (e) {
-      useApp.getState().toast({ title: "Couldn't save the wadspace", body: (e as Error).message, tone: "error" });
-      return null;
-    }
-  };
-  return { save, problems, canSave: !!w.name.trim() && !problems.length };
 }

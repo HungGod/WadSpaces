@@ -21,6 +21,11 @@ export const WALLPAPER_PRESETS: { name: string; wallpaper: Wallpaper }[] = [
 /** What a new wadspace starts with, and what templates and customizations are pictured on. */
 export const DEFAULT_WALLPAPER: Wallpaper = WALLPAPER_PRESETS[0].wallpaper;
 
+/** A new customization's background until one's picked: not one of the
+ *  choices, so it reads as "not set". */
+export const BLANK_WALLPAPER: Wallpaper = { type: "gradient", value: "linear-gradient(160deg, #17112a 0%, #0e0919 100%)" };
+export const isBlankWallpaper = (w: Wallpaper | undefined) => !w || w.value === BLANK_WALLPAPER.value;
+
 export function wallpaperStyle(w: Wallpaper): React.CSSProperties {
   if (w.type === "image") return { backgroundImage: `url("${w.value}")`, backgroundSize: "cover", backgroundPosition: "center", backgroundColor: "#0a0614" };
   return { background: w.value };

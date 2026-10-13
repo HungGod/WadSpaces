@@ -1,19 +1,18 @@
 // @vitest-environment jsdom
-// The WadSpaces Client as you use it: Step 1 lists template stacks, Step 2
-// customizes a template and saves it as a customization, Step 3 constructs a
-// wadspace with secrets, and the sidebar's launcher launches them. Against
-// the fake backend with the sample library (test/sample.ts): what's launched
-// is what the fake records.
+// The WadSpaces Client as you use it: a library loads (one from before stacks
+// moved to them), the sidebar's launcher launches wadspaces and WadBrowsers,
+// and Home shows your wadspaces. Against the fake backend with the sample
+// library (test/sample.ts): what's launched is what the fake records. (The
+// Builder's board has tests of its own, in components/builder.)
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import App from "./App";
-import { useDraft } from "./components/wadbuilder/draft";
 import { setBackendForTests } from "./data";
 import { useApp } from "./lib/store";
 import { useUi } from "./lib/ui";
 import type { FakeBackend } from "./test/fakeBackend";
-import { CLAUDE_CODE, GOOGLE, sampleBackend } from "./test/sample";
+import { GOOGLE, legacyBackend, sampleBackend } from "./test/sample";
 
 beforeAll(() => {
   // jsdom has neither; the Builder measures its preview and scrolls panels into view.
@@ -34,10 +33,8 @@ let fake: FakeBackend;
 beforeEach(() => {
   fake = sampleBackend();
   setBackendForTests(fake);
-  useDraft.getState().reset();
-  useDraft.getState().pick(null);
   useUi.setState({ detailsId: null, launcher: null });
-  useApp.setState({ toasts: [], builds: [], launches: [], templates: [], customizations: [], wadspaces: [], browsers: [], images: {}, signIns: [], projects: [] });
+  useApp.setState({ toasts: [], builds: [], launches: [], templates: [], extensions: [], wadspaces: [], browsers: [], images: {}, signIns: [], projects: [] });
 });
 
 afterEach(cleanup);
@@ -52,149 +49,18 @@ const open = async (path = "/builder") => {
   await waitFor(() => expect(useApp.getState().wadspaces.length).toBeGreaterThan(0));
 };
 
-const startFrom = async (template: string) => fireEvent.click(await screen.findByRole("button", { name: `Start from ${template}` }));
-
-describe("the Builder", () => {
-  it("opens on Step 1 with one stack per template", async () => {
-    await open();
-    expect(await screen.findByRole("heading", { name: "Choose your template" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Templates" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Start from Writing" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Start from Dev" })).toBeTruthy();
-    expect(screen.getByText("Build your own template")).toBeTruthy();
-    // No separate wadspace or customization sections: they're in the stacks.
-    expect(screen.queryByRole("heading", { name: "Your wadspaces" })).toBeNull();
-    expect(screen.getByText(/1 customization · 1 wadspace/)).toBeTruthy();
-  });
-
-  it("pictures each layer's desktop: VS Code with extensions gets a +", async () => {
-    await open();
-    await screen.findByRole("button", { name: "Start from Dev" });
-    // VanuaAcademy Dev and the wadspace on it add Claude Code to VS Code.
-    expect(screen.getAllByTitle("1 added").length).toBeGreaterThan(0);
-  });
-
-  it("picks a starting point in a stack: the template, its customization, or a wadspace", async () => {
-    await open();
-    await startFrom("Dev");
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("VanuaAcademy Dev")).toBeTruthy();
-    expect(within(dialog).getByRole("button", { name: "Open VanuaAcademy" })).toBeTruthy();
-    expect(within(dialog).getByRole("button", { name: "Edit VanuaAcademy" })).toBeTruthy();
-    expect(within(dialog).getAllByRole("button", { name: "Start here" })).toHaveLength(2);
-  });
-
-  it("opens (launches) a wadspace straight from its stack", async () => {
-    await open();
-    await startFrom("Dev");
-    await act(async () => fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Open VanuaAcademy" })));
-    expect(fake.launches).toEqual([{ items: [{ kind: "wadspace", wadspaceId: "vanua-academy" }], focusMinutes: null }]);
-  });
-
-  it("edits a saved wadspace from Step 2, then constructs it with its secrets", async () => {
-    await open();
-    await startFrom("Dev");
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Edit VanuaAcademy" }));
-    expect(useDraft.getState().step).toBe("customize");
-    expect(screen.getByText("VanuaAcademy Dev", { selector: "div" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Next: construct/ }));
-    expect((screen.getByPlaceholderText("e.g. VanuaAcademy") as HTMLInputElement).value).toBe("VanuaAcademy");
-    const firebase = screen.getByLabelText("Existing secret for Google FireBase (web app)") as HTMLSelectElement;
-    expect(firebase.selectedOptions[0].textContent).toBe(GOOGLE);
-    // Only WadBrowser sign-ins are offered to a web app.
-    expect([...firebase.options].map((o) => o.textContent)).not.toContain(CLAUDE_CODE);
-    expect(screen.getAllByText(/Shared with/).length).toBeGreaterThan(0);
-  });
-
-  it("starts a new wadspace from a saved one, without its name", async () => {
-    await open();
-    await startFrom("Writing");
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: /New from it/ }));
-    const w = useDraft.getState().wadspace;
-    expect(w).toMatchObject({ id: undefined, name: "", projects: ["writing"] });
-    expect(w.wallpaper.value).toBe("/wallpapers/cosmic-bodybuilding.png");
-  });
-
-  it("needs a new name for changes to a template, and builds what's saved", async () => {
-    await open();
-    await startFrom("Dev");
-    fireEvent.click(within(await screen.findByRole("dialog")).getAllByRole("button", { name: "Start here" })[0]);
-    fireEvent.change(screen.getByLabelText("Web app name"), { target: { value: "GitHub" } });
-    fireEvent.change(screen.getByLabelText("Web app address"), { target: { value: "github.com" } });
-    fireEvent.click(within(screen.getByLabelText("Web app name").closest("form")!).getByRole("button", { name: /Add/ }));
-    expect(screen.getByText("https://github.com")).toBeTruthy();
-    expect((screen.getByRole("button", { name: /Next: construct/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/differs from the Dev template/)).toBeTruthy();
-    // A name in use won't do.
-    fireEvent.change(screen.getByLabelText("Customization name"), { target: { value: "VanuaAcademy Dev" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save new/ }));
-    expect(screen.getByText(/is taken/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Customization name"), { target: { value: "My Dev" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Save new/ })));
-    expect([...fake.customizations.values()].map((c) => c.name)).toContain("My Dev");
-    // Saving builds its image.
-    expect(fake.builds).toEqual(["custom:my-dev"]);
-    fireEvent.click(screen.getByRole("button", { name: /Next: construct/ }));
-    expect(screen.getByText("GitHub (web app)")).toBeTruthy();
-  });
-
-  it("imports another customization's setup as a starting point", async () => {
-    await open();
-    await startFrom("Writing");
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start here" }));
-    fireEvent.click(screen.getByRole("button", { name: /Import/ }));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByText("VanuaAcademy Dev"));
-    // Writing has no WadBrowser or VS Code: only the tools come across.
-    expect((within(dialog).getByLabelText("Web apps") as HTMLInputElement).disabled).toBe(true);
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Import$/ }));
-    expect(useDraft.getState().setup?.tools).toEqual(["firebase"]);
-  });
-
-  it("shows what an app is, with screenshots and its licence, from the template maker", async () => {
-    await open();
-    fireEvent.click(await screen.findByText("Build your own template"));
-    fireEvent.click(screen.getByRole("button", { name: "About Krita" }));
-    expect(await screen.findByRole("heading", { name: "Krita" })).toBeTruthy();
-    expect(screen.getByText("How it gets into the image")).toBeTruthy();
-    expect(screen.getByText("GPL-3.0-only")).toBeTruthy();
-    expect(screen.getByText("RUN wadspaces-feature krita")).toBeTruthy();
-  });
-
-  it("constructs a new wadspace, making its new sign-ins and saving refs to them", async () => {
-    await open();
-    await startFrom("Writing");
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start here" }));
-    fireEvent.click(screen.getByRole("button", { name: /Next: construct/ }));
-    fireEvent.change(screen.getByPlaceholderText("e.g. VanuaAcademy"), { target: { value: "Night Notes" } });
-    expect((screen.getByLabelText("New secret for Obsidian") as HTMLInputElement).placeholder).toBe("NightNotes-Obsidian");
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Save new wadspace/ })));
-    const saved = fake.wadspaces.get("night-notes")!;
-    expect(saved.base).toEqual({ kind: "template", id: "writing" });
-    const made = fake.signIns.find((s) => s.name === "NightNotes-Obsidian")!;
-    expect(made.app).toBe("obsidian");
-    expect(saved.secrets).toEqual({ "app:obsidian": { id: made.id, name: "NightNotes-Obsidian", kind: "obsidian" } });
-    // Back on Step 1.
-    expect(useDraft.getState().step).toBe("template");
-  });
-
-  it("deletes softly, restores from Recently deleted, and refuses to delete what's built on", async () => {
-    await open();
-    await act(async () => useApp.getState().remove("wadspace", "cosmic-bodybuilding"));
-    expect(fake.wadspaces.get("cosmic-bodybuilding")?.deletedAt).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: /Recently deleted \(1\)/ }));
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Restore/ })));
-    expect(fake.wadspaces.get("cosmic-bodybuilding")?.deletedAt).toBeUndefined();
-    // Dev has VanuaAcademy Dev on it.
-    await expect(useApp.getState().remove("template", "dev")).rejects.toThrow(/VanuaAcademy Dev/);
-    // For good, once nothing's on it.
-    await act(async () => useApp.getState().remove("wadspace", "cosmic-bodybuilding"));
-    await act(async () => useApp.getState().remove("template", "writing"));
-    await expect(useApp.getState().purge("template", "writing")).rejects.toThrow(/Cosmic Bodybuilding \(recently deleted\)/);
-    await act(async () => useApp.getState().purge("wadspace", "cosmic-bodybuilding"));
-    await act(async () => useApp.getState().purge("template", "writing"));
-    expect(fake.templates.has("writing")).toBe(false);
-    expect(fake.images.has("template:writing")).toBe(false);
+describe("loading", () => {
+  it("moves a library from before stacks to them, once", async () => {
+    const legacy = legacyBackend();
+    setBackendForTests(legacy);
+    await open("/");
+    const ws = useApp.getState().wadspaces;
+    expect(ws.map((w) => [w.id, w.version, w.order])).toEqual([["cosmic-bodybuilding", 3, 1], ["vanua-academy", 3, 2]]);
+    expect(useApp.getState().extensions.map((e) => e.id)).toEqual(["vanua-academy-dev"]);
+    // Written behind: the Extensions moved, the old documents gone, the stacks saved.
+    await waitFor(() => expect([...legacy.wadspaces.values()].every((w) => w.version === 3)).toBe(true));
+    expect([...legacy.extensions.keys()]).toEqual(["vanua-academy-dev"]);
+    expect(legacy.customizations.size).toBe(0);
   });
 });
 
@@ -250,10 +116,10 @@ describe("the launcher", () => {
     await open("/");
     const dialog = await launcher();
     fireEvent.click(within(dialog).getByRole("button", { name: "Customize Cosmic Bodybuilding" }));
-    // Only construction options: background, folders, secrets.
+    // Only its own options: background and keys (its projects are its own).
     expect(within(dialog).getByRole("heading", { name: "Background" })).toBeTruthy();
-    expect(within(dialog).getByRole("heading", { name: "Folders" })).toBeTruthy();
-    expect(within(dialog).getByRole("heading", { name: "Secrets" })).toBeTruthy();
+    expect(within(dialog).getByRole("heading", { name: "Keys" })).toBeTruthy();
+    expect(within(dialog).queryByRole("heading", { name: "Folders" })).toBeNull();
     expect(within(dialog).queryByText("Open at boot")).toBeNull();
     fireEvent.click(within(dialog).getByTitle("Midnight"));
     await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: /Throwaway run/ })));
@@ -275,7 +141,9 @@ describe("the launcher", () => {
     expect(save().disabled).toBe(true);
     fireEvent.change(within(dialog).getByLabelText("New wadspace name"), { target: { value: "Cosmic Sequel" } });
     await act(async () => fireEvent.click(save()));
-    expect([...fake.wadspaces.values()].map((w) => w.name)).toContain("Cosmic Sequel");
+    const sequel = [...fake.wadspaces.values()].find((w) => w.version === 3 && w.customization?.name === "Cosmic Sequel");
+    // A copy of its stack, at the board's end.
+    expect(sequel && sequel.version === 3 && [sequel.template, sequel.order]).toEqual(["writing", 3]);
     expect(within(dialog).getByText("Cosmic Sequel")).toBeTruthy();
   });
 
@@ -310,7 +178,7 @@ describe("the launcher", () => {
     expect(fake.signIns.length).toBe(before);
     await launch(dialog);
     const item = fake.launches[0].items[0];
-    expect(item.kind === "wadspace" && item.overrides?.secrets).toEqual({});
+    expect(item.kind === "wadspace" && item.overrides?.bySlot).toEqual({});
   });
 
   it("names an unnamed WadBrowser setup's new sign-ins WadSpaces-WadBrowser.<app>, and can save none", async () => {
@@ -352,11 +220,10 @@ describe("the launcher", () => {
 });
 
 describe("Home", () => {
-  it("shows your templates, which open their picker in the Builder", async () => {
+  it("shows your wadspaces, which open on the Builder's board", async () => {
     await open("/");
-    expect(await screen.findByRole("heading", { name: "Your templates" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Start from Dev" }));
-    expect(await screen.findByRole("heading", { name: "Choose your template" })).toBeTruthy();
-    expect(within(await screen.findByRole("dialog")).getByText("VanuaAcademy Dev")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Your wadspaces" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open VanuaAcademy in the Builder" }));
+    expect(await screen.findByText(/Cosmic Bodybuilding · VanuaAcademy/)).toBeTruthy();
   });
 });

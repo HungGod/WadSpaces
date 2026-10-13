@@ -3,28 +3,32 @@
 //
 //   - the layer images on a machine (wadd's GET /v1/images, or a heartbeat)
 //     and how each stands: Not built, Building, Built, or Changed since built
-//     (its build folder's sha differs, or its template's image was rebuilt
-//     since it was built on it);
+//     (its build folder's sha differs, or what it's built on was rebuilt since);
 //   - what the launcher starts (RunItem) as wadd launches it (LaunchItem),
 //     with a throwaway run's wallpaper drawn here;
-//   - what installing a wadspace on a machine sends (PUT /v1/wadspaces/{id}).
+//   - what installing a wadspace (a stack) on a machine sends
+//     (PUT /v1/wadspaces/{id}), and what building a layer does (its templates
+//     below it, bottom first).
 import {
+  chainOf,
   extensionsLayer,
-  imageKey,
-  resolve,
+  resolveStack,
+  stackImageKey,
   templateLayer,
-  type BaseRef,
+  workspaceFor,
   type BrowserSetup,
-  type Customization,
+  type Extensions,
   type LayerKey,
   type Library,
   type SignInRef,
+  type StackKeys,
   type Template,
   type Wadspace,
   type Wallpaper,
   type WebApp,
 } from "@core/layers";
 
+import { appById, extensionById } from "@core/catalog/catalog";
 import { renderWallpaper } from "@/lib/wallpaperRender";
 
 /** A layer's image on a machine. */
@@ -43,32 +47,45 @@ export interface ImageRow {
 
 export type ImageState = "never" | "building" | "built" | "changed";
 
-/** How a layer's image stands on the machine: built from the layer as it is
- *  now (and, for a customization, on its template's image as it is now). */
+/**
+ * How a layer's image stands on the machine: built from the layer as it is
+ * now, on what's under it as that is now (a template on its parent's image,
+ * an Extensions layer on its template's), all the way down. A template on
+ * the base is taken as built on it (the base comes on the update drive).
+ */
 export function imageState(key: LayerKey, lib: Library, images: Partial<Record<LayerKey, ImageRow>>, building: ReadonlySet<string>): ImageState {
   if (building.has(key)) return "building";
   const row = images[key];
   if (!row) return "never";
+  const under = (parentKey: LayerKey | null, sha: string): ImageState => {
+    if (row.dockerfileSha !== sha) return "changed";
+    if (!parentKey) return "built";
+    const parent = images[parentKey];
+    if (!parent || parent.id !== row.from) return "changed";
+    const p = imageState(parentKey, lib, images, building);
+    return p === "built" ? "built" : "changed";
+  };
   if (key.startsWith("template:")) {
     const t = lib.templates.find((x) => x.id === key.slice(9));
     if (!t) return "built";
-    return row.dockerfileSha === templateLayer(t).sha ? "built" : "changed";
+    const chain = chainOf(lib, t.id);
+    const parent = chain.length > 1 ? chain[chain.length - 2] : null;
+    return under(parent ? `template:${parent.id}` : null, templateLayer(t, parent).sha);
   }
-  const c = lib.customizations.find((x) => x.id === key.slice(7));
-  const t = c && lib.templates.find((x) => x.id === c.templateId);
-  if (!c || !t) return "built";
-  const parent = images[`template:${t.id}`];
-  return row.dockerfileSha === extensionsLayer(c, t).sha && !!parent && parent.id === row.from ? "built" : "changed";
+  const e = lib.extensions.find((x) => x.id === key.slice(7));
+  const t = e && lib.templates.find((x) => x.id === e.templateId);
+  if (!e || !t) return "built";
+  return under(`template:${t.id}`, extensionsLayer(e, t).sha);
 }
 
 /** The image rows by layer. */
 export const byLayer = (rows: ImageRow[]): Partial<Record<LayerKey, ImageRow>> => Object.fromEntries(rows.map((r) => [r.layer, r]));
 
-/** What a throwaway run has instead of its wadspace's own. */
+/** What a throwaway run has instead of its wadspace's own: its background, and keys by slot. */
 export interface RunOverrides {
   wallpaper: Wallpaper;
-  projects: string[];
-  secrets: Record<string, SignInRef>;
+  /** Its keys by slot ("app:<id>", "ext:<id>"); WadBrowser's groups are its wadspace's. */
+  bySlot: Record<string, SignInRef>;
 }
 
 /** A WadBrowser to launch: one of the machine's own (WadBrowser, WadBrowser
@@ -97,20 +114,9 @@ export const DEFAULT_BROWSERS: BrowserConfig[] = [
 /** wadd's own app for a default WadBrowser. */
 export const DEFAULT_BROWSER_APPS: Record<string, string> = { wadbrowser: "browser", "wadbrowser-focus": "browser-focus" };
 
-/** A saved sign-in a slot uses, as wadd mounts it: the app it's for (a web
- *  app's id, VS Code for an extension's, else the app), by slot. */
-export function workspaceSignIns(secrets: Record<string, SignInRef>) {
-  return Object.entries(secrets).map(([slot, r]) => {
-    const [prefix, rest] = slot.split(/:(.*)/s);
-    return {
-      id: r.id,
-      app: prefix === "ext" ? "vscode" : rest,
-      ...(prefix === "web" && { web: true }),
-      name: r.name,
-      kind: r.kind,
-      slot,
-    };
-  });
+/** A WadBrowser setup's sign-ins as wadd mounts them: each web app's, by slot. */
+export function browserSignIns(secrets: Record<string, SignInRef>) {
+  return Object.entries(secrets).map(([slot, r]) => ({ id: r.id, app: slot.replace(/^web:/, ""), web: true, name: r.name, kind: r.kind, slot }));
 }
 
 /** A wallpaper as wadd takes it: drawn here (gradients and colours too). */
@@ -125,54 +131,102 @@ function base64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-/** wadd's LaunchItem for what the launcher starts. */
-export async function launchItem(item: RunItem, opts: { background: boolean; projectsOf: (id: string) => string[] }): Promise<Record<string, unknown>> {
+/** wadd's LaunchItem for what the launcher starts. A run's sign-ins are its
+ *  wadspace's with the run's keys by slot, as wad-core installs them. */
+export async function launchItem(item: RunItem, opts: { background: boolean; lib: Library & { wadspaces: Wadspace[] } }): Promise<Record<string, unknown>> {
   const { background } = opts;
   if (item.kind === "terminal") return { kind: "terminal", background };
   if (item.kind === "browser") {
     const c = item.config;
     const plain = DEFAULT_BROWSER_APPS[c.id];
-    if (plain && !item.savedId && !c.webapps.length) return { kind: "workspace", workspace: plain, projects: [], background };
-    const setup = {
-      name: c.name,
-      mode: c.mode,
-      webapps: c.webapps,
-      signins: workspaceSignIns(c.secrets).map((s) => ({ ...s, web: true })),
-    };
+    if (plain && !item.savedId && !c.webapps.length) return { kind: "workspace", workspace: plain, background };
+    const setup = { name: c.name, mode: c.mode, webapps: c.webapps, signins: browserSignIns(c.secrets) };
     return { kind: "browser", setup, ...(item.savedId && { savedId: item.savedId }), background };
   }
-  if (!item.overrides) return { kind: "workspace", workspace: item.wadspaceId, projects: opts.projectsOf(item.wadspaceId), background };
+  if (!item.overrides) return { kind: "workspace", workspace: item.wadspaceId, background };
   const o = item.overrides;
-  return {
-    kind: "run",
-    from: item.wadspaceId,
-    overrides: { wallpaper: await wallpaperUpload(o.wallpaper), projects: o.projects, signins: workspaceSignIns(o.secrets) },
-    background,
-  };
+  const w = opts.lib.wadspaces.find((x) => x.id === item.wadspaceId);
+  const r = w && resolveStack(opts.lib, w);
+  const keys: StackKeys = { ...w?.customization?.secrets, bySlot: o.bySlot };
+  const signins = w?.customization && r ? workspaceFor({ ...w, customization: { ...w.customization, secrets: keys } }, r.template, r.setup, {}).signins : [];
+  return { kind: "run", from: item.wadspaceId, overrides: { wallpaper: await wallpaperUpload(o.wallpaper), signins }, background };
 }
 
-/** PUT /v1/wadspaces/{id}: the wadspace and the layers it's on. */
+/** Why a stack can't be installed or built yet, or null. */
+export function notReady(w: Wadspace, lib: Library): string | null {
+  if (!w.template) return "It needs a template with apps.";
+  if (!resolveStack(lib, w)) return "Its template is gone.";
+  if (!w.customization) return "It needs a customization.";
+  if (!w.customization.name.trim()) return "Its customization needs a name.";
+  return null;
+}
+
+/** PUT /v1/wadspaces/{id}: the stack and the layers it's on. */
 export function installBody(w: Wadspace, lib: Library, tz: string) {
-  const r = resolve(lib, w.base);
-  if (!r) throw new Error(`${w.name}'s template or customization is gone.`);
-  return { wadspace: w, template: r.template, customization: r.customization ?? null, tz };
+  const r = resolveStack(lib, w);
+  if (!r) throw new Error(`${w.customization?.name || "That wadspace"}'s template is gone.`);
+  return { wadspace: w, template: r.template, extensions: r.extensions ?? null, tz };
 }
 
-/** The layer build request: a template's, or a customization's (its template with it). */
-export function layerRequest(key: LayerKey, lib: Library): { layer: LayerKey; template: Template; customization: Customization | null } {
-  if (key.startsWith("template:")) {
-    const template = lib.templates.find((t) => t.id === key.slice(9));
-    if (!template) throw new Error("That template is gone.");
-    return { layer: key, template, customization: null };
+/** The layer build request: a template's (with the templates it builds on), or an
+ *  Extensions layer's (its template and those under it with it). */
+export function layerRequest(key: LayerKey, lib: Library): { layer: LayerKey; template: Template; parents: Template[]; extensions: Extensions | null } {
+  const on = (tid: string) => {
+    const chain = chainOf(lib, tid);
+    if (!chain.length) throw new Error("That template is gone.");
+    return { template: chain[chain.length - 1], parents: chain.slice(0, -1) };
+  };
+  if (key.startsWith("template:")) return { layer: key, ...on(key.slice(9)), extensions: null };
+  const extensions = lib.extensions.find((c) => c.id === key.slice(7));
+  if (!extensions) throw new Error("Those Extensions are gone.");
+  return { layer: key, ...on(extensions.templateId), extensions };
+}
+
+/** The image a stack runs on, or null without a template. */
+export const layerOf = (w: Pick<Wadspace, "template" | "extensions">): LayerKey | null => stackImageKey(w) || null;
+
+/** A stack's name: its customization's, else what's under it. */
+export const wadspaceName = (w: Wadspace, lib?: Library) =>
+  w.customization?.name.trim() ||
+  (lib && w.extensions && lib.extensions.find((e) => e.id === w.extensions)?.name) ||
+  (lib && w.template && lib.templates.find((t) => t.id === w.template)?.name) ||
+  w.draftTemplate?.name ||
+  "Untitled";
+
+/** Something that uses a saved sign-in: a stack (by a slot or a WadBrowser
+ *  key group), or a WadBrowser setup; `what` in it, e.g. "Claude Code" or
+ *  "WadBrowser, Gmail". */
+export interface KeyUser {
+  kind: "wadspace" | "browser";
+  id: string;
+  name: string;
+  what: string;
+}
+
+/** Who uses each saved sign-in, by its id (deleted ones left out). */
+export function keyUse(lib: Library & { wadspaces: Wadspace[]; browsers: BrowserSetup[] }): Record<string, KeyUser[]> {
+  const out: Record<string, KeyUser[]> = {};
+  const add = (id: string, u: KeyUser) => (out[id] ??= []).push(u);
+  const slotName = (slot: string) => {
+    const [kind, id] = slot.split(/:(.*)/s);
+    return kind === "ext" ? extensionById(id).name : (appById(id)?.name ?? id);
+  };
+  for (const w of lib.wadspaces.filter((x) => !x.deletedAt && x.customization)) {
+    const keys = w.customization!.secrets;
+    const name = wadspaceName(w);
+    for (const [slot, r] of Object.entries(keys.bySlot)) add(r.id, { kind: "wadspace", id: w.id, name, what: slotName(slot) });
+    const webapps = resolveStack(lib, w)?.setup.webapps ?? [];
+    for (const g of keys.groups ?? []) {
+      if (!g.key || !g.members.length) continue;
+      const what = g.members.map((m) => (m === "browser" ? "WadBrowser" : (webapps.find((x) => `web:${x.id}` === m)?.name ?? m.replace(/^web:/, "")))).join(", ");
+      add(g.key.id, { kind: "wadspace", id: w.id, name, what });
+    }
   }
-  const customization = lib.customizations.find((c) => c.id === key.slice(7));
-  const template = customization && lib.templates.find((t) => t.id === customization.templateId);
-  if (!customization || !template) throw new Error("That customization or its template is gone.");
-  return { layer: key, template, customization };
+  for (const b of lib.browsers.filter((x) => !x.deletedAt)) {
+    for (const [slot, r] of Object.entries(b.secrets)) add(r.id, { kind: "browser", id: b.id, name: b.name, what: b.webapps.find((x) => `web:${x.id}` === slot)?.name ?? slot });
+  }
+  return out;
 }
-
-/** The base a wadspace is on, as a layer key. */
-export const layerOf = (base: BaseRef): LayerKey => imageKey(base);
 
 /** Saved setups' fields a WadBrowser launch carries. */
 export const configOf = (b: BrowserSetup): BrowserConfig => ({ id: b.id, name: b.name, mode: b.mode, webapps: b.webapps, secrets: b.secrets });
