@@ -1,10 +1,12 @@
 # Example wadspaces
 
-Two real wadspaces as the Builder keeps them: each `layers.json` holds the
-template, the customization (when there is one) and the wadspace documents,
-as `crates/wad-core/src/layers.rs` reads them.
+Two real wadspaces' layers: each `layers.json` holds the template, its
+Extensions layer when there is one (under `customization`, its name from
+before the layer was called Extensions) and the wadspace (a version 2
+document), as `cargo xtask layer` and `crates/wad-core/src/layers.rs` read
+them.
 
-| Example | Template | Customization | The wadspace |
+| Example | Template | Extensions | The wadspace |
 |---|---|---|---|
 | `cosmic-bodybuilding` | Writing (Obsidian) | none | its own background and the Writing project; Obsidian's sign-in isn't saved |
 | `vanua-academy` | Dev (WadBrowser, VS Code) | VanuaAcademy Dev: Claude Code, the Firebase CLI, seven web apps | the VanuaAcademy project and named saved sign-ins, two of them shared (one Google sign-in for Firebase and Cloud, the Workspace one for Gmail, Drive and Workspace) |

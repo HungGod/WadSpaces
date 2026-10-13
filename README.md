@@ -5,13 +5,13 @@ The software that runs a WadSpaces machine, and the WadSpaces Client, the app us
 | Path | What it is |
 |---|---|
 | `apps/wadd/` | wadd, the machine daemon: workspaces, the Builder's layer images and installs, launches (wadspaces, throwaway runs, WadBrowser setups, the terminal), projects, saved sign-ins, the account link. Its API is `/v1` over `/run/wadd/wadd.sock`. |
-| `apps/client/` | The WadSpaces Client (the program is `client`, `/usr/bin/client` on a machine): the React UI, with the Builder (templates, customizations, wadspaces) and the launcher. It's built for three targets (`src/lib/machine.ts`): the web portal (`online`, `wad-spaces.web.app`), the machine app (`machine`, inside Tauri: the kiosk's shell), and `offline` (in Tauri with no account, `npm run app:offline`). The Firebase function and Firestore rules are here too. |
+| `apps/client/` | The WadSpaces Client (the program is `client`, `/usr/bin/client` on a machine): the React UI, with the Builder (a board of stacks: templates, Extensions, Customizations) and the launcher. It's built for three targets (`src/lib/machine.ts`): the web portal (`online`, `wad-spaces.web.app`), the machine app (`machine`, inside Tauri: the kiosk's shell), and `offline` (in Tauri with no account, `npm run app:offline`). The Firebase function and Firestore rules are here too. |
 | `apps/client/src-tauri/` | The machine app: Tauri around the same React UI. Its Rust side holds the commands the UI calls (`src/gen/bindings.ts` is generated from them). |
 | `apps/hud/` | The HUD: the bar above every wadspace (Home, Wi-Fi, brightness and volume, power, the clock; it tucks away behind an arrow), and the switcher (what runs, spaces then apps, each with its Super+number), Wi-Fi, power and clipboard-history (Super+V) overlays. WadNotes is built into it (`src/notes/`): notes and tasks for the wadspace on screen (or the machine's own, "Default": WadSpaces Client, WadTerminal, WadBrowser), a calendar shared by all of them, and reminders. They sit side by side at the top right; the bar's WadNotes button puts them away and brings them back, and its menu (hover, or a long press) turns each on or off and picks the notespace. |
 | `apps/wadbrowser/` | WadBrowser, the WadSpaces web browser (Tauri chrome, WebKitGTK tabs). It's in the lean base image, and on the machine itself as an app, with instances for saved WadBrowser setups. |
 | `crates/` | Shared Rust crates:<br>• `wad-proto`: types shared by wadd, the app and the UI<br>• `wad-core`: the Builder's layers (`layers.rs`), its catalog and starter templates (`data/`), sign-in kinds, and the generators; also compiled to wasm for the UI<br>• `wad-config`<br>• `wad-store`: wadd's state files<br>• `wad-podman`, `wad-systemd`, `wad-sway`<br>• `wad-input`: the keyboard proxy<br>• `wad-git`: project clones and fast-forwards<br>• `wad-net`: Wi-Fi through NetworkManager<br>• `wad-github`: GitHub's REST calls (whose token, repos, new repos)<br>• `wad-firebase`: Firestore from Rust<br>• `wad-clip`: one clipboard for the machine (each wadspace's `wadspaces-clipboard` bridge, and the HUD's history)<br>• `wad-notes`: WadNotes' files: markdown notes and tasks per wadspace, the calendar's events, reminders and each wadspace's colour |
 | `host/` | The machine's OS image (Fedora bootc, sway, WadSpaces Client as the shell), and `host/build.sh` to build it and write it to a drive. Two apps run on the machine itself (`usr/lib/wadspaces/workspaces.d/{terminal,browser}.toml`: workspaces of kind `app`): WadTerminal (foot) and WadBrowser. wadd opens and closes them like wadspaces, each in a transient unit `wad-<id>.service` as the kiosk user, full screen and on Super+Tab, but with no Super+number. |
-| `images/` | The base image every template is built on (`base`: the lean desktop, WadBrowser, and a feature script per catalog app). `images/build.sh` builds it; templates and customizations are built from it by wadd. `examples/` has two real wadspaces' layers (Cosmic Bodybuilding, VanuaAcademy). |
+| `images/` | The base image every template is built on (`base`: the lean desktop, WadBrowser, and a feature script per catalog app). `images/build.sh` builds it; templates (one on another) and Extensions layers are built from it by wadd. `examples/` has two real wadspaces' layers (Cosmic Bodybuilding, VanuaAcademy). |
 | `fixtures/` | What every renderer must reproduce:<br>• unit files (`quadlet/`)<br>• the core's goldens (`core/`), shared by wad-core and the client |
 
 ## Tests
@@ -56,10 +56,10 @@ apps/wadd/dev/try-view.sh      # the screen: a headless sway with the machine's 
                                # workspace's window: switching, Super+Tab, focus sessions
 apps/wadd/dev/try-apps.sh      # the machine's own apps (foot, WadBrowser) in the headless sway:
                                # full screen, Super+Tab, restart, stop, and exiting by themselves
-apps/wadd/dev/try-projects.sh  # projects: a GitHub clone, a folder and a loop-device "stick",
-                               # launched together into a workspace
-apps/wadd/dev/try-layers.sh    # the Builder's layers: a customization built (its template first),
-                               # a wadspace installed on it, opened, then a throwaway run of it
+apps/wadd/dev/try-projects.sh  # projects in a wadspace: GitHub repos cloned (and fast-forwarded)
+                               # and files copied in by the wadspace itself; a throwaway run
+apps/wadd/dev/try-layers.sh    # the Builder's layers: Extensions built (their template first), a
+                               # template on a template, a stack installed, opened, a throwaway run
 apps/wadd/dev/try-cloud.sh     # the account link, against the Firebase emulators (real rules and
                                # enrollMachine): link, heartbeat, commands, project and secret sync
 apps/wadd/dev/try-network.sh   # NetworkManager for real: status and networks in range

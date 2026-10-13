@@ -1,262 +1,139 @@
+// Projects: what wadspaces start with in ~/Desktop. Nothing is mounted: your
+// GitHub repositories are cloned into the wadspaces whose Customization has
+// them (and fast-forwarded at each start when that's safe), and files from a
+// machine are copied in once. Here: your repositories (and which wadspaces
+// clone each), a new one, and the copies wadspaces take in. They're added to
+// a wadspace in the Builder, in its Customization.
 import { useCallback, useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronDown, Cloud, Folder, FolderGit2, GitBranch, HardDrive, MonitorCheck, MonitorX, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
-import clsx from "clsx";
+import { useNavigate } from "react-router";
+import { FolderGit2, HardDriveDownload, Lock, Plus, RefreshCw } from "lucide-react";
 import { Page } from "@/components/Page";
-import { DeleteProject } from "@/components/DeleteProject";
-import { ProjectDialog, SourceIcon } from "@/components/ProjectDialog";
-import { AddFromGithub, GITHUB_NEW, GithubTokenCallout, NewRepoDialog, NewRepoOnlineNote, OutLink } from "@/components/GithubRepos";
-import { AddDriveDialog, AddFolderDialog } from "@/components/HostFolders";
-import { Badge, Button, Dropdown, EmptyState, IconButton, PageHeader } from "@/components/ui";
+import { GITHUB_NEW, GithubTokenCallout, NewRepoDialog, OutLink } from "@/components/GithubRepos";
+import { Badge, Button, EmptyState, PageHeader } from "@/components/ui";
 import { backend } from "@/data";
+import type { GithubRepoList } from "@/data/backend";
 import { wadspaceName } from "@/data/layers";
-import type { GithubStatus } from "@/data/backend";
-import { sourceLabel, sourcePath, type Project, type ProjectStatus } from "@core/projects";
-import { useApp } from "@/lib/store";
-import { hasLocal } from "@/lib/machine";
+import type { StackProject, Wadspace } from "@core/layers";
+import { timeAgo } from "@/lib/format";
+import { alive, useApp } from "@/lib/store";
 
-type Adding = "github" | "github-new" | "folder" | "drive";
+const sizeOf = (bytes = 0) => (bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`);
 
-/** The user's projects: GitHub repositories, folders and drives that wadspaces open on their Desktop. */
+type Copy = Extract<StackProject, { kind: "copy" }>;
+
 export default function ProjectsPage() {
-  const projects = useApp((s) => s.projects);
   const wadspaces = useApp((s) => s.wadspaces);
-  const machines = useApp((s) => s.machines);
-  const toast = useApp((s) => s.toast);
-  const [editing, setEditing] = useState<Project | null>(null);
-  const [deleting, setDeleting] = useState<Project | null>(null);
-  const [adding, setAdding] = useState<Adding | null>(null);
+  const navigate = useNavigate();
+  const [list, setList] = useState<GithubRepoList | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [status, setStatus] = useState<Record<string, ProjectStatus | null>>({});
-  const [github, setGithub] = useState<GithubStatus | null>(null);
-  const [checking, setChecking] = useState(false);
-  const offline = hasLocal;
 
-  // Offline, each project's folder on this machine (refreshed as wadspaces start and stop).
-  useEffect(() => {
-    if (!offline || !backend.caps.projects) return;
-    let off = false;
-    Promise.all(projects.map(async (p) => [p.id, await backend.projectStatus(p.id).catch(() => null)] as const)).then((rows) => !off && setStatus(Object.fromEntries(rows)));
-    return () => {
-      off = true;
-    };
-  }, [offline, projects, machines]);
-
-  // Is there a token (offline), or a list your machines shared (online).
-  const checkGithub = useCallback(async () => {
-    if (!backend.caps.projects) return;
-    setChecking(true);
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      setGithub(await backend.githubStatus());
-    } catch {
-      setGithub(null);
+      setList(await backend.listGithubRepos());
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
-      setChecking(false);
+      setLoading(false);
     }
   }, []);
   useEffect(() => {
-    checkGithub();
-    return backend.subscribe((t) => t === "github" && checkGithub());
-  }, [checkGithub]);
+    void load();
+    return backend.subscribe((t) => t === "github" && void load());
+  }, [load]);
 
-  const name = (wsId: string) => {
-    const w = wadspaces.find((x) => x.id === wsId);
-    return w ? wadspaceName(w) : wsId;
+  // Who has what: each wadspace's projects.
+  const stacks = alive(wadspaces).filter((w) => w.customization);
+  const cloning = (repo: string) => stacks.filter((w) => w.customization!.projects.some((p) => p.kind === "github" && p.repo.toLowerCase() === repo.toLowerCase()));
+  const copies = new Map<string, { p: Copy; in: Wadspace[] }>();
+  for (const w of stacks) for (const p of w.customization!.projects) if (p.kind === "copy") copies.set(p.id, { p, in: [...(copies.get(p.id)?.in ?? []), w] });
+  const chips = (ws: Wadspace[]) =>
+    ws.map((w) => (
+      <button key={w.id} type="button" onClick={() => navigate(`/builder?stack=${encodeURIComponent(w.id)}`)} title="Open it in the Builder">
+        <Badge tone="accent-2">In {wadspaceName(w)}</Badge>
+      </button>
+    ));
+  const refresh = async () => {
+    await backend.refreshGithubRepos?.().catch(() => 0);
+    await load();
   };
-
-  const newRepo = () => {
-    if (offline) return setCreating(true);
-    // Online there's no token here: GitHub makes it, a machine lists it, you pick it.
-    window.open(GITHUB_NEW, "_blank", "noreferrer");
-    setAdding("github-new");
-  };
-  /** Folders and drives are picked on the machine they're on. */
-  const onMachine = () => toast({ title: "Add it on that machine", body: "Folders and drives are picked in WadSpaces on the machine they're on (Projects → Add)." });
 
   return (
     <Page>
       <PageHeader
         title="Projects"
-        subtitle={
-          offline
-            ? "Your work: GitHub repositories, folders and drives. A wadspace opens the ones you pick on its Desktop, and the files stay put when it stops."
-            : "Your work: GitHub repositories, folders and drives. A wadspace opens the ones you pick on its Desktop."
-        }
+        subtitle="What your wadspaces start with in ~/Desktop. Your GitHub repositories are cloned into them and files from a machine are copied in: nothing is mounted. Add them to a wadspace in the Builder, in its Customization."
       >
-        {backend.caps.projects && (
-          <>
-            <Button onClick={newRepo}>
-              <Plus className="size-4" /> New repo
-            </Button>
-            <Dropdown
-              trigger={(open) => (
-                <Button variant="primary">
-                  <Plus className="size-4" /> Add <ChevronDown className={clsx("size-4 transition-transform", open && "rotate-180")} />
-                </Button>
-              )}
-              items={[
-                { label: "From GitHub", icon: <FolderGit2 />, onClick: () => setAdding("github") },
-                { label: offline ? "Folder on this machine" : "Folder on a machine", icon: <Folder />, onClick: () => (offline ? setAdding("folder") : onMachine()) },
-                { label: "Drive", icon: <HardDrive />, onClick: () => (offline ? setAdding("drive") : onMachine()) },
-              ]}
-            />
-          </>
-        )}
+        <Button variant="ghost" onClick={() => void refresh()} disabled={loading}>
+          <RefreshCw className="size-4" /> Refresh
+        </Button>
+        <Button variant="primary" onClick={() => (backend.target === "online" ? window.open(GITHUB_NEW, "_blank", "noreferrer") : setCreating(true))}>
+          <Plus className="size-4" /> New repository
+        </Button>
       </PageHeader>
 
-      {!offline && (
-        <p className="mb-6 flex items-start gap-2.5 rounded-2xl bg-surface-2/60 px-4 py-3 text-sm text-muted ring-1 ring-line">
-          <Cloud className="mt-0.5 size-4 shrink-0 text-accent" />
-          The files are on your machines and GitHub, not here. A machine clones a repository the first time a wadspace opens it there, and pulls when it opens it again if
-          nothing's uncommitted or unpushed. A folder opens on its machine, a drive wherever it's plugged in.
-        </p>
-      )}
-
-      {backend.caps.projects && github && !github.token && (
-        <div className="mb-6">
-          <GithubTokenCallout missing={offline ? "token" : "shared"} onRetry={offline ? checkGithub : () => setAdding("github")} busy={checking} />
-        </div>
-      )}
-      {backend.caps.projects && github?.token && github.error && (
-        <p className="mb-6 rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger ring-1 ring-danger/30">GitHub: {github.error}</p>
-      )}
-
-      {!backend.caps.projects ? (
-        <EmptyState
-          icon={<FolderGit2 className="size-6" />}
-          title="Not on this machine yet"
-          body="This machine's wadd predates projects. Update the system (a stick update) to use them."
-        />
-      ) : !projects.length ? (
-        <EmptyState
-          icon={<FolderGit2 className="size-6" />}
-          title="No projects yet"
-          body="Add one of your GitHub repositories (or make a new one), a folder or a drive. Then pick it for a wadspace in the Builder (Step 3), or for one run in the launcher."
-          action={
-            <Button variant="primary" onClick={() => setAdding("github")}>
-              <FolderGit2 className="size-4" /> Add from GitHub
-            </Button>
-          }
-        />
+      <h2 className="mb-3 font-display text-base font-semibold">GitHub repositories{list?.login ? ` (${list.login})` : ""}</h2>
+      {list?.missing ? (
+        <GithubTokenCallout missing={list.missing} onRetry={() => void load()} busy={loading} />
+      ) : error ? (
+        <p className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger ring-1 ring-danger/30">{error}</p>
+      ) : !list ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : !list.repos.length ? (
+        <EmptyState icon={<FolderGit2 className="size-6" />} title="No repositories yet" body="Make one, then clone it into a wadspace from its Customization in the Builder." />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {projects.map((p) => {
-            const st = status[p.id];
-            const defaults = wadspaces.filter((w) => !w.deletedAt && w.customization?.projects.some((x) => x.id === p.id));
-            const where = sourcePath(p.source);
-            return (
-              <div key={p.id} className="flex flex-col rounded-2xl border border-line bg-surface/70 p-4 transition-colors hover:border-line-strong">
-                <div className="flex items-start gap-3">
-                  <span className={clsx("grid size-10 shrink-0 place-items-center rounded-xl", p.legacy ? "bg-surface-3 text-faint" : "bg-accent-soft text-accent")}>
-                    <SourceIcon project={p} className="size-5" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-display text-[15px] font-semibold">{p.name}</div>
-                    <div className="truncate font-mono text-xs text-muted">~/Desktop/{p.mountName}</div>
+        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+          {list.repos.map((r) => (
+            <div key={r.fullName} className="flex flex-col rounded-2xl border border-line bg-surface/70 p-4">
+              <div className="flex items-start gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
+                  <FolderGit2 className="size-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <OutLink href={r.url} className="truncate font-medium">
+                      {r.fullName}
+                    </OutLink>
+                    {r.private && <Lock className="size-3.5 shrink-0 text-faint" aria-label="Private" />}
                   </div>
-                  {!p.legacy && (
-                    <IconButton label="Edit" onClick={() => setEditing(p)}>
-                      <Pencil className="size-4" />
-                    </IconButton>
-                  )}
-                  <IconButton label="Delete" onClick={() => setDeleting(p)}>
-                    <Trash2 className="size-4" />
-                  </IconButton>
-                </div>
-                <div className="mt-3 space-y-1 text-xs text-muted">
-                  {p.legacy ? (
-                    <div className="flex items-start gap-1.5 text-accent-2">
-                      <TriangleAlert className="mt-px size-3.5 shrink-0" />
-                      <span>Not a GitHub repo: an empty folder from before projects were repositories. Wadspaces still open it where it is; push the work to a repository, add that, and delete this.</span>
-                    </div>
-                  ) : p.source.kind === "git" ? (
-                    <div className="truncate" title={p.source.url}>
-                      <OutLink href={p.source.url.replace(/\.git$/, "")} className="font-mono">
-                        {sourceLabel(p.source)}
-                      </OutLink>
-                      {p.source.ref && <> · {p.source.ref}</>}
-                    </div>
-                  ) : (
-                    <div className="truncate" title={where ?? undefined}>
-                      {sourceLabel(p.source)} · <span className="font-mono">{where}</span>
-                    </div>
-                  )}
-                  {p.setup && (
-                    <div className="truncate">
-                      Setup: <span className="font-mono">{p.setup}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {offline && st && <FolderState p={p} st={st} />}
-                  {offline && st?.mountedIn.filter((id) => !defaults.some((w) => w.id === id)).map((id) => <Badge key={id}>In {name(id)}</Badge>)}
-                  {defaults.map((w) => (
-                    <Badge key={w.id} tone="accent-2">
-                      In {wadspaceName(w)}
-                    </Badge>
-                  ))}
+                  <div className="truncate text-xs text-muted">{r.description || (r.pushedAt ? `Pushed ${timeAgo(r.pushedAt)}` : "")}</div>
                 </div>
               </div>
-            );
-          })}
+              <div className="mt-3 flex flex-wrap gap-1.5">{chips(cloning(r.fullName))}</div>
+            </div>
+          ))}
         </div>
       )}
 
-      <ProjectDialog project={editing} onClose={() => setEditing(null)} />
-      <AddFromGithub open={adding === "github" || adding === "github-new"} onClose={() => setAdding(null)} intro={adding === "github-new" ? <NewRepoOnlineNote /> : undefined} />
-      {offline && (
-        <>
-          <NewRepoDialog open={creating} onClose={() => setCreating(false)} />
-          <AddFolderDialog open={adding === "folder"} onClose={() => setAdding(null)} />
-          <AddDriveDialog open={adding === "drive"} onClose={() => setAdding(null)} />
-        </>
-      )}
-      <DeleteProject project={deleting} status={deleting ? status[deleting.id] : null} onClose={() => setDeleting(null)} />
-    </Page>
-  );
-}
-
-/** The project on this machine: whether it can open here, and a clone's branch and what's not in step with GitHub. */
-function FolderState({ p, st }: { p: Project; st: ProjectStatus }) {
-  if (!st.available) {
-    return (
-      <Badge>
-        <MonitorX className="size-3" /> {st.reason ? `Not here: ${st.reason}` : "Not on this machine"}
-      </Badge>
-    );
-  }
-  const g = st.git;
-  return (
-    <>
-      {!st.existsOnDisk ? (
-        <Badge>
-          <HardDrive className="size-3" /> {p.source.kind === "git" ? "Not cloned on this machine yet" : "Not found on this machine"}
-        </Badge>
+      <h2 className="mb-3 mt-10 font-display text-base font-semibold">Copied in</h2>
+      {copies.size ? (
+        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+          {[...copies.values()].map(({ p, in: ws }) => (
+            <div key={p.id} className="flex flex-col rounded-2xl border border-line bg-surface/70 p-4">
+              <div className="flex items-start gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-3 text-muted">
+                  <HardDriveDownload className="size-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">~/Desktop/{p.as}</div>
+                  <div className="truncate text-xs text-muted">
+                    {p.source.drive ? `from the drive ${p.source.drive.label || p.source.drive.uuid}` : `from ${p.source.paths.join(", ")}`}
+                    {p.files ? ` · ${p.files} files, ${sizeOf(p.bytes)}` : " · copied when it first starts there"}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5">{chips(ws)}</div>
+            </div>
+          ))}
+        </div>
       ) : (
-        !g && (
-          <Badge tone="accent">
-            <MonitorCheck className="size-3" /> {p.source.kind === "drive" ? "Plugged in here" : "On this machine"}
-          </Badge>
-        )
+        <p className="text-sm text-muted">No copies yet. In the Builder, a Customization&apos;s Projects copies a folder or files in from the machine.</p>
       )}
-      {g && (
-        <>
-          <Badge tone="accent">
-            <GitBranch className="size-3" /> {g.branch ?? "detached"}
-          </Badge>
-          {g.dirty && <Badge tone="accent-2">uncommitted changes</Badge>}
-          {g.ahead > 0 && (
-            <Badge tone="accent-2">
-              <ArrowUp className="size-3" /> {g.ahead} to push
-            </Badge>
-          )}
-          {g.behind > 0 && (
-            <Badge>
-              <ArrowDown className="size-3" /> {g.behind} behind
-            </Badge>
-          )}
-          {!g.upstream && p.source.kind === "git" && <Badge>no upstream</Badge>}
-        </>
-      )}
-    </>
+
+      <NewRepoDialog open={creating} onClose={() => setCreating(false)} onCreated={() => void load()} />
+    </Page>
   );
 }
