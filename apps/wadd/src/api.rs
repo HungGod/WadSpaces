@@ -514,7 +514,7 @@ async fn images(State(app): State<Arc<AppState>>) -> Result<Json<Vec<ImageRow>>,
     Ok(Json(crate::images::list(app.registry_backend.as_ref()).await?))
 }
 
-/// Builds a layer's image (a customization's template first when needed).
+/// Builds a layer's image (what it builds on first, when needed).
 async fn image_build(
     State(app): State<Arc<AppState>>,
     Json(req): Json<LayerBuildRequest>,

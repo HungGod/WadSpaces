@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # The Builder's layers for real, on this laptop, as you: wadd (with your
-# rootless podman) builds a customization of the Dev template (WadBrowser and
-# VS Code), which builds the template first; the images are listed with their
-# labels; a wadspace is installed on the customization with a wallpaper given
-# at run time, and opened in a headless sway (desktop.png: its icons, the
-# wallpaper, the Start button's logo); VS Code's extension is in its home;
-# then a throwaway run of it is launched, stopped, and gone.
+# rootless podman) builds an Extensions layer on the Dev template (WadBrowser
+# and VS Code), which builds the template first; then a template built on
+# Dev (adding Tiled), which builds on Dev's image without building Dev again;
+# the images are listed with their labels; a wadspace (a stack) is installed
+# on the Extensions with a wallpaper given at run time, and opened in a
+# headless sway (desktop.png: its icons, the wallpaper, the Start button's
+# logo); VS Code's extension is in its home; then a throwaway run of it is
+# launched, stopped, and gone.
 #
 #   apps/wadd/dev/try-layers.sh
 #   KEEP=1 apps/wadd/dev/try-layers.sh     leave the images
@@ -52,7 +54,8 @@ finish() {
   done
   systemctl --user daemon-reload
   if [ -z "${KEEP:-}" ]; then
-    podman rmi -i localhost/wadspaces-custom-tryl-plus:latest localhost/wadspaces-template-tryl-dev:latest >/dev/null 2>&1 || true
+    podman rmi -i localhost/wadspaces-custom-tryl-plus:latest localhost/wadspaces-template-tryl-more:latest \
+      localhost/wadspaces-template-tryl-dev:latest >/dev/null 2>&1 || true
   fi
   stop_sway
 }
@@ -67,32 +70,52 @@ custom='{"id":"tryl-plus","owner":"me","name":"Try Dev plus","description":"","t
   "webapps":[{"id":"github","name":"GitHub","url":"https://github.com"}],"extensions":["esbenp.prettier-vscode"],
   "tools":["go"],"autostart":[],"createdAt":"t","updatedAt":"t"}'
 
-echo "== build the customization (its template first)"
-t0=$(date +%s)
-id=$(printf '{"layer":"custom:tryl-plus","template":%s,"customization":%s}' "$template" "$custom" | send POST /v1/images/build |
-  python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d.get("id") or sys.exit(str(d)))')
-for _ in $(seq 7200); do
-  out=$(curl -sS --unix-socket "$sock" "http://wadd/v1/builds/$id")
-  grep -q '"status":"\(done\|error\|cancelled\)"' <<<"$out" && break
-  sleep 0.5
-done
-python3 -I -c '
+# A build to its end; its result and its » / ✓ / ✗ lines.
+build() {
+  local id out
+  id=$(send POST /v1/images/build |
+    python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d.get("id") or sys.exit(str(d)))')
+  for _ in $(seq 7200); do
+    out=$(curl -sS --unix-socket "$sock" "http://wadd/v1/builds/$id")
+    grep -q '"status":"\(done\|error\|cancelled\)"' <<<"$out" && break
+    sleep 0.5
+  done
+  python3 -I -c '
 import json, sys
 l = json.load(sys.stdin); b = l["build"]
 print("status:", b["status"], b["error"] or "", "| layer:", b["layer"], "| progress:", round(b["progress"], 2))
 for line in l["lines"]:
-    if line.startswith(("»", "✓", "✗", "STEP")): print("  |", line[:110])' <<<"$out"
+    if line.startswith(("»", "✓", "✗", "STEP")): print("  |", line[:110])' <<<"$out" | tee "$dir/last-build.txt"
+  grep -q '"status":"done"' <<<"$out" || fail "the build failed"
+}
+
+echo "== build the Extensions (its template first)"
+t0=$(date +%s)
+printf '{"layer":"custom:tryl-plus","template":%s,"extensions":%s}' "$template" "$custom" | build
 echo "  took $(( $(date +%s) - t0 )) s"
-grep -q '"status":"done"' <<<"$out" || fail "the build failed"
+
+echo "== a template built on it: Try Dev plus Tiled"
+more='{"id":"tryl-more","owner":"me","name":"Try More","description":"","parent":"tryl-dev","apps":["wadbrowser","vscode","tiled"],"createdAt":"t","updatedAt":"t"}'
+t0=$(date +%s)
+printf '{"layer":"template:tryl-more","template":%s,"parents":[%s]}' "$more" "$template" | build
+echo "  took $(( $(date +%s) - t0 )) s"
+grep -q "the Try Dev template is built already" "$dir/last-build.txt" || fail "Try Dev was built again"
+dev_id=$(podman image inspect -f '{{.Id}}' localhost/wadspaces-template-tryl-dev:latest)
+more_from=$(podman image inspect -f '{{index .Labels "io.wadspaces.from"}}' localhost/wadspaces-template-tryl-more:latest)
+[ "$dev_id" = "$more_from" ] || fail "Try More isn't built on Try Dev's image ($more_from)"
+podman run --rm --entrypoint sh localhost/wadspaces-template-tryl-more:latest -c \
+  'command -v code >/dev/null && command -v tiled >/dev/null && echo "  VS Code (from Try Dev) and Tiled are both in it"' ||
+  fail "Try More is missing an app"
 
 echo "== the layer images"
 api GET /v1/images | python3 -I -c '
 import json, sys
 for r in json.load(sys.stdin): print("  ", r["layer"], r["ref"], r["dockerfileSha"][:12], "from", r["from"][:12], r["sizeMb"], "MB")'
 
-echo "== install a wadspace on it, with a wallpaper at run time"
-wadspace='{"version":2,"id":"tryl-space","owner":"me","name":"Try space","description":"","base":{"kind":"customization","id":"tryl-plus"},
-  "wallpaper":{"type":"color","value":"#205080"},"projects":[],"secrets":{},"createdAt":"t","updatedAt":"t"}'
+echo "== install a wadspace (a stack) on the Extensions, with a wallpaper at run time"
+wadspace='{"version":3,"id":"tryl-space","owner":"me","order":1,"template":"tryl-dev","extensions":"tryl-plus",
+  "customization":{"name":"Try space","description":"","wallpaper":{"type":"color","value":"#205080"},"projects":[],"secrets":{"bySlot":{}}},
+  "createdAt":"t","updatedAt":"t"}'
 # A WadSpaces-made wallpaper: a PNG of one colour.
 png=$(python3 -I -c '
 import base64, struct, zlib
@@ -101,7 +124,7 @@ raw = b"".join(b"\0" + bytes([0x20, 0x50, 0x80]) * w for _ in range(h))
 def chunk(t, d): return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
 png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 print(base64.b64encode(png).decode())')
-printf '{"wadspace":%s,"template":%s,"customization":%s,"tz":"Pacific/Fiji"}' "$wadspace" "$template" "$custom" |
+printf '{"wadspace":%s,"template":%s,"extensions":%s,"tz":"Pacific/Fiji"}' "$wadspace" "$template" "$custom" |
   send PUT /v1/wadspaces/tryl-space | python3 -I -c 'import json,sys; d=json.load(sys.stdin); w=d.get("workspace") or sys.exit(str(d)); print("  ", w["image"], [e for e in w["env"] if e[0].startswith("WALL")])'
 printf '{"ext":"png","data":"%s"}' "$png" | send PUT /v1/workspaces/tryl-space/wallpaper >/dev/null
 [ -f "$dir/state/extra/tryl-space/wallpaper.png" ] || fail "no wallpaper in the extra folder"

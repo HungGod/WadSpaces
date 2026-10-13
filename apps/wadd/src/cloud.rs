@@ -540,7 +540,7 @@ impl CloudRelay {
                 let req: crate::images::Install = serde_json::from_value(json!({
                     "wadspace": cmd.get("wadspace").cloned().unwrap_or(Value::Null),
                     "template": cmd.get("template").cloned().unwrap_or(Value::Null),
-                    "customization": cmd.get("customization").cloned().filter(|c| !c.is_null()),
+                    "extensions": cmd.get("extensions").or_else(|| cmd.get("customization")).cloned().filter(|c| !c.is_null()),
                     "tz": cmd.get("tz").cloned().filter(|t| !t.is_null()),
                 }))
                 .map_err(|e| e.to_string())?;
@@ -566,26 +566,49 @@ impl CloudRelay {
     }
 
     /// A `build` command's layer, with its documents: as sent, else read
-    /// from the owner's account.
+    /// from the owner's account (and the templates it builds on, read by
+    /// following each one's `parent`).
     async fn layer_request(&self, cmd: &Value) -> Result<wad_proto::v1::LayerBuildRequest, String> {
         let layer = s(cmd, "layer");
         let given = |k: &str| cmd.get(k).cloned().filter(Value::is_object);
-        let (mut template, mut customization) = (given("template"), given("customization"));
+        let (mut template, mut extensions) =
+            (given("template"), given("extensions").or_else(|| given("customization")));
         let (kind, id) = layer.split_once(':').ok_or_else(|| format!("{layer:?} isn't a layer"))?;
         if !wad_core::spec::is_id(id) {
             return Err(format!("{layer:?} isn't a layer"));
         }
-        if kind == "custom" && customization.is_none() {
-            customization = Some(self.owner_doc("customizations", id).await?);
+        if kind == "custom" && extensions.is_none() {
+            // Kept as "customizations" until the account moves to stacks.
+            extensions = Some(match self.owner_doc("extensions", id).await {
+                Ok(e) => e,
+                Err(_) => self.owner_doc("customizations", id).await?,
+            });
         }
         if template.is_none() {
-            let tid = match (kind, &customization) {
+            let tid = match (kind, &extensions) {
                 ("custom", Some(c)) => s(c, "templateId"),
                 _ => id.to_string(),
             };
             template = Some(self.owner_doc("templates", &tid).await?);
         }
-        Ok(wad_proto::v1::LayerBuildRequest { layer, template: template.unwrap_or_default(), customization })
+        let template = template.unwrap_or_default();
+        let mut parents: Vec<Value> = match cmd.get("parents").and_then(Value::as_array) {
+            Some(p) => p.clone(),
+            None => {
+                let mut up = Vec::new();
+                let mut next = s(&template, "parent");
+                while !next.is_empty() && up.len() < wad_core::layers::MAX_CHAIN {
+                    let t = self.owner_doc("templates", &next).await?;
+                    next = s(&t, "parent");
+                    up.push(t);
+                }
+                up
+            }
+        };
+        if cmd.get("parents").is_none() {
+            parents.reverse();
+        }
+        Ok(wad_proto::v1::LayerBuildRequest { layer, template, parents, extensions })
     }
 
     /// One of the owner's documents (users/{uid}/<collection>/<id>), with its id.

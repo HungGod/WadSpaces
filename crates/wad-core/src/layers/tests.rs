@@ -516,7 +516,7 @@ fn a_stack_installs_with_its_keys_and_each_group_member_signing_in_with_its_grou
     assert_eq!(ws["signins"][0]["kind"], "vscode");
     assert_eq!(
         ws["signins"][2],
-        json!({ "id": "s-mail", "app": "@browser", "web": true, "name": "Mail", "kind": "web", "slot": "group:mail" })
+        json!({ "id": "s-mail", "app": "@browser", "web": true, "name": "Mail", "kind": "web", "slot": "app:wadbrowser" })
     );
 }
 

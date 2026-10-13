@@ -1,12 +1,13 @@
 //! Building the Builder's layers on this machine: a template's image FROM
-//! the base, a customization's FROM its template's, each from wad-core's
-//! build folder (with its web apps' icons made here first, icons.rs: nothing
-//! is fetched inside the build). Each image is labelled with the sha of its
-//! build folder and the id of the image it was built on, which is how
-//! WadSpaces tells a built layer from a changed one. A customization whose
-//! template image is missing, or older than the template, builds the
-//! template first in the same job. Neither adds a workspace: a wadspace
-//! installs on its layer's image (images.rs, with `merged`).
+//! the base or the template it builds on, an Extensions layer's FROM its
+//! template's, each from wad-core's build folder (with its web apps' icons
+//! made here first, icons.rs: nothing is fetched inside the build). Each
+//! image is labelled with the sha of its build folder and the id of the
+//! image it was built on, which is how WadSpaces tells a built layer from a
+//! changed one. What a layer builds on is built first in the same job when
+//! its image is missing, from another build folder, or on an image that's
+//! since been rebuilt. None of it adds a workspace: a wadspace installs on
+//! its layer's image (images.rs, with `merged`).
 //!
 //! One build runs at a time; bases are never downloaded (they reach a
 //! machine on the update drive), and a build needs some free disk. Progress
@@ -137,8 +138,8 @@ pub struct LayerStep {
     pub files: Vec<(String, String)>,
     pub sha: String,
     pub icons: Vec<IconJob>,
-    /// A customization's template: built only when its image is missing or
-    /// was built from another build folder.
+    /// What the layer builds on: built only when its image is missing, was
+    /// built from another build folder, or on another image.
     pub if_needed: bool,
 }
 
@@ -163,39 +164,56 @@ fn layer_step(layer: &Value, name: &str, icons: Vec<IconJob>, if_needed: bool) -
     }
 }
 
-/// What a layer build makes, in order: the template (if it's a
-/// customization's, only when needed), then the customization.
+/// What a layer build makes, in order: the templates it builds on and (for
+/// an Extensions layer's) its template, each only when needed, then the
+/// layer itself.
 pub fn layer_steps(req: &LayerBuildRequest) -> Result<Vec<LayerStep>, ApiError> {
-    let t = &req.template;
     let str_of = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+    let chain: Vec<Value> = req.parents.iter().chain([&req.template]).cloned().collect();
+    for t in &chain {
+        let tid = str_of(t, "id");
+        if !wad_core::spec::is_id(&tid) {
+            return Err(bad(format!("{tid:?} isn't a template id")));
+        }
+        let apps = t.get("apps").and_then(Value::as_array).cloned().unwrap_or_default();
+        if apps.is_empty() || apps.iter().any(|a| a.as_str().and_then(wad_core::catalog::app).is_none()) {
+            return Err(bad(format!("{}: a template's apps are catalog apps, at least one", str_of(t, "name"))));
+        }
+    }
+    if let Some(why) = wad_core::layers::chain_ok(&chain) {
+        return Err(bad(why));
+    }
+    let mut steps: Vec<LayerStep> = chain
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let parent = if i == 0 { &Value::Null } else { &chain[i - 1] };
+            layer_step(&wad_core::layers::template_layer(t, parent), &str_of(t, "name"), vec![], true)
+        })
+        .collect();
+    let t = &req.template;
     let tid = str_of(t, "id");
-    if !wad_core::spec::is_id(&tid) {
-        return Err(bad(format!("{tid:?} isn't a template id")));
-    }
-    let apps = t.get("apps").and_then(Value::as_array).cloned().unwrap_or_default();
-    if apps.is_empty() || apps.iter().any(|a| a.as_str().and_then(wad_core::catalog::app).is_none()) {
-        return Err(bad(format!("{}: a template's apps are catalog apps, at least one", str_of(t, "name"))));
-    }
-    let template =
-        layer_step(&wad_core::layers::template_layer(t, &serde_json::Value::Null), &str_of(t, "name"), vec![], false);
     match req.layer.split_once(':') {
-        Some(("template", id)) if id == tid => Ok(vec![template]),
+        Some(("template", id)) if id == tid => {
+            steps.last_mut().expect("a template").if_needed = false;
+            Ok(steps)
+        }
         Some(("custom", id)) => {
-            let c = req.customization.as_ref().ok_or_else(|| bad("a customization's build needs the customization"))?;
+            let c = req.extensions.as_ref().ok_or_else(|| bad("an Extensions layer's build needs the layer"))?;
             if str_of(c, "id") != id || !wad_core::spec::is_id(id) {
-                return Err(bad(format!("{id:?} isn't the customization sent")));
+                return Err(bad(format!("{id:?} isn't the Extensions layer sent")));
             }
             if str_of(c, "templateId") != tid {
-                return Err(bad(format!("{} isn't built on {}", str_of(c, "name"), str_of(t, "name"))));
+                return Err(bad(format!("{} isn't made on {}", str_of(c, "name"), str_of(t, "name"))));
             }
-            let has_browser = apps.iter().any(|a| a == "wadbrowser");
+            let has_browser = wad_core::layers::key_items(t, &Value::Null).iter().any(|i| i == "browser");
             let icons = icon_jobs(
                 &serde_json::json!({ "webapps": if has_browser { c["webapps"].clone() } else { Value::Null } }),
             );
-            let custom = layer_step(&wad_core::layers::extensions_layer(c, t), &str_of(c, "name"), icons, false);
-            Ok(vec![LayerStep { if_needed: true, ..template }, custom])
+            steps.push(layer_step(&wad_core::layers::extensions_layer(c, t), &str_of(c, "name"), icons, false));
+            Ok(steps)
         }
-        _ => Err(bad(format!("{:?} isn't this template's layer or a customization's", req.layer))),
+        _ => Err(bad(format!("{:?} isn't this template's layer or an Extensions layer's", req.layer))),
     }
 }
 
@@ -268,8 +286,8 @@ impl Builds {
         })
     }
 
-    /// Builds a layer's image (a customization's, its template's first when
-    /// needed); it waits its turn behind another build.
+    /// Builds a layer's image (what it builds on first when needed); it
+    /// waits its turn behind another build.
     pub fn create_layer(&self, req: &LayerBuildRequest) -> Result<Build, ApiError> {
         let steps = layer_steps(req)?;
         let last = steps.last().expect("a step at least");
@@ -455,14 +473,6 @@ impl Builds {
         let mut last = String::new();
         for (i, step) in steps.into_iter().enumerate() {
             self.jobs.lock().unwrap().iter_mut().filter(|j| j.build.id == id).for_each(|j| j.group = i as u32);
-            if step.if_needed {
-                let have = self.backend.image_info(&step.tag).await?;
-                if have.is_some_and(|h| h.labels.get(SHA_LABEL).and_then(Value::as_str) == Some(&step.sha)) {
-                    self.line(id, &format!("» the {} template is built already", step.name));
-                    continue;
-                }
-                self.line(id, &format!("» Building the {} template first", step.name));
-            }
             let Some(from) = self.backend.image_info(&step.from).await? else {
                 let hint = if is_local_base(&step.from) && !step.from.contains("-template-") {
                     " — update the drive with host/build.sh update --bases"
@@ -471,6 +481,21 @@ impl Builds {
                 };
                 return Err(format!("{} is not on this machine{hint}", step.from));
             };
+            if step.if_needed {
+                // Built already: from this build folder, on what's below it as
+                // it is now (a template rebuilt under it means building again).
+                let have = self.backend.image_info(&step.tag).await?;
+                let label =
+                    |h: &crate::backend::ImageInfo, k: &str| h.labels.get(k).and_then(Value::as_str).map(String::from);
+                if have.is_some_and(|h| {
+                    label(&h, SHA_LABEL).as_deref() == Some(&step.sha)
+                        && label(&h, FROM_LABEL).as_deref() == Some(&from.id)
+                }) {
+                    self.line(id, &format!("» the {} template is built already", step.name));
+                    continue;
+                }
+                self.line(id, &format!("» Building the {} template first", step.name));
+            }
             let icons = if step.icons.is_empty() {
                 vec![]
             } else {

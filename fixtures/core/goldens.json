@@ -21649,7 +21649,7 @@
      "web": true,
      "name": "s-g-name",
      "kind": "web",
-     "slot": "group:google"
+     "slot": "app:wadbrowser"
     },
     {
      "id": "s-g",
@@ -21657,7 +21657,7 @@
      "web": true,
      "name": "s-g-name",
      "kind": "web",
-     "slot": "group:google"
+     "slot": "web:google-cloud"
     }
    ],
    "hotkey": null,

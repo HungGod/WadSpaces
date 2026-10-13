@@ -291,9 +291,11 @@ fn check_signins(v: Option<&Value>, where_: &str) -> Result<Vec<WorkspaceSignIn>
         let web = o.get("web").and_then(Value::as_bool).unwrap_or(false);
         let kind = o.get("kind").map(as_text).unwrap_or_default();
         let slot = o.get("slot").map(as_text).unwrap_or_default();
-        if !wad_core::spec::is_id(&id) || !wad_core::spec::is_id(&app) {
+        // WadBrowser itself (its windows that aren't a web app's) is "@browser".
+        let browser = web && app == wad_core::layers::BROWSER_APP;
+        if !wad_core::spec::is_id(&id) || !(browser || wad_core::spec::is_id(&app)) {
             return Err(err(format!(
-                "{where_}: sign-in {id:?} for {app:?}: both must match ^[a-z0-9][a-z0-9-]{{0,62}}$"
+                "{where_}: sign-in {id:?} for {app:?}: both must match ^[a-z0-9][a-z0-9-]{{0,62}}$ (or the app be @browser, a web sign-in)"
             )));
         }
         if !kind.is_empty() && !wad_core::spec::is_id(&kind) {

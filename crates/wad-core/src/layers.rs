@@ -813,10 +813,14 @@ fn signins_v3(w: &Value, template: &Value, setup: &Value) -> Vec<Value> {
     }
     for g in key_groups_of(template, setup, &secrets["groups"]) {
         let Some(r) = g.get("key").filter(|r| !s(r, "id").is_empty()) else { continue };
-        let slot = format!("group:{}", s(&g, "id"));
+        // Each member its own slot (a web app's as in version 2), all with
+        // the group's key: wadd mounts it once, for each of them.
         for m in strs(&g, "members") {
-            let app = if m == "browser" { BROWSER_APP } else { m.strip_prefix("web:").unwrap_or(m) };
-            out.push(signin_entry(r, app, true, signins::WEB, &slot));
+            let (app, slot) = match m {
+                "browser" => (BROWSER_APP, "app:wadbrowser"),
+                web => (web.strip_prefix("web:").unwrap_or(web), web),
+            };
+            out.push(signin_entry(r, app, true, signins::WEB, slot));
         }
     }
     out

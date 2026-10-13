@@ -5,12 +5,13 @@
 //!   puts them on): its build folder's sha and the id of the image it was
 //!   built on. WadSpaces compares those with the layer as it is now to show
 //!   Built, Changed since built, or Not built.
-//! - `DELETE /v1/images/{layer}`: when a template or customization is deleted
-//!   for good. Refused while a workspace here runs on it.
-//! - `PUT /v1/wadspaces/{id}`: a wadspace (no image of its own) installed,
-//!   or updated, as a workspace on its layer's image (wad-core's
-//!   `workspace_for`): its name and wallpaper at run time, a /config of its
-//!   own, its sign-ins, and the github_token secret when the machine has one.
+//! - `DELETE /v1/images/{layer}`: when a template or Extensions layer is
+//!   deleted for good. Refused while a workspace here runs on it.
+//! - `PUT /v1/wadspaces/{id}`: a wadspace (its customization has no image)
+//!   installed, or updated, as a workspace on its top layer's image
+//!   (wad-core's `workspace_for`): its name and wallpaper at run time, a
+//!   /config of its own, its sign-ins, and the github_token secret when the
+//!   machine has one. A stack (version 3), or a version 2 wadspace.
 //! - `PUT /v1/workspaces/{id}/wallpaper`: the wallpaper it's started with,
 //!   kept in its extra folder (mounted at /run/wadspaces-extra).
 
@@ -91,9 +92,12 @@ pub async fn delete(registry: &Registry, builds: &Builds, backend: &dyn Backend,
 #[serde(rename_all = "camelCase")]
 pub struct Install {
     pub wadspace: Value,
+    /// Its template (the top of its chain).
     pub template: Value,
-    #[serde(default)]
-    pub customization: Option<Value>,
+    /// Its Extensions layer, if it has one ("customization" from before
+    /// the layer was called Extensions).
+    #[serde(default, alias = "customization")]
+    pub extensions: Option<Value>,
     /// The time zone its clock shows (the client's).
     #[serde(default)]
     pub tz: Option<String>,
@@ -105,23 +109,10 @@ pub async fn workspace_of(backend: &dyn Backend, id: &str, req: &Install) -> Res
     if w.get("id").and_then(Value::as_str) != Some(id) || !wad_core::spec::is_id(id) {
         return Err(bad(format!("{id:?}: the wadspace sent is another")));
     }
-    if w.get("version").and_then(Value::as_u64) != Some(2) {
-        return Err(bad("a wadspace from before the layers: WadSpaces moves it to them first"));
-    }
-    let setup = match &req.customization {
-        Some(c) => {
-            let base = &w["base"];
-            if base["kind"] != "customization" || base["id"] != c["id"] || c["templateId"] != req.template["id"] {
-                return Err(bad("the customization sent isn't this wadspace's"));
-            }
-            wad_core::layers::setup_of(c)
-        }
-        None => {
-            if w["base"]["kind"] != "template" || w["base"]["id"] != req.template["id"] {
-                return Err(bad("the template sent isn't this wadspace's"));
-            }
-            wad_core::layers::empty_setup(req.template["id"].as_str().unwrap_or_default())
-        }
+    let setup = match w.get("version").and_then(Value::as_u64) {
+        Some(3) => setup_v3(w, req)?,
+        Some(2) => setup_v2(w, req)?,
+        _ => return Err(bad("a wadspace from before the layers: WadSpaces moves it to them first")),
     };
     // Git's credentials, when the machine has them.
     let secrets: Vec<String> =
@@ -129,6 +120,42 @@ pub async fn workspace_of(backend: &dyn Backend, id: &str, req: &Install) -> Res
     let tz = req.tz.as_deref().filter(|t| !t.is_empty() && t.len() < 64 && !t.contains(char::is_control));
     let opts = json!({ "tz": tz.unwrap_or("Etc/UTC"), "secrets": secrets });
     Ok(wad_core::layers::workspace_for(w, &req.template, &setup, &opts))
+}
+
+/// A stack's setup: its Extensions' (made on its template), or its
+/// template's own. It needs a customization (its name, at least).
+fn setup_v3(w: &Value, req: &Install) -> Result<Value, ApiError> {
+    let tid = req.template["id"].as_str().unwrap_or_default();
+    if w["template"] != req.template["id"] || tid.is_empty() {
+        return Err(bad("the template sent isn't this wadspace's"));
+    }
+    if !w["customization"].is_object() {
+        return Err(bad("a wadspace needs its customization (a name, at least) to be installed"));
+    }
+    match (&req.extensions, w.get("extensions").and_then(Value::as_str)) {
+        (Some(e), Some(eid)) if e["id"] == eid && e["templateId"] == tid => Ok(wad_core::layers::setup_of(e)),
+        (None, None) => Ok(wad_core::layers::empty_setup(tid)),
+        _ => Err(bad("the Extensions sent aren't this wadspace's")),
+    }
+}
+
+/// A version 2 wadspace's setup: its base's.
+fn setup_v2(w: &Value, req: &Install) -> Result<Value, ApiError> {
+    match &req.extensions {
+        Some(c) => {
+            let base = &w["base"];
+            if base["kind"] != "customization" || base["id"] != c["id"] || c["templateId"] != req.template["id"] {
+                return Err(bad("the customization sent isn't this wadspace's"));
+            }
+            Ok(wad_core::layers::setup_of(c))
+        }
+        None => {
+            if w["base"]["kind"] != "template" || w["base"]["id"] != req.template["id"] {
+                return Err(bad("the template sent isn't this wadspace's"));
+            }
+            Ok(wad_core::layers::empty_setup(req.template["id"].as_str().unwrap_or_default()))
+        }
+    }
 }
 
 /// Installs or updates it; whether it's running with the old settings.

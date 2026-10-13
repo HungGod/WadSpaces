@@ -1,5 +1,6 @@
-//! The Builder's layers on a machine: a template's and a customization's
-//! images (the template built first when it's missing or out of date), their
+//! The Builder's layers on a machine: templates' (one on another) and an
+//! Extensions layer's images (what each builds on built first when it's
+//! missing or out of date), their
 //! labels and listing, deleting one, and wadspaces installed on them with
 //! their wallpaper; and what any build does: one at a time, cancelling, a
 //! missing base or too little disk, and web apps' icons made first. A fake
@@ -82,7 +83,12 @@ fn plus() -> Value {
 }
 
 fn custom(t: Value, c: Value) -> LayerBuildRequest {
-    LayerBuildRequest { layer: format!("custom:{}", c["id"].as_str().unwrap()), template: t, customization: Some(c) }
+    LayerBuildRequest {
+        layer: format!("custom:{}", c["id"].as_str().unwrap()),
+        template: t,
+        parents: vec![],
+        extensions: Some(c),
+    }
 }
 
 /// A build's log once it's finished (in 30 s at most: a loaded CI machine is slow).
@@ -106,7 +112,7 @@ const T_REF: &str = "localhost/wadspaces-template-dev:latest";
 const C_REF: &str = "localhost/wadspaces-custom-dev-plus:latest";
 
 #[tokio::test]
-async fn a_customization_builds_its_template_first_then_itself() {
+async fn an_extensions_layer_builds_its_template_first_then_itself() {
     let e = env().await;
     let b = e.builds.create_layer(&custom(dev(), plus())).unwrap();
     assert_eq!((b.layer.as_deref(), b.image.as_str(), b.base_image.as_str()), (Some("custom:dev-plus"), C_REF, BASE));
@@ -134,7 +140,12 @@ async fn a_built_template_isnt_built_again_until_it_changes() {
     let e = env().await;
     let b = e
         .builds
-        .create_layer(&LayerBuildRequest { layer: "template:dev".into(), template: dev(), customization: None })
+        .create_layer(&LayerBuildRequest {
+            layer: "template:dev".into(),
+            template: dev(),
+            parents: vec![],
+            extensions: None,
+        })
         .unwrap();
     wait(&e, &b.id).await;
     let b = e.builds.create_layer(&custom(dev(), plus())).unwrap();
@@ -167,7 +178,8 @@ async fn images_list_with_their_shas_and_a_rebuilt_template_shows() {
     let b = e.builds.create_layer(&LayerBuildRequest {
         layer: "template:dev".into(),
         template: json!({"id": "dev", "name": "Dev", "apps": ["wadbrowser", "vscode", "lmms"]}),
-        customization: None,
+        parents: vec![],
+        extensions: None,
     });
     wait(&e, &b.unwrap().id).await;
     let rows = images::list(&e.fake).await.unwrap();
@@ -179,11 +191,11 @@ async fn layer_requests_are_checked() {
     let e = env().await;
     let bad = |r: LayerBuildRequest| e.builds.create_layer(&r).unwrap_err().code;
     assert_eq!(
-        bad(LayerBuildRequest { layer: "template:other".into(), template: dev(), customization: None }),
+        bad(LayerBuildRequest { layer: "template:other".into(), template: dev(), parents: vec![], extensions: None }),
         ErrorCode::BadRequest
     );
     assert_eq!(
-        bad(LayerBuildRequest { layer: "custom:dev-plus".into(), template: dev(), customization: None }),
+        bad(LayerBuildRequest { layer: "custom:dev-plus".into(), template: dev(), parents: vec![], extensions: None }),
         ErrorCode::BadRequest
     );
     let mut elsewhere = plus();
@@ -192,7 +204,7 @@ async fn layer_requests_are_checked() {
     let mut nothing = dev();
     nothing["apps"] = json!(["brave"]);
     assert_eq!(
-        bad(LayerBuildRequest { layer: "template:dev".into(), template: nothing, customization: None }),
+        bad(LayerBuildRequest { layer: "template:dev".into(), template: nothing, parents: vec![], extensions: None }),
         ErrorCode::BadRequest
     );
     // No base here: the build says so.
@@ -201,7 +213,12 @@ async fn layer_requests_are_checked() {
     });
     let b = e
         .builds
-        .create_layer(&LayerBuildRequest { layer: "template:dev".into(), template: dev(), customization: None })
+        .create_layer(&LayerBuildRequest {
+            layer: "template:dev".into(),
+            template: dev(),
+            parents: vec![],
+            extensions: None,
+        })
         .unwrap();
     let l = wait(&e, &b.id).await;
     assert_eq!(l.build.status, BuildStatus::Error);
@@ -227,7 +244,7 @@ async fn a_wadspace_installs_on_its_layer_with_its_wallpaper_and_sign_ins() {
     let req = Install {
         wadspace: wadspace("academy"),
         template: dev(),
-        customization: Some(plus()),
+        extensions: Some(plus()),
         tz: Some("Pacific/Fiji".into()),
     };
     let saved = images::install(&e.reg, &e.fake, "academy", &req).await.unwrap();
@@ -266,14 +283,14 @@ async fn a_wadspace_installs_on_its_layer_with_its_wallpaper_and_sign_ins() {
 async fn a_wadspace_on_layers_it_doesnt_have_is_refused() {
     let e = env().await;
     // A wadspace that isn't on what's sent is refused.
-    let wrong = Install { wadspace: wadspace("academy"), template: dev(), customization: None, tz: None };
+    let wrong = Install { wadspace: wadspace("academy"), template: dev(), extensions: None, tz: None };
     assert_eq!(images::install(&e.reg, &e.fake, "academy", &wrong).await.unwrap_err().code, ErrorCode::BadRequest);
 }
 
 #[tokio::test]
 async fn wadspaces_from_before_the_layers_go_with_their_images() {
     let e = env().await;
-    let req = Install { wadspace: wadspace("academy"), template: dev(), customization: Some(plus()), tz: None };
+    let req = Install { wadspace: wadspace("academy"), template: dev(), extensions: Some(plus()), tz: None };
     images::install(&e.reg, &e.fake, "academy", &req).await.unwrap();
     let mut old = common::ws(
         "writing",
@@ -302,7 +319,7 @@ async fn an_image_isnt_deleted_while_a_wadspace_runs_on_it() {
     let e = env().await;
     let b = e.builds.create_layer(&custom(dev(), plus())).unwrap();
     wait(&e, &b.id).await;
-    let req = Install { wadspace: wadspace("academy"), template: dev(), customization: Some(plus()), tz: None };
+    let req = Install { wadspace: wadspace("academy"), template: dev(), extensions: Some(plus()), tz: None };
     images::install(&e.reg, &e.fake, "academy", &req).await.unwrap();
     let refused = images::delete(&e.reg, &e.builds, &e.fake, "custom:dev-plus").await.unwrap_err();
     assert_eq!(refused.code, ErrorCode::Conflict);
@@ -320,7 +337,12 @@ async fn an_image_isnt_deleted_while_a_wadspace_runs_on_it() {
 }
 
 fn template(t: Value) -> LayerBuildRequest {
-    LayerBuildRequest { layer: format!("template:{}", t["id"].as_str().unwrap()), template: t, customization: None }
+    LayerBuildRequest {
+        layer: format!("template:{}", t["id"].as_str().unwrap()),
+        template: t,
+        parents: vec![],
+        extensions: None,
+    }
 }
 
 #[tokio::test]
@@ -428,4 +450,119 @@ fn a_wadspace_cannot_take_an_apps_id() {
     assert!(e.contains("one of this machine's own apps"), "{e}");
     let other = json!({"id": "w", "name": "W2", "image": "localhost/wadspaces-w:latest", "display": "host"});
     assert!(wadd::builds::merged(&current, &other).unwrap().1);
+}
+
+fn gamedev() -> Value {
+    json!({"id": "gamedev", "owner": "me", "name": "Game Dev", "description": "", "parent": "dev",
+           "apps": ["wadbrowser", "vscode", "tiled", "libresprite"], "createdAt": "t", "updatedAt": "t"})
+}
+
+fn music() -> Value {
+    json!({"id": "music", "owner": "me", "name": "Game Music", "description": "", "parent": "gamedev",
+           "apps": ["wadbrowser", "vscode", "tiled", "libresprite", "lmms"], "createdAt": "t", "updatedAt": "t"})
+}
+
+const GD_REF: &str = "localhost/wadspaces-template-gamedev:latest";
+const M_REF: &str = "localhost/wadspaces-template-music:latest";
+
+fn top(parents: Vec<Value>, t: Value) -> LayerBuildRequest {
+    LayerBuildRequest {
+        layer: format!("template:{}", t["id"].as_str().unwrap()),
+        template: t,
+        parents,
+        extensions: None,
+    }
+}
+
+fn built(e: &Env) -> Vec<(String, String)> {
+    e.fake.0.lock().unwrap().builds.iter().map(|(t, b, _)| (t.clone(), b.clone())).collect()
+}
+
+#[tokio::test]
+async fn templates_build_on_templates_each_on_the_one_below() {
+    let e = env().await;
+    let b = e.builds.create_layer(&top(vec![dev(), gamedev()], music())).unwrap();
+    assert_eq!((b.image.as_str(), b.base_image.as_str()), (M_REF, BASE));
+    let l = wait(&e, &b.id).await;
+    assert_eq!(l.build.status, BuildStatus::Done, "{:?}", l.lines);
+    assert_eq!(built(&e), [(T_REF.into(), BASE.into()), (GD_REF.into(), T_REF.into()), (M_REF.into(), GD_REF.into())]);
+    // Each installs only what it adds.
+    let tar = String::from_utf8_lossy(&e.fake.0.lock().unwrap().builds[2].2).to_string();
+    assert!(tar.contains("RUN wadspaces-apt lmms") && !tar.contains("wadspaces-feature"), "{tar}");
+    let gd_id = e.fake.0.lock().unwrap().image_ids[GD_REF].clone();
+    assert_eq!(label(&e, M_REF, FROM_LABEL), Some(gd_id));
+
+    // Built again: nothing below needs building.
+    let b = e.builds.create_layer(&top(vec![dev(), gamedev()], music())).unwrap();
+    let l = wait(&e, &b.id).await;
+    assert!(l.lines.iter().any(|x| x == "» the Dev template is built already"), "{:?}", l.lines);
+    assert!(l.lines.iter().any(|x| x == "» the Game Dev template is built already"), "{:?}", l.lines);
+    assert_eq!(built(&e).len(), 4);
+
+    // The middle one rebuilt on its own: the top one builds again on it, even
+    // though its build folder is the same.
+    let b = e.builds.create_layer(&top(vec![dev()], gamedev())).unwrap();
+    wait(&e, &b.id).await;
+    assert_eq!(built(&e).len(), 5);
+    let b = e.builds.create_layer(&top(vec![dev(), gamedev()], music())).unwrap();
+    let l = wait(&e, &b.id).await;
+    assert!(l.lines.iter().any(|x| x == "» the Game Dev template is built already"), "{:?}", l.lines);
+    assert_eq!(built(&e).len(), 6, "{:?}", l.lines);
+    assert_eq!(built(&e)[5], (M_REF.into(), GD_REF.into()));
+}
+
+#[tokio::test]
+async fn a_chain_that_doesnt_build_is_refused() {
+    let e = env().await;
+    let bad = |r: LayerBuildRequest| e.builds.create_layer(&r).unwrap_err().message;
+    // Its parents not sent, one that drops an app, one in the wrong order.
+    assert_eq!(bad(top(vec![], gamedev())), "Game Dev builds on a template that's gone");
+    let mut dropped = music();
+    dropped["apps"] = json!(["wadbrowser", "tiled", "libresprite", "lmms"]);
+    assert!(bad(top(vec![dev(), gamedev()], dropped)).contains("doesn't have VS Code"));
+    assert_eq!(bad(top(vec![gamedev(), dev()], music())), "Game Dev builds on a template that's gone");
+    // Extensions on a chained template build the whole chain under them.
+    let mut on_music = plus();
+    on_music["templateId"] = "music".into();
+    let r = LayerBuildRequest {
+        layer: "custom:dev-plus".into(),
+        template: music(),
+        parents: vec![dev(), gamedev()],
+        extensions: Some(on_music),
+    };
+    let b = e.builds.create_layer(&r).unwrap();
+    wait(&e, &b.id).await;
+    assert_eq!(built(&e).iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), [T_REF, GD_REF, M_REF, C_REF]);
+}
+
+fn stack(id: &str) -> Value {
+    json!({"version": 3, "id": id, "owner": "me", "order": 2, "template": "dev", "extensions": "dev-plus",
+           "customization": {
+               "name": "Academy", "description": "",
+               "wallpaper": {"type": "gradient", "value": "linear-gradient(#000,#111)"},
+               "projects": [],
+               "secrets": {
+                   "bySlot": {"app:vscode": {"id": "code-abc123", "name": "Code", "kind": "vscode"}},
+                   "groups": [{"id": "all", "members": ["browser", "web:github"], "key": {"id": "gh-abc123", "name": "GitHub", "kind": "web"}}],
+               },
+           },
+           "createdAt": "t", "updatedAt": "t"})
+}
+
+#[tokio::test]
+async fn a_stack_installs_on_its_extensions_with_its_keys() {
+    let e = env().await;
+    let req = Install { wadspace: stack("academy"), template: dev(), extensions: Some(plus()), tz: None };
+    let ws = images::install(&e.reg, &e.fake, "academy", &req).await.unwrap().workspace;
+    assert_eq!(ws.image, C_REF);
+    assert!(ws.env.iter().any(|(k, v)| k == "WALLPAPER" && v == "/run/wadspaces-extra/wallpaper.png"));
+    let signins: Vec<(&str, &str)> = ws.signins.iter().map(|s| (s.id.as_str(), s.app.as_str())).collect();
+    assert_eq!(signins, [("code-abc123", "vscode"), ("gh-abc123", "@browser"), ("gh-abc123", "github")]);
+    // Only what it's built from, and only with a customization.
+    let wrong = Install { wadspace: stack("academy"), template: dev(), extensions: None, tz: None };
+    assert_eq!(images::install(&e.reg, &e.fake, "academy", &wrong).await.unwrap_err().code, ErrorCode::BadRequest);
+    let mut bare = stack("academy");
+    bare.as_object_mut().unwrap().remove("customization");
+    let bare = Install { wadspace: bare, template: dev(), extensions: Some(plus()), tz: None };
+    assert!(images::install(&e.reg, &e.fake, "academy", &bare).await.unwrap_err().message.contains("customization"));
 }
