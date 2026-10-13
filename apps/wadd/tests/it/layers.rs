@@ -117,7 +117,7 @@ async fn a_customization_builds_its_template_first_then_itself() {
         e.fake.0.lock().unwrap().builds.iter().map(|(t, b, _)| (t.clone(), b.clone())).collect();
     assert_eq!(built, [(T_REF.into(), BASE.into()), (C_REF.into(), T_REF.into())]);
     // Labelled with their folders' shas and what they were built on.
-    let t_layer = wad_core::layers::template_layer(&dev());
+    let t_layer = wad_core::layers::template_layer(&dev(), &serde_json::Value::Null);
     assert_eq!(label(&e, T_REF, SHA_LABEL).as_deref(), t_layer["sha"].as_str());
     let template_id = e.fake.0.lock().unwrap().image_ids[T_REF].clone();
     assert_eq!(label(&e, C_REF, FROM_LABEL), Some(template_id));
@@ -160,7 +160,7 @@ async fn images_list_with_their_shas_and_a_rebuilt_template_shows() {
     assert_eq!(layers, ["custom:dev-plus", "template:dev"]);
     let (c, t) = (&rows[0], &rows[1]);
     assert_eq!(c.image_ref, C_REF);
-    assert_eq!(c.dockerfile_sha, wad_core::layers::customization_layer(&plus(), &dev())["sha"].as_str().unwrap());
+    assert_eq!(c.dockerfile_sha, wad_core::layers::extensions_layer(&plus(), &dev())["sha"].as_str().unwrap());
     // Built on the template's image as it is: unchanged.
     assert_eq!(c.from, t.id);
     // The template rebuilt: the customization's `from` is an older image now.

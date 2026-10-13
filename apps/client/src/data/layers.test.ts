@@ -2,7 +2,7 @@
 // the images' shas and what they were built on, and launcher items as wadd
 // launches them.
 import { describe, expect, it } from "vitest";
-import { customizationLayer, templateLayer, type Customization, type Template } from "@core/layers";
+import { extensionsLayer, templateLayer, type Customization, type Template } from "@core/layers";
 import { DEFAULT_BROWSERS, imageState, launchItem, workspaceSignIns, type ImageRow } from "./layers";
 
 const t: Template = { id: "dev", owner: "me", name: "Dev", description: "", apps: ["wadbrowser", "vscode"], createdAt: "t", updatedAt: "t" };
@@ -16,7 +16,7 @@ const row = (layer: ImageRow["layer"], sha: string, from = "base", id = `${layer
 describe("image states", () => {
   it("tells built, changed, never and building apart", () => {
     const tRow = row("template:dev", templateLayer(t).sha);
-    const cRow = row("custom:plus", customizationLayer(c, t).sha, tRow.id);
+    const cRow = row("custom:plus", extensionsLayer(c, t).sha, tRow.id);
     const images = { "template:dev": tRow, "custom:plus": cRow };
     expect(imageState("template:dev", lib, images, new Set())).toBe("built");
     expect(imageState("custom:plus", lib, images, new Set())).toBe("built");

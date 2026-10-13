@@ -8,7 +8,7 @@
 // wallpapers) are {"$bytes": base64}. A function that throws gives {"err"}.
 import type { WaddSpec } from "./spec";
 import type { Project, ProjectDraft } from "./projects";
-import type { BrowserSetup, Customization, Setup, Template, Wadspace } from "./layers";
+import type { BrowserSetup, Customization, KeyGroup, Setup, Template, Wadspace, WadspaceV3 } from "./layers";
 
 export interface Case {
   fn: string;
@@ -150,6 +150,60 @@ const BROWSERS: BrowserSetup[] = [
 ];
 const LIB = { templates: TEMPLATES, customizations: CUSTOMIZATIONS };
 
+// Template chains: Dev, then Game Dev on it, then Game Music on that; one
+// whose parent is gone, two that loop.
+const CHAINED: Template[] = [
+  T("gamedev", ["wadbrowser", "vscode", "tiled", "libresprite"], { name: "Game Dev", parent: "dev" }),
+  T("music", ["wadbrowser", "vscode", "tiled", "libresprite", "lmms"], { name: "Game Music", parent: "gamedev" }),
+  T("orphan", ["krita", "obs"], { parent: "gone-for-good" }),
+  T("looped", ["krita"], { parent: "loop2" }),
+  T("loop2", ["krita", "obs"], { parent: "looped" }),
+];
+const LIB3 = { templates: [...TEMPLATES, ...CHAINED], extensions: CUSTOMIZATIONS };
+const S3 = (id: string, extra: Partial<WadspaceV3>): WadspaceV3 => ({ version: 3, id, owner: "me", order: 1, createdAt: "2026-07-01", updatedAt: "2026-07-01", ...extra });
+const STACKS: WadspaceV3[] = [
+  S3("work3", {
+    template: "dev",
+    extensions: "dev-plus",
+    customization: {
+      name: "Work",
+      description: "Day job",
+      wallpaper: { type: "gradient", value: "radial-gradient(60% 70% at 18% 28%, rgb(255 61 129 / 0.5), transparent 65%), #0e0919" },
+      projects: [
+        { id: "web", kind: "github", repo: "HungGod/web", as: "Web", setup: "npm ci" },
+        { id: "c1", kind: "copy", source: { machineId: "m1", paths: ["/var/home/wad/Notes"] }, as: "Notes", files: 12, bytes: 34567 },
+      ],
+      secrets: {
+        bySlot: { "app:vscode": ref("s-code", "vscode"), "ext:anthropic.claude-code": ref("s-cc", "vscode-claude-code"), "app:steam": ref("s-steam", "steam") },
+        groups: [
+          { id: "solo", members: ["web:github"] },
+          { id: "google", members: ["browser", "web:google-cloud"], key: ref("s-g") },
+          { id: "empty", members: [] },
+        ],
+      },
+    },
+  }),
+  S3("chained", { template: "music", customization: { name: "Chained", description: "", wallpaper: { type: "image", value: "data:image/jpeg;base64,/9j/" }, projects: [], secrets: { bySlot: {} } } }),
+  S3("wrong-base", { template: "music", extensions: "dev-plus" }),
+  S3("blank", { draftTemplate: { name: "Untitled", description: "" } }),
+  S3("loose", { customization: { name: "Loose", description: "", wallpaper: { type: "color", value: "#000" }, projects: [], secrets: { bySlot: {} } } }),
+];
+const GROUPS: (KeyGroup[] | null)[] = [
+  null,
+  [],
+  [{ id: "empty", members: [] }],
+  [
+    { id: "a", members: ["web:github", "web:gone"], key: ref("s-a") },
+    { id: "b", members: ["browser"] },
+  ],
+];
+const MIGRATED_PROJECTS = [
+  { id: "notes", name: "Notes", mountName: "Notes", setup: "", source: { kind: "git", url: "https://github.com/HungGod/notes" } },
+  { id: "web", name: "Web app", mountName: "Web", setup: "npm ci", source: { kind: "git", url: "https://github.com/HungGod/web.git", ref: "main" } },
+  { id: "here", name: "Here", mountName: "Here", setup: "make", source: { kind: "folder", machineId: "m1", machineName: "Surface", path: "/var/home/wad/Here" } },
+  { id: "photos", name: "Photos", mountName: "Photos", setup: "", source: { kind: "drive", uuid: "1234-ABCD", label: "Photos", fstype: "exfat", subpath: "2026" } },
+];
+
 export function cases(): Case[] {
   const c: Case[] = [];
   const add = (fn: string, ...args: unknown[]) => c.push({ fn, args });
@@ -231,10 +285,33 @@ export function cases(): Case[] {
     add("templateDockerfile", t);
     add("templateLayer", t);
     for (const c of CUSTOMIZATIONS) {
-      add("customizationDockerfile", c, t);
-      add("customizationLayer", c, t);
+      add("extensionsDockerfile", c, t);
+      add("extensionsLayer", c, t);
     }
   }
+
+  // template chains, and wadspaces as stacks (version 3)
+  for (const [t, p] of [[CHAINED[0], TEMPLATES[1]], [CHAINED[1], CHAINED[0]], [CHAINED[2], CHAINED[1]], [CHAINED[0], null]] as [Template, Template | null][]) {
+    add("templateDockerfile", t, p);
+    add("templateLayer", t, p);
+  }
+  for (const id of ["dev", "gamedev", "music", "orphan", "looped", "nope", ""]) add("chainOf", LIB3, id);
+  for (const ch of [[], [TEMPLATES[1]], [TEMPLATES[1], CHAINED[0], CHAINED[1]], [CHAINED[0]], [TEMPLATES[1], CHAINED[1]], [CHAINED[0], TEMPLATES[1]], [TEMPLATES[0], { ...CHAINED[0], parent: "writing" }]])
+    add("chainOk", ch);
+  for (const w of STACKS) {
+    add("resolveStack", LIB3, w);
+    add("stackImageKey", w);
+    const r = LIB3.templates.find((t) => t.id === w.template) ?? TEMPLATES[1];
+    const st = LIB3.extensions.find((e) => e.id === w.extensions && e.templateId === r.id) ?? SETUPS[0];
+    add("workspaceFor", w, r, st, { tz: "Pacific/Fiji", secrets: ["github_token"] });
+  }
+  for (const t of [TEMPLATES[0], TEMPLATES[1], CHAINED[1]]) {
+    for (const st of SETUPS) {
+      add("keyItems", t, st);
+      for (const g of GROUPS) add("keyGroupsOf", t, st, g);
+    }
+  }
+  for (const w of [...WADSPACES, { ...WADSPACES[0], projects: ["here", "photos", "missing"] }, STACKS[0], { version: 1, id: "v1" }]) add("migrateV2", w, LIB, MIGRATED_PROJECTS);
   add("importInto", SETUPS[2], SETUPS[1], TEMPLATES[1], ["webapps", "autostart"]);
   add("importInto", SETUPS[1], SETUPS[1], TEMPLATES[1], ["webapps", "tools"]);
   for (const st of SETUPS) add("browserSlots", st);

@@ -1,5 +1,5 @@
 //! The Builder's catalog (data/catalog.json): the apps a template is made of,
-//! the VS Code extensions and command-line tools a customization adds, and
+//! the VS Code extensions and command-line tools an Extensions layer adds, and
 //! for each app what the Builder shows (summary, screenshots, its Start menu
 //! category) and how it gets into an image. The starter templates every
 //! library begins with are in data/starters.json.

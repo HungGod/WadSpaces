@@ -3,7 +3,7 @@
 // and Claude Code, a wadspace on each kind of base, a saved WadBrowser setup,
 // saved sign-ins (some shared) and the layer images built. Sign-in names are
 // made up (images/examples has the real VanuaAcademy's).
-import { customizationLayer, templateLayer, webappId, type BrowserSetup, type Customization, type SignInRef, type Template, type Wadspace } from "@core/layers";
+import { extensionsLayer, templateLayer, webappId, type BrowserSetup, type Customization, type SignInRef, type Template, type Wadspace } from "@core/layers";
 import type { Project } from "@core/projects";
 import { FakeBackend } from "./fakeBackend";
 
@@ -108,7 +108,7 @@ export function sampleBackend(target: "offline" | "online" | "machine" = "offlin
   // The images built: the starters' and the customization's, on Dev's.
   const tw = { layer: "template:writing" as const, ref: "localhost/wadspaces-template-writing:latest", id: "img-writing", dockerfileSha: templateLayer(writing).sha, builtAt: Date.parse(at(29)) / 1000, sizeMb: 1650, from: "base" };
   const td = { layer: "template:dev" as const, ref: "localhost/wadspaces-template-dev:latest", id: "img-dev", dockerfileSha: templateLayer(dev).sha, builtAt: Date.parse(at(29)) / 1000, sizeMb: 2400, from: "base" };
-  const cv = { layer: "custom:vanua-academy-dev" as const, ref: "localhost/wadspaces-custom-vanua-academy-dev:latest", id: "img-vanua-dev", dockerfileSha: customizationLayer(vanuaDev, dev).sha, builtAt: Date.parse(at(12)) / 1000, sizeMb: 2650, from: "img-dev" };
+  const cv = { layer: "custom:vanua-academy-dev" as const, ref: "localhost/wadspaces-custom-vanua-academy-dev:latest", id: "img-vanua-dev", dockerfileSha: extensionsLayer(vanuaDev, dev).sha, builtAt: Date.parse(at(12)) / 1000, sizeMb: 2650, from: "img-dev" };
   for (const row of [tw, td, cv]) b.images.set(row.layer, row);
   return b;
 }

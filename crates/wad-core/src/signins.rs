@@ -13,7 +13,7 @@ pub const WEB: &str = "web";
 /// The kinds a Builder slot can keep, besides [`WEB`]. (GitHub Copilot isn't
 /// one: VS Code keeps its GitHub session in state.vscdb with the rest of its
 /// global state, so it can't be kept apart; it signs in inside each wadspace.)
-pub const SLOT_KINDS: &[&str] = &[WEB, "obsidian", "steam", "vscode-claude-code", "vscode-codex"];
+pub const SLOT_KINDS: &[&str] = &[WEB, "vscode", "obsidian", "steam", "vscode-claude-code", "vscode-codex"];
 
 /// Where a wadspace sees each sign-in it mounts: `<MOUNT_ROOT>/<id>`.
 pub const MOUNT_ROOT: &str = "/run/wadspaces-signins";
@@ -23,10 +23,16 @@ pub const MOUNT_ROOT: &str = "/run/wadspaces-signins";
 /// file wouldn't survive that).
 pub fn paths_for(app: &str) -> Option<&'static [&'static str]> {
     Some(match app {
-        // Accounts (GitHub, Microsoft) and extensions' sign-ins: Electron's
-        // safe storage in state.vscdb, readable anywhere since the images
-        // run it with --password-store=basic.
-        "vscode" => &[".config/Code/User/globalStorage/"],
+        // VS Code's key: accounts (GitHub, Microsoft) and extensions'
+        // sign-ins (Electron's safe storage in state.vscdb, readable anywhere
+        // since the images run it with --password-store=basic), and the
+        // user's settings, keybindings and snippets.
+        "vscode" => &[
+            ".config/Code/User/globalStorage/",
+            ".config/Code/User/settings.json",
+            ".config/Code/User/keybindings.json",
+            ".config/Code/User/snippets/",
+        ],
         "cursor" => &[".config/Cursor/User/globalStorage/"],
         // The Obsidian account (Sync, Publish) is in the app's local storage.
         "obsidian" => &[".config/obsidian/Local Storage/"],

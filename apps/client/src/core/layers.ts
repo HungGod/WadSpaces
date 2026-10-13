@@ -1,16 +1,20 @@
-// The Builder's three layers, and the rules between them: wad-core's
-// crates/wad-core/src/layers.rs, run as WebAssembly. Each layer builds on the
-// one before:
+// The Builder's layers, and the rules between them: wad-core's
+// crates/wad-core/src/layers.rs, run as WebAssembly. A wadspace is a stack,
+// each layer building on the one below:
 //
-//   Template       the base image plus one or more apps. Its own image,
-//                  localhost/wadspaces-template-<id>:latest, FROM the base.
-//   Customization  a template's apps set up: WadBrowser's mode and web apps,
+//   Template       the base image plus apps. Its own image,
+//                  localhost/wadspaces-template-<id>:latest, FROM the base, or
+//                  FROM its `parent` template's (whose apps it all has, and more).
+//   Extensions     a template's apps set up: WadBrowser's mode and web apps,
 //                  VS Code's extensions, tools, what opens at boot. Its own
-//                  image, localhost/wadspaces-custom-<id>:latest, FROM the
-//                  template's.
-//   Wadspace       a template or customization made into a space: name,
-//                  wallpaper, project folders and secrets (saved sign-ins).
-//                  No image of its own: wadd mounts those when it starts.
+//                  image, FROM the template's (still keyed "custom:<id>",
+//                  localhost/wadspaces-custom-<id>:latest).
+//   Customization  the wadspace's own: name, wallpaper, projects and keys
+//                  (saved sign-ins). No image: wadd hands them over at start.
+//
+// (`Customization` below is still the Extensions layer's document, and
+// `Wadspace` the version 2 document, until the Builder moves to stacks:
+// `WadspaceV3`.)
 import { call } from "./wasm";
 
 /** A wadspace's background: a gradient or colour (CSS), or a picture (a URL). */
@@ -20,7 +24,7 @@ export interface Wallpaper {
 }
 
 /** A saved sign-in's kind: a secret only fits a slot of its kind. */
-export type SecretKind = "web" | "obsidian" | "steam" | "vscode-claude-code" | "vscode-codex";
+export type SecretKind = "web" | "vscode" | "obsidian" | "steam" | "vscode-claude-code" | "vscode-codex";
 
 /** A saved sign-in a slot uses: the machine's id, plus its name and kind, so
  *  a machine that doesn't have it yet can make it (wadd does, at launch). */
@@ -44,6 +48,8 @@ export interface Template {
   description: string;
   /** App ids (catalog.json's, or an old app a migrated template kept), in desktop order. */
   apps: string[];
+  /** The template it builds on: all of its apps are in `apps` (first, in its order), plus more. */
+  parent?: string;
   starter?: true;
   createdAt: string;
   updatedAt: string;
@@ -95,6 +101,66 @@ export interface Wadspace {
   projects: string[];
   /** The sign-in per slot ("web:<id>", "ext:<id>", "app:<id>"); a slot left out keeps nothing ("Don't save"). */
   secrets: Record<string, SignInRef>;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+/** Some of WadBrowser's apps sharing one key (a profile): the browser itself ("browser") and web apps ("web:<id>"). */
+export interface KeyGroup {
+  id: string;
+  members: string[];
+  key?: SignInRef;
+}
+
+/** A wadspace's keys: by slot ("app:<id>", "ext:<id>"), and WadBrowser's groups (left out: one group, no key). */
+export interface StackKeys {
+  bySlot: Record<string, SignInRef>;
+  groups?: KeyGroup[];
+}
+
+/**
+ * A project in a wadspace: nothing is mounted. A GitHub repo is cloned into
+ * it (and fast-forwarded at start when that's safe); files from a machine
+ * are copied in once. Either way it's at ~/Desktop/<as>.
+ */
+export type StackProject =
+  | { id: string; kind: "github"; repo: string; ref?: string; as: string; setup?: string }
+  | {
+      id: string;
+      kind: "copy";
+      /** Where it was copied from: paths on a machine, or on a drive (from before copies). */
+      source: { machineId?: string; drive?: { uuid: string; label: string; fstype: string }; paths: string[] };
+      as: string;
+      /** What was copied (not yet, for one from before copies: copied at its first start). */
+      files?: number;
+      bytes?: number;
+    };
+
+/** A wadspace's own layer. */
+export interface StackCustomization {
+  name: string;
+  description: string;
+  wallpaper: Wallpaper;
+  projects: StackProject[];
+  secrets: StackKeys;
+}
+
+/** A wadspace as a stack (version 3): a template (the top of its chain), maybe Extensions, and its Customization. */
+export interface WadspaceV3 {
+  version: 3;
+  id: string;
+  owner: string;
+  sharedWith?: string[];
+  /** Left to right on the Builder's board. */
+  order: number;
+  /** The top template; what it builds on follows its `parent`. */
+  template?: string;
+  /** A template with no apps yet (one can't be saved empty): the board's blank template. */
+  draftTemplate?: { name: string; description: string };
+  /** Its Extensions layer, made on `template`. */
+  extensions?: string;
+  customization?: StackCustomization;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -236,12 +302,36 @@ export const layoutJsonFor = (template: Template, setup: Setup): string => call(
 /** A marketplace id (publisher.name). */
 export const isExtensionId = (id: string): boolean => call("isExtensionId", id);
 
-export const templateDockerfile = (t: Template): string => call("templateDockerfile", t);
-export const customizationDockerfile = (c: Customization, t: Template): string => call("customizationDockerfile", c, t);
+/** A template's Dockerfile: FROM its parent's image (null: the base), adding its own apps. */
+export const templateDockerfile = (t: Template, parent: Template | null = null): string => call("templateDockerfile", t, parent);
+export const extensionsDockerfile = (c: Customization, t: Template): string => call("extensionsDockerfile", c, t);
 /** A template's build folder and the sha its image is labelled with. */
-export const templateLayer = (t: Template): Layer => call("templateLayer", t);
-/** A customization's build folder (FROM its template's image) and its sha. */
-export const customizationLayer = (c: Customization, t: Template): Layer => call("customizationLayer", c, t);
+export const templateLayer = (t: Template, parent: Template | null = null): Layer => call("templateLayer", t, parent);
+/** An Extensions layer's build folder (FROM its template's image) and its sha. */
+export const extensionsLayer = (c: Customization, t: Template): Layer => call("extensionsLayer", c, t);
+
+/** A template and what it builds on, bottom first. */
+export const chainOf = (lib: { templates: Template[] }, templateId: string): Template[] => call("chainOf", lib, templateId);
+/** Why a chain (bottom first) can't be built, or null. */
+export const chainOk = (chain: Template[]): string | null => call("chainOk", chain);
+/** What a stack is built from, or null with no template. */
+export const resolveStack = (
+  lib: { templates: Template[]; extensions: Customization[] },
+  w: Pick<WadspaceV3, "template" | "extensions">,
+): { chain: Template[]; template: Template; setup: Setup; extensions?: Customization } | null => call("resolveStack", lib, w);
+/** The image a stack runs: its Extensions', else its template's ("" with neither). */
+export const stackImageKey = (w: Pick<WadspaceV3, "template" | "extensions">): LayerKey | "" => call("stackImageKey", w);
+/** WadBrowser's apps that keep keys: "browser" and "web:<id>" (none without WadBrowser). */
+export const keyItems = (template: Template, setup: Setup): string[] => call("keyItems", template, setup);
+/** WadBrowser's key groups, tidied (apps in no group join the first with members). */
+export const keyGroupsOf = (template: Template, setup: Setup, groups: KeyGroup[] | undefined): KeyGroup[] =>
+  call("keyGroupsOf", template, setup, groups ?? null);
+/** A version 2 wadspace as a stack (others come back as they are); `order` is the caller's. */
+export const migrateV2 = (
+  w: Wadspace | WadspaceV3,
+  lib: Library,
+  projects: { id: string; name: string; mountName: string; setup: string; source: unknown }[],
+): Omit<WadspaceV3, "order"> & { order?: number } => call("migrateV2", w, lib, projects);
 /** "jpg" for a JPEG picture, else "png": how wadd stores the wallpaper. */
 export const wallpaperExt = (w: Wallpaper): "png" | "jpg" => call("wallpaperExt", w);
 /** What wadd mounts when the wadspace starts, for the Image tab. */
@@ -251,7 +341,7 @@ export const runSummary = (
   slots: Slot[],
 ): string[] => call("runSummary", w, projects, slots);
 /** The wadd workspace a wadspace installs as (its image, env, /config, sign-ins). */
-export const workspaceFor = (w: Wadspace, template: Template, setup: Setup, opts: { tz?: string; secrets?: string[] }): Record<string, unknown> =>
+export const workspaceFor = (w: Wadspace | WadspaceV3, template: Template, setup: Setup, opts: { tz?: string; secrets?: string[] }): Record<string, unknown> =>
   call("workspaceFor", w, template, setup, opts);
 
 /** Web apps used anywhere already, to add in a click. */

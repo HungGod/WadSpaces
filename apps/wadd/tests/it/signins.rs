@@ -83,7 +83,7 @@ async fn made_renamed_and_listed() {
     assert!(gh.id.starts_with("github-"), "{}", gh.id);
     assert!(s.dir.path().join("signins").join(&gh.id).is_dir());
     let code = s.signins.create(SignInRequest { name: "VS Code".into(), app: "vscode".into(), paths: vec![] }).unwrap();
-    assert_eq!(code.paths, [".config/Code/User/globalStorage/"]);
+    assert_eq!(code.paths, wad_core::signins::paths_for("vscode").unwrap());
     // An app the catalog doesn't know names its files.
     let err = s.signins.create(SignInRequest { name: "Tool".into(), app: "tool".into(), paths: vec![] }).unwrap_err();
     assert_eq!(err.code, ErrorCode::BadRequest);
@@ -135,7 +135,7 @@ async fn mounted_where_used_and_kept_while_in_use() {
             {"id": gh.id, "name": "GitHub", "web": true, "apps": ["github", "tailscale"],
              "dir": format!("/run/wadspaces-signins/{}", gh.id), "paths": []},
             {"id": "vscode-zz", "name": "vscode", "web": false, "apps": ["vscode"],
-             "dir": "/run/wadspaces-signins/vscode-zz", "paths": [".config/Code/User/globalStorage/"]},
+             "dir": "/run/wadspaces-signins/vscode-zz", "paths": wad_core::signins::paths_for("vscode").unwrap()},
         ])
     );
 

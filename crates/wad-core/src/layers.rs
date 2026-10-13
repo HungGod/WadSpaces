@@ -1,20 +1,24 @@
-//! The Builder's three layers, and the rules between them (the UI's
-//! src/core/layers.ts wraps these):
+//! The Builder's layers, and the rules between them (the UI's
+//! src/core/layers.ts wraps these). A wadspace is a stack, bottom to top:
 //!
-//!   Template       the base image plus one or more apps. Its own image,
-//!                  localhost/wadspaces-template-<id>:latest, FROM the base.
-//!   Customization  a template's apps set up: WadBrowser's mode and web apps,
+//!   Template       the base image plus apps. Its own image,
+//!                  localhost/wadspaces-template-<id>:latest, FROM the base,
+//!                  or FROM another template's (its `parent`): a template can
+//!                  build on one whose apps it all has, adding at least one.
+//!   Extensions     a template's apps set up: WadBrowser's mode and web apps,
 //!                  VS Code's extensions, tools, what opens at boot. Its own
-//!                  image, localhost/wadspaces-custom-<id>:latest, FROM the
-//!                  template's.
-//!   Wadspace       a template or customization made into a space: name,
-//!                  wallpaper, project folders and secrets (saved sign-ins).
-//!                  No image of its own: wadd mounts those when it starts.
+//!                  image, FROM the template's. (Its image key is still
+//!                  "custom:<id>" and its image localhost/wadspaces-custom-
+//!                  <id>:latest, from when this layer was "customization".)
+//!   Customization  the wadspace's own: name, wallpaper, projects and keys
+//!                  (saved sign-ins). No image: wadd hands those over when
+//!                  it starts. Kept in the wadspace document (version 3).
 //!
 //! What a wadspace ends up with, which sign-ins it can keep and which secrets
 //! fit them, its desktop and Start menu as the image draws them, each layer's
-//! Dockerfile and build folder, and turning a wadspace from before the layers
-//! (a v1 design) into them. Values are JSON, as everywhere in the core.
+//! Dockerfile and build folder, and turning a version 2 wadspace (its base a
+//! template or extensions, its customization's fields its own) into a stack.
+//! Values are JSON, as everywhere in the core.
 
 use std::cmp::Ordering;
 
@@ -145,6 +149,135 @@ pub fn resolve(lib: &Value, base: &Value) -> Value {
         Some(t) => json!({ "template": t, "setup": setup_of(&c), "customization": c }),
         None => Value::Null,
     }
+}
+
+// ------------------------------------------------------- stacks (version 3)
+
+/// How deep templates can stack.
+pub const MAX_CHAIN: usize = 8;
+
+/// A template and what it builds on, bottom first: walks `parent` through
+/// the library's templates. A missing parent ends the walk (the chain then
+/// starts with a template that has a `parent`; [`chain_ok`] says so), and so
+/// does a loop or [`MAX_CHAIN`].
+pub fn chain_of(lib: &Value, template_id: &str) -> Vec<Value> {
+    let find = |id: &str| js::arr(lib, "templates").iter().find(|t| s(t, "id") == id).cloned();
+    let mut chain: Vec<Value> = Vec::new();
+    let mut next = find(template_id);
+    while let Some(t) = next {
+        if chain.len() > MAX_CHAIN || chain.iter().any(|c| s(c, "id") == s(&t, "id")) {
+            break;
+        }
+        next = match s(&t, "parent") {
+            "" => None,
+            pid => find(pid),
+        };
+        chain.push(t);
+    }
+    chain.reverse();
+    chain
+}
+
+/// Why a chain (bottom first) can't be built, or None: each template builds
+/// on the one below it, has all of its apps and adds at least one.
+pub fn chain_ok(chain: &[Value]) -> Option<String> {
+    let first = chain.first()?;
+    if !s(first, "parent").is_empty() {
+        return Some(format!("{} builds on a template that's gone", one_line(s(first, "name"))));
+    }
+    if chain.len() > MAX_CHAIN {
+        return Some(format!("Templates stack {MAX_CHAIN} deep at most"));
+    }
+    for pair in chain.windows(2) {
+        let (lower, upper) = (&pair[0], &pair[1]);
+        let (lname, uname) = (one_line(s(lower, "name")), one_line(s(upper, "name")));
+        if s(upper, "parent") != s(lower, "id") {
+            return Some(format!("{uname} doesn't build on {lname}"));
+        }
+        let have = strs(upper, "apps");
+        let missing: Vec<&str> = strs(lower, "apps").into_iter().filter(|a| !have.contains(a)).collect();
+        if !missing.is_empty() {
+            let names: Vec<String> =
+                missing.iter().map(|id| catalog::app(id).map(|a| a.name).unwrap_or_else(|| id.to_string())).collect();
+            return Some(format!("{uname} can't build on {lname}: it doesn't have {}", names.join(", ")));
+        }
+        if have.len() <= strs(lower, "apps").len() {
+            return Some(format!("{uname} adds no apps to {lname}"));
+        }
+    }
+    None
+}
+
+/// What a version 3 wadspace is built from: `{chain, template, setup,
+/// extensions?}` (`template` the top of the chain), or null with no template
+/// (or one that's gone). `lib`: `{templates, extensions}`. An Extensions
+/// layer made on another template doesn't count (the stack needs fixing).
+pub fn resolve_stack(lib: &Value, w: &Value) -> Value {
+    let chain = chain_of(lib, s(w, "template"));
+    let Some(t) = chain.last().cloned() else { return Value::Null };
+    let tid = s(&t, "id").to_string();
+    let ext = js::arr(lib, "extensions").iter().find(|e| s(e, "id") == s(w, "extensions") && s(e, "templateId") == tid);
+    match ext {
+        Some(e) => json!({ "chain": chain, "template": t, "setup": setup_of(e), "extensions": e }),
+        None => json!({ "chain": chain, "template": t, "setup": empty_setup(&tid) }),
+    }
+}
+
+/// The image a version 3 wadspace runs: its Extensions layer's, else its
+/// template's ("" with neither).
+pub fn stack_image_key(w: &Value) -> String {
+    match (s(w, "extensions"), s(w, "template")) {
+        ("", "") => String::new(),
+        ("", t) => format!("template:{t}"),
+        (e, _) => format!("custom:{e}"),
+    }
+}
+
+/// WadBrowser's apps that keep keys: the browser itself ("browser") and
+/// each web app ("web:<id>"), when the template has WadBrowser.
+pub fn key_items(template: &Value, setup: &Value) -> Vec<String> {
+    if !has_app(template, "wadbrowser") {
+        return vec![];
+    }
+    let web = js::arr(setup, "webapps").iter().map(|w| format!("web:{}", s(w, "id")));
+    std::iter::once("browser".to_string()).chain(web).collect()
+}
+
+/// WadBrowser's key groups, tidied: members that are gone dropped, and
+/// those in no group joining the first group with members (so by default
+/// one group: everything shares one profile). An empty group stays (it was
+/// made to drag apps into). `[{id, members, key?}]`.
+pub fn key_groups_of(template: &Value, setup: &Value, groups: &Value) -> Vec<Value> {
+    let items = key_items(template, setup);
+    if items.is_empty() {
+        return vec![];
+    }
+    let mut out: Vec<Value> = groups
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|g| {
+            let mut g = g.clone();
+            let members: Vec<Value> =
+                strs(&g, "members").into_iter().filter(|m| items.iter().any(|i| i == m)).map(Value::from).collect();
+            g["members"] = Value::Array(members);
+            g
+        })
+        .collect();
+    let placed: Vec<String> = out.iter().flat_map(|g| strs(g, "members")).map(String::from).collect();
+    let loose: Vec<Value> = items.iter().filter(|i| !placed.contains(i)).map(|i| Value::from(i.as_str())).collect();
+    if loose.is_empty() {
+        return out;
+    }
+    match out.iter().position(|g| !js::arr(g, "members").is_empty()) {
+        Some(i) => {
+            let mut members = js::arr(&out[i], "members").to_vec();
+            members.extend(loose);
+            out[i]["members"] = Value::Array(members);
+        }
+        None => out.insert(0, json!({ "id": "all", "members": loose })),
+    }
+    out
 }
 
 fn apps_of(template: &Value) -> Vec<App> {
@@ -428,23 +561,44 @@ pub fn is_extension_id(id: &str) -> bool {
     id.len() <= 120 && id.split_once('.').is_some_and(|(a, b)| ok(a) && b.split('.').all(ok))
 }
 
-/// The template's image: the base plus its apps.
-pub fn template_dockerfile(t: &Value) -> String {
-    let apps = apps_of(t);
+/// The image a template builds FROM: its parent template's, else the base.
+fn template_from(parent: &Value) -> String {
+    match s(parent, "id") {
+        "" => DEFAULT_BASE_IMAGE.into(),
+        id => image_ref(&format!("template:{id}")),
+    }
+}
+
+/// The template's image: the base plus its apps, or (with a `parent`, null
+/// for none) the parent template's image plus the apps it adds.
+pub fn template_dockerfile(t: &Value, parent: &Value) -> String {
+    let all = apps_of(t);
+    let had = strs(parent, "apps");
+    let apps: Vec<&App> = all.iter().filter(|a| !had.contains(&a.id.as_str())).collect();
     let name = one_line(s(t, "name"));
+    let mut label = format!(
+        "LABEL io.wadspaces.layer={} io.wadspaces.apps={}",
+        q(&format!("template:{}", s(t, "id"))),
+        q(&all.iter().map(|a| a.id.as_str()).collect::<Vec<_>>().join(","))
+    );
+    let first = match s(parent, "id") {
+        "" => format!("# {name} template. Generated by WadSpaces Client."),
+        pid => {
+            label.push_str(&format!(" io.wadspaces.parent={}", q(&format!("template:{pid}"))));
+            format!("# {name} template, built on {}. Generated by WadSpaces Client.", one_line(s(parent, "name")))
+        }
+    };
     let mut lines = vec![
-        format!("# {name} template. Generated by WadSpaces Client."),
-        format!("ARG BASE_IMAGE={DEFAULT_BASE_IMAGE}"),
+        first,
+        format!("ARG BASE_IMAGE={}", template_from(parent)),
         "FROM ${BASE_IMAGE}".into(),
         String::new(),
         format!("ENV TITLE={}", q(&name)),
-        format!(
-            "LABEL io.wadspaces.layer={} io.wadspaces.apps={}",
-            q(&format!("template:{}", s(t, "id"))),
-            q(&apps.iter().map(|a| a.id.as_str()).collect::<Vec<_>>().join(","))
-        ),
+        label,
         String::new(),
     ];
+    // A parent's features are installed already (wadspaces-feature leaves a
+    // marker for each, which this image inherits), so only the new apps'.
     let features = in_order(apps.iter().filter_map(|a| match a.recipe {
         Recipe::Feature { feature, .. } => Some(feature),
         _ => None,
@@ -478,11 +632,11 @@ pub fn template_dockerfile(t: &Value) -> String {
     lines.join("\n") + "\n"
 }
 
-/// A customization's image: its template's, with the apps set up.
-pub fn customization_dockerfile(c: &Value, t: &Value) -> String {
+/// An Extensions layer's image: its template's, with the apps set up.
+pub fn extensions_dockerfile(c: &Value, t: &Value) -> String {
     let name = one_line(s(c, "name"));
     let mut lines = vec![
-        format!("# {name}: {} customized. Generated by WadSpaces Client.", one_line(s(t, "name"))),
+        format!("# {name}: {}'s extensions. Generated by WadSpaces Client.", one_line(s(t, "name"))),
         format!("ARG BASE_IMAGE={}", image_ref(&format!("template:{}", s(t, "id")))),
         "FROM ${BASE_IMAGE}".into(),
         String::new(),
@@ -530,24 +684,26 @@ fn layer(key: String, from: String, files: Vec<(String, String)>) -> Value {
 
 /// A template's build folder: `{key, ref, from, files: [{path, content}], sha}`.
 /// `sha` labels the built image, so a later Dockerfile can be told apart.
-pub fn template_layer(t: &Value) -> Value {
+/// `parent`: the template it builds on, or null. The desktop's layout is the
+/// whole template's (its parent's apps too), in its order.
+pub fn template_layer(t: &Value, parent: &Value) -> Value {
     let setup = empty_setup(s(t, "id"));
     let mut files = vec![
-        ("Dockerfile".to_string(), template_dockerfile(t)),
+        ("Dockerfile".to_string(), template_dockerfile(t, parent)),
         ("root/etc/wadspaces/layout.json".into(), layout_json_for(t, &setup)),
     ];
     if let Some(conf) = wadbrowser_conf(t, &setup) {
         files.push(("root/etc/wadspaces/wadbrowser.conf".into(), conf));
     }
-    layer(format!("template:{}", s(t, "id")), DEFAULT_BASE_IMAGE.into(), files)
+    layer(format!("template:{}", s(t, "id")), template_from(parent), files)
 }
 
-/// A customization's build folder, FROM its template's image. (wadd adds
-/// the web apps' icons under root/; they follow from the web apps' sites,
-/// which the Dockerfile already has, so they aren't in the sha.)
-pub fn customization_layer(c: &Value, t: &Value) -> Value {
+/// An Extensions layer's build folder, FROM its template's image. (wadd
+/// adds the web apps' icons under root/; they follow from the web apps'
+/// sites, which the Dockerfile already has, so they aren't in the sha.)
+pub fn extensions_layer(c: &Value, t: &Value) -> Value {
     let mut files = vec![
-        ("Dockerfile".to_string(), customization_dockerfile(c, t)),
+        ("Dockerfile".to_string(), extensions_dockerfile(c, t)),
         ("root/etc/wadspaces/layout.json".into(), layout_json_for(t, c)),
     ];
     if let Some(conf) = wadbrowser_conf(t, c) {
@@ -605,14 +761,83 @@ pub fn run_summary(w: &Value, projects: &[Value], slots: &[Value]) -> Vec<String
 
 // ------------------------------------------------------- installing one
 
+/// One sign-in a wadspace mounts, as wadd takes it.
+fn signin_entry(r: &Value, app: &str, web: bool, kind: &str, slot: &str) -> Value {
+    let mut e = Obj::new();
+    e.insert("id".into(), s(r, "id").into());
+    e.insert("app".into(), app.into());
+    if web {
+        e.insert("web".into(), true.into());
+    }
+    e.insert("name".into(), s(r, "name").into());
+    e.insert("kind".into(), kind.into());
+    e.insert("slot".into(), slot.into());
+    Value::Object(e)
+}
+
+/// What WadBrowser's key group member signs in: the browser itself
+/// ("@browser", its windows that aren't a web app's) or a web app (its id).
+pub const BROWSER_APP: &str = "@browser";
+
+/// A version 2 wadspace's sign-ins: one per slot it keeps one in.
+fn signins_v2(w: &Value, template: &Value, setup: &Value) -> Vec<Value> {
+    let mut out = Vec::new();
+    for sl in slots_for(template, setup) {
+        let key = s(&sl, "key");
+        let Some(r) = w.get("secrets").and_then(|x| x.get(key)).filter(|r| !s(r, "id").is_empty()) else { continue };
+        let (prefix, rest) = key.split_once(':').unwrap_or(("", key));
+        // The app the sign-in is for: a web app's id (its WadBrowser window is
+        // wadspaces-webapp-<id>), VS Code for an extension's, else the app.
+        let app = if prefix == "ext" { "vscode" } else { rest };
+        out.push(signin_entry(r, app, prefix == "web", s(&sl, "kind"), key));
+    }
+    out
+}
+
+/// A version 3 wadspace's sign-ins: its keys by slot (apps and VS Code's
+/// extensions), then WadBrowser's groups, each member signing in with its
+/// group's key. Keys for what the stack doesn't have are left out.
+fn signins_v3(w: &Value, template: &Value, setup: &Value) -> Vec<Value> {
+    let secrets = &w["customization"]["secrets"];
+    let mut out = Vec::new();
+    for sl in slots_for(template, setup) {
+        let key = s(&sl, "key");
+        if key.starts_with("web:") {
+            continue;
+        }
+        let Some(r) = secrets.get("bySlot").and_then(|x| x.get(key)).filter(|r| !s(r, "id").is_empty()) else {
+            continue;
+        };
+        let app = if key.starts_with("ext:") { "vscode" } else { key.split_once(':').map_or(key, |(_, a)| a) };
+        out.push(signin_entry(r, app, false, s(&sl, "kind"), key));
+    }
+    for g in key_groups_of(template, setup, &secrets["groups"]) {
+        let Some(r) = g.get("key").filter(|r| !s(r, "id").is_empty()) else { continue };
+        let slot = format!("group:{}", s(&g, "id"));
+        for m in strs(&g, "members") {
+            let app = if m == "browser" { BROWSER_APP } else { m.strip_prefix("web:").unwrap_or(m) };
+            out.push(signin_entry(r, app, true, signins::WEB, &slot));
+        }
+    }
+    out
+}
+
 /// The wadd workspace a wadspace installs as on a machine: its layers' image,
 /// its name and wallpaper at run time, a /config of its own, and its secrets. No
 /// Super+number (that follows what's running) and no start with the machine.
-/// `opts`: `{tz, secrets?: [podman secret names]}`.
+/// `template` and `setup` are what it's built from (the top of its chain, and
+/// its Extensions' setup or the template's). `opts`: `{tz, secrets?: [podman
+/// secret names]}`.
 pub fn workspace_for(w: &Value, template: &Value, setup: &Value, opts: &Value) -> Value {
     let id = s(w, "id");
-    let base = w.get("base").cloned().unwrap_or(Value::Null);
-    let image = image_ref(&image_key(&base));
+    let v3 = w.get("version").and_then(Value::as_u64) == Some(3);
+    // Version 3 keeps its own in its customization.
+    let own = if v3 { &w["customization"] } else { w };
+    let image = if v3 {
+        image_ref(&stack_image_key(w))
+    } else {
+        image_ref(&image_key(&w.get("base").cloned().unwrap_or(Value::Null)))
+    };
     let tz = match s(opts, "tz") {
         "" => "Etc/UTC",
         tz => tz,
@@ -621,36 +846,15 @@ pub fn workspace_for(w: &Value, template: &Value, setup: &Value, opts: &Value) -
     for (k, v) in [("PUID", "1000"), ("PGID", "1000"), ("TZ", tz)] {
         env.insert(k.into(), v.into());
     }
-    env.insert("TITLE".into(), one_line(s(w, "name")).into());
-    let wp = w.get("wallpaper").unwrap_or(&Value::Null);
+    env.insert("TITLE".into(), one_line(s(own, "name")).into());
+    let wp = own.get("wallpaper").unwrap_or(&Value::Null);
     env.insert("WALLPAPER".into(), format!("{WALLPAPER_DIR}/wallpaper.{}", wallpaper_ext(wp)).into());
     // Filling the screen, as the Builder's preview shows it (the base centres).
     env.insert("WALLPAPER_MODE".into(), "fill".into());
-    let mut signins = Vec::new();
-    for sl in slots_for(template, setup) {
-        let key = s(&sl, "key");
-        let Some(r) = w.get("secrets").and_then(|x| x.get(key)).filter(|r| !s(r, "id").is_empty()) else { continue };
-        let (prefix, rest) = key.split_once(':').unwrap_or(("", key));
-        let mut e = Obj::new();
-        e.insert("id".into(), s(r, "id").into());
-        // The app the sign-in is for: a web app's id (its WadBrowser window is
-        // wadspaces-webapp-<id>), VS Code for an extension's, else the app.
-        let app = match prefix {
-            "ext" => "vscode",
-            _ => rest,
-        };
-        e.insert("app".into(), app.into());
-        if prefix == "web" {
-            e.insert("web".into(), true.into());
-        }
-        e.insert("name".into(), s(r, "name").into());
-        e.insert("kind".into(), s(&sl, "kind").into());
-        e.insert("slot".into(), key.into());
-        signins.push(Value::Object(e));
-    }
+    let signins = if v3 { signins_v3(w, template, setup) } else { signins_v2(w, template, setup) };
     let mut out = Obj::new();
     out.insert("id".into(), id.into());
-    out.insert("name".into(), one_line(s(w, "name")).into());
+    out.insert("name".into(), one_line(s(own, "name")).into());
     out.insert("image".into(), image.into());
     out.insert("display".into(), "host".into());
     out.insert("enabled".into(), true.into());
@@ -662,6 +866,134 @@ pub fn workspace_for(w: &Value, template: &Value, setup: &Value, opts: &Value) -
     out.insert("signins".into(), Value::Array(signins));
     out.insert("hotkey".into(), Value::Null);
     out.insert("autostart".into(), false.into());
+    Value::Object(out)
+}
+
+// ------------------------------------------------------ version 2 → 3
+
+/// A version 2 wadspace as a version 3 stack (anything else comes back as
+/// it is). `lib`: `{templates, customizations}` as they were; `projects`: the
+/// project documents its `projects` named.
+///
+/// - `base` becomes `template` (and `extensions`, for a customization).
+/// - Name, description, wallpaper, projects and secrets move into its
+///   `customization`.
+/// - Projects become the stack's own: a GitHub one is cloned into the
+///   wadspace (`{kind: "github", repo, ref?, as, setup?}`); a folder or a
+///   drive's is copied in once (`{kind: "copy", source, as}`, no size yet:
+///   wadd copies it the first time the wadspace starts where it is).
+/// - Web apps' secrets become WadBrowser's key groups: one group per sign-in,
+///   and first a group without a key for the browser and the web apps that
+///   kept none. Every other secret stays by its slot.
+///
+/// `order` is left to the caller (it orders all of them).
+pub fn migrate_v2(w: &Value, lib: &Value, projects: &[Value]) -> Value {
+    if w.get("version").and_then(Value::as_u64) != Some(2) {
+        return w.clone();
+    }
+    let base = &w["base"];
+    let custom = s(base, "kind") == "customization";
+    let found = resolve(lib, base);
+    let template_id = match (&found, custom) {
+        (Value::Object(_), _) => s(&found["template"], "id").to_string(),
+        (_, false) => s(base, "id").to_string(),
+        _ => js::arr(lib, "customizations")
+            .iter()
+            .find(|c| s(c, "id") == s(base, "id"))
+            .map(|c| s(c, "templateId").to_string())
+            .unwrap_or_default(),
+    };
+    let mut out = Obj::new();
+    out.insert("version".into(), 3.into());
+    for k in ["id", "owner", "sharedWith"] {
+        if let Some(v) = w.get(k) {
+            out.insert(k.into(), v.clone());
+        }
+    }
+    if !template_id.is_empty() {
+        out.insert("template".into(), template_id.into());
+    }
+    if custom {
+        out.insert("extensions".into(), s(base, "id").into());
+    }
+
+    let mut moved = Vec::new();
+    for pid in strs(w, "projects") {
+        let Some(p) = projects.iter().find(|p| s(p, "id") == pid) else { continue };
+        let src = &p["source"];
+        let as_ = s(p, "mountName");
+        let mut e = Obj::new();
+        e.insert("id".into(), pid.into());
+        match s(src, "kind") {
+            "git" => {
+                e.insert("kind".into(), "github".into());
+                e.insert("repo".into(), crate::projects::repo_full_name(s(src, "url")).into());
+                if !s(src, "ref").is_empty() {
+                    e.insert("ref".into(), s(src, "ref").into());
+                }
+            }
+            "folder" => {
+                e.insert("kind".into(), "copy".into());
+                e.insert("source".into(), json!({ "machineId": s(src, "machineId"), "paths": [s(src, "path")] }));
+            }
+            "drive" => {
+                e.insert("kind".into(), "copy".into());
+                let drive = json!({ "uuid": s(src, "uuid"), "label": s(src, "label"), "fstype": s(src, "fstype") });
+                e.insert("source".into(), json!({ "drive": drive, "paths": [s(src, "subpath")] }));
+            }
+            _ => continue,
+        }
+        e.insert("as".into(), as_.into());
+        if !s(p, "setup").is_empty() && s(src, "kind") == "git" {
+            e.insert("setup".into(), s(p, "setup").into());
+        }
+        moved.push(Value::Object(e));
+    }
+
+    let mut by_slot = Obj::new();
+    let mut groups: Vec<Value> = Vec::new();
+    let mut keyless: Vec<Value> = Vec::new();
+    let setup = found.get("setup").cloned().unwrap_or(Value::Null);
+    let template = found.get("template").cloned().unwrap_or(Value::Null);
+    let secrets = w.get("secrets").and_then(Value::as_object);
+    for (slot, r) in secrets.into_iter().flatten() {
+        if slot.starts_with("web:") {
+            continue;
+        }
+        by_slot.insert(slot.clone(), r.clone());
+    }
+    for item in key_items(&template, &setup) {
+        match secrets.and_then(|x| x.get(&item)).filter(|r| !s(r, "id").is_empty()) {
+            Some(r) => match groups.iter_mut().find(|g| s(&g["key"], "id") == s(r, "id")) {
+                Some(g) => g["members"].as_array_mut().expect("a list").push(item.into()),
+                None => groups.push(json!({ "id": format!("g-{}", s(r, "id")), "members": [item], "key": r })),
+            },
+            None => keyless.push(item.into()),
+        }
+    }
+    if !groups.is_empty() && !keyless.is_empty() {
+        groups.insert(0, json!({ "id": "all", "members": keyless }));
+    }
+    let mut keys = json!({ "bySlot": by_slot });
+    if !groups.is_empty() {
+        keys["groups"] = Value::Array(groups);
+    }
+
+    out.insert(
+        "customization".into(),
+        json!({
+            "name": s(w, "name"),
+            "description": s(w, "description"),
+            "wallpaper": w.get("wallpaper").cloned().unwrap_or(Value::Null),
+            "projects": moved,
+            "secrets": keys,
+        }),
+    );
+    for k in ["createdAt", "updatedAt", "deletedAt"] {
+        if let Some(v) = w.get(k) {
+            out.insert(k.into(), v.clone());
+        }
+    }
     Value::Object(out)
 }
 

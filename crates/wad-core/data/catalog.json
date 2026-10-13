@@ -39,7 +39,7 @@
       "id": "vscode",
       "name": "VS Code",
       "summary": "Code editor with extensions",
-      "description": "Microsoft's code editor. A customization picks its extensions, which are installed into the image so they're there on first start. AI extensions like Claude Code and Codex keep a sign-in, chosen when you construct the wadspace.",
+      "description": "Microsoft's code editor. Its Extensions pick its extensions, which are installed into the image so they're there on first start. A key keeps its settings and accounts, and AI extensions like Claude Code and Codex keep keys of their own.",
       "category": "Development",
       "icon": "/apps/vscode/icon.png",
       "screenshots": [
@@ -61,7 +61,10 @@
       "homepage": "https://code.visualstudio.com",
       "options": "vscode",
       "opensFolders": true,
-      "secret": null
+      "secret": {
+        "kind": "vscode",
+        "id": "VSCode"
+      }
     },
     {
       "id": "obsidian",

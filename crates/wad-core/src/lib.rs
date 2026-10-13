@@ -1,5 +1,5 @@
 //! WadSpaces' core logic, shared by wadd (native) and the UI (WebAssembly, via
-//! wad-wasm): the Builder's layers (templates, customizations, wadspaces) and
+//! wad-wasm): the Builder's layers (templates, extensions, wadspaces) and
 //! their images, the catalog, projects, saved sign-ins, and the units wadd
 //! writes.
 //!
@@ -107,10 +107,17 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
         "bootables" => Value::Array(layers::bootables(a(0), a(1))),
         "layoutJsonFor" => layers::layout_json_for(a(0), a(1)).into(),
         "isExtensionId" => layers::is_extension_id(s(0)).into(),
-        "templateDockerfile" => layers::template_dockerfile(a(0)).into(),
-        "customizationDockerfile" => layers::customization_dockerfile(a(0), a(1)).into(),
-        "templateLayer" => layers::template_layer(a(0)),
-        "customizationLayer" => layers::customization_layer(a(0), a(1)),
+        "templateDockerfile" => layers::template_dockerfile(a(0), a(1)).into(),
+        "extensionsDockerfile" => layers::extensions_dockerfile(a(0), a(1)).into(),
+        "templateLayer" => layers::template_layer(a(0), a(1)),
+        "extensionsLayer" => layers::extensions_layer(a(0), a(1)),
+        "chainOf" => Value::Array(layers::chain_of(a(0), s(1))),
+        "chainOk" => layers::chain_ok(list(0)).map(Value::from).unwrap_or(Value::Null),
+        "resolveStack" => layers::resolve_stack(a(0), a(1)),
+        "stackImageKey" => layers::stack_image_key(a(0)).into(),
+        "keyItems" => json!(layers::key_items(a(0), a(1))),
+        "keyGroupsOf" => Value::Array(layers::key_groups_of(a(0), a(1), a(2))),
+        "migrateV2" => layers::migrate_v2(a(0), a(1), list(2)),
         "wallpaperExt" => layers::wallpaper_ext(a(0)).into(),
         "runSummary" => json!(layers::run_summary(a(0), list(1), list(2))),
         "workspaceFor" => layers::workspace_for(a(0), a(1), a(2), a(3)),

@@ -79,9 +79,9 @@ fn layer(docs: &str, dir: &str) -> Result<(), String> {
     let text = std::fs::read_to_string(docs).map_err(|e| format!("{docs}: {e}"))?;
     let docs: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{docs}: {e}"))?;
     let template = &docs["template"];
-    let mut layers = vec![("template", wad_core::layers::template_layer(template))];
+    let mut layers = vec![("template", wad_core::layers::template_layer(template, &serde_json::Value::Null))];
     if !docs["customization"].is_null() {
-        layers.push(("customization", wad_core::layers::customization_layer(&docs["customization"], template)));
+        layers.push(("customization", wad_core::layers::extensions_layer(&docs["customization"], template)));
     }
     for (name, l) in layers {
         let out = PathBuf::from(dir).join(name);

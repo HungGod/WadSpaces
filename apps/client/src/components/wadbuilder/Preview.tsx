@@ -3,7 +3,7 @@
 // what's mounted at start.
 import { useLayoutEffect, useState } from "react";
 import { FileCode2, LayoutDashboard } from "lucide-react";
-import { customizationDockerfile, desktopFor, imageRef, resolve, runSummary, sameSetup, slotsFor, startMenuFor, templateDockerfile, type Customization, type LayerKey } from "@core/layers";
+import { extensionsDockerfile, desktopFor, imageRef, resolve, runSummary, sameSetup, slotsFor, startMenuFor, templateDockerfile, type Customization, type LayerKey } from "@core/layers";
 import { DEFAULT_BASE_IMAGE } from "@core/spec";
 import { useApp } from "@/lib/store";
 import { Desktop } from "../desktop/Desktop";
@@ -107,7 +107,7 @@ function Layers() {
           title={`Customization: ${custom.name}`}
           image={r.customization && !changed ? `custom:${r.customization.id}` : undefined}
           subtitle={r.customization && !changed ? undefined : "Not saved yet: save Step 2 to build it"}
-          dockerfile={customizationDockerfile(custom, r.template)}
+          dockerfile={extensionsDockerfile(custom, r.template)}
         />
       )}
       <div className="rounded-2xl border border-dashed border-line-strong bg-surface/60 p-4">

@@ -2,7 +2,7 @@
 // documents, layer images that build when asked (or on `finishBuilds`),
 // launches recorded instead of run, and saved sign-ins.
 import type { BrowserSetup, Customization, LayerKey, Template, Wadspace } from "@core/layers";
-import { customizationLayer, templateLayer } from "@core/layers";
+import { extensionsLayer, templateLayer } from "@core/layers";
 import type { Project, ProjectDraft } from "@core/projects";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
 import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser } from "@/lib/types";
@@ -147,7 +147,7 @@ export class FakeBackend implements Backend {
       const tRow = this.images.get(`template:${t.id}`) ?? this.built(`template:${t.id}`, templateLayer(t).sha, "base");
       if (key.startsWith("custom:")) {
         const c = lib.customizations.find((x) => x.id === key.slice(7))!;
-        this.built(key, customizationLayer(c, t).sha, tRow.id);
+        this.built(key, extensionsLayer(c, t).sha, tRow.id);
       } else this.built(key, templateLayer(t).sha, "base");
       this.buildListeners.forEach((fn) => fn({ id, wadspaceId: key, name: key, status: "done", progress: 1, from: 0, lines: [], layer: key }));
     }

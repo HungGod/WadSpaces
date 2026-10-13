@@ -176,7 +176,8 @@ pub fn layer_steps(req: &LayerBuildRequest) -> Result<Vec<LayerStep>, ApiError> 
     if apps.is_empty() || apps.iter().any(|a| a.as_str().and_then(wad_core::catalog::app).is_none()) {
         return Err(bad(format!("{}: a template's apps are catalog apps, at least one", str_of(t, "name"))));
     }
-    let template = layer_step(&wad_core::layers::template_layer(t), &str_of(t, "name"), vec![], false);
+    let template =
+        layer_step(&wad_core::layers::template_layer(t, &serde_json::Value::Null), &str_of(t, "name"), vec![], false);
     match req.layer.split_once(':') {
         Some(("template", id)) if id == tid => Ok(vec![template]),
         Some(("custom", id)) => {
@@ -191,7 +192,7 @@ pub fn layer_steps(req: &LayerBuildRequest) -> Result<Vec<LayerStep>, ApiError> 
             let icons = icon_jobs(
                 &serde_json::json!({ "webapps": if has_browser { c["webapps"].clone() } else { Value::Null } }),
             );
-            let custom = layer_step(&wad_core::layers::customization_layer(c, t), &str_of(c, "name"), icons, false);
+            let custom = layer_step(&wad_core::layers::extensions_layer(c, t), &str_of(c, "name"), icons, false);
             Ok(vec![LayerStep { if_needed: true, ..template }, custom])
         }
         _ => Err(bad(format!("{:?} isn't this template's layer or a customization's", req.layer))),

@@ -86,6 +86,7 @@ export function runLine(app: AppDef): string | null {
 /** What a sign-in of each kind keeps, for the Secrets page and Step 3. */
 export const SECRET_KINDS: Record<SecretKind, { label: string; keeps: string }> = {
   web: { label: "WadBrowser sign-in", keeps: "A cookie profile: one or more web apps can share it" },
+  vscode: { label: "VS Code settings", keeps: "VS Code's accounts, settings, keybindings and snippets" },
   obsidian: { label: "Obsidian sign-in", keeps: "Obsidian's account (Sync, Publish)" },
   steam: { label: "Steam sign-in", keeps: "Steam's login and each account's settings" },
   "vscode-claude-code": { label: "Claude Code sign-in", keeps: "Claude Code's login and settings (~/.claude)" },

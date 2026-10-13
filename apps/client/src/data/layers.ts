@@ -9,7 +9,7 @@
 //     with a throwaway run's wallpaper drawn here;
 //   - what installing a wadspace on a machine sends (PUT /v1/wadspaces/{id}).
 import {
-  customizationLayer,
+  extensionsLayer,
   imageKey,
   resolve,
   templateLayer,
@@ -58,7 +58,7 @@ export function imageState(key: LayerKey, lib: Library, images: Partial<Record<L
   const t = c && lib.templates.find((x) => x.id === c.templateId);
   if (!c || !t) return "built";
   const parent = images[`template:${t.id}`];
-  return row.dockerfileSha === customizationLayer(c, t).sha && !!parent && parent.id === row.from ? "built" : "changed";
+  return row.dockerfileSha === extensionsLayer(c, t).sha && !!parent && parent.id === row.from ? "built" : "changed";
 }
 
 /** The image rows by layer. */
