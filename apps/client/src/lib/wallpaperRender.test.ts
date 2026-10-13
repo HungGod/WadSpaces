@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WALLPAPER_PRESETS } from "@/components/desktop/wallpapers";
-import { parseStops, splitTop } from "./wallpaperRender";
+import { clearStops, parseStops, radialShape, rgbOf, splitTop } from "./wallpaperRender";
 
 describe("wallpaper CSS parsing", () => {
   it("splits layers on top-level commas only", () => {
@@ -24,10 +24,34 @@ describe("wallpaper CSS parsing", () => {
   });
 
   it("every gradient preset parses into layers the renderer knows", () => {
-    for (const p of WALLPAPER_PRESETS.filter((x) => x.wallpaper.type === "gradient")) {
+    expect(WALLPAPER_PRESETS.map((p) => p.name)).toEqual(["Aurora", "Nebula", "Acid Dusk", "Neon Tide", "Ember", "Glacier", "Midnight", "Prism", "Haze"]);
+    for (const p of WALLPAPER_PRESETS) {
+      expect(p.wallpaper.type).toBe("gradient");
       for (const layer of splitTop(p.wallpaper.value)) {
-        expect(layer).toMatch(/^(linear-gradient\(|radial-gradient\(\d|#[0-9a-f]{3,8}$)/i);
+        expect(layer).toMatch(/^(linear-gradient\(|radial-gradient\(|#[0-9a-f]{3,8}$)/i);
+        const radial = layer.match(/^radial-gradient\((.*)\)$/s);
+        if (radial) {
+          const [shape, ...stops] = splitTop(radial[1]);
+          expect(radialShape(shape), `${p.name}: ${shape}`).not.toBeNull();
+          for (const st of clearStops(parseStops(stops))) expect(rgbOf(st.color), `${p.name}: ${st.color}`).not.toBeNull();
+        }
       }
     }
+  });
+
+  it("reads a radial shape whose centre is off the canvas", () => {
+    expect(radialShape("120% 80% at 50% -5%")).toEqual([1.2, 0.8, 0.5, -0.05]);
+    expect(radialShape("closest-side")).toBeNull();
+  });
+
+  it("fades to transparent in the neighbouring colour, as CSS does (not through black)", () => {
+    expect(rgbOf("rgb(198 255 31 / 0.38)")).toEqual([198, 255, 31]);
+    expect(rgbOf("#ff3d8155")).toEqual([255, 61, 129]);
+    expect(rgbOf("#abc")).toEqual([170, 187, 204]);
+    expect(clearStops(parseStops(["rgb(255 61 129 / 0.5)", "transparent 60%"]))).toEqual([
+      { color: "rgb(255 61 129 / 0.5)", at: 0 },
+      { color: "rgba(255, 61, 129, 0)", at: 0.6 },
+    ]);
+    expect(clearStops(parseStops(["transparent", "#0a0614"]))[0].color).toBe("rgba(10, 6, 20, 0)");
   });
 });

@@ -48,9 +48,41 @@ export function parseStops(parts: string[]): { color: string; at: number }[] {
   return stops.map((s) => ({ color: s.color, at: s.at! }));
 }
 
+/** A colour's red, green and blue (#rgb, #rrggbb(aa), rgb()/rgba(), comma or space separated), or null. */
+export function rgbOf(color: string): [number, number, number] | null {
+  const c = color.trim().toLowerCase();
+  const hex = c.match(/^#([0-9a-f]{3,8})$/);
+  if (hex) {
+    const h = hex[1].length <= 4 ? [...hex[1].slice(0, 3)].map((x) => x + x).join("") : hex[1].slice(0, 6);
+    return [0, 2, 4].map((i) => Number.parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+  }
+  const fn = c.match(/^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/);
+  return fn ? [Number(fn[1]), Number(fn[2]), Number(fn[3])] : null;
+}
+
+/**
+ * CSS fades a gradient into `transparent` without darkening it (it mixes
+ * colours with their alpha applied), where a canvas gradient would pass
+ * through transparent black. So a transparent stop becomes its neighbour's
+ * colour at no opacity: the one before it, else the one after.
+ */
+export function clearStops(stops: { color: string; at: number }[]): { color: string; at: number }[] {
+  return stops.map((s, i) => {
+    if (s.color.trim().toLowerCase() !== "transparent") return s;
+    const near = [...stops.slice(0, i).reverse(), ...stops.slice(i + 1)].map((x) => rgbOf(x.color)).find(Boolean);
+    return near ? { ...s, color: `rgba(${near.join(", ")}, 0)` } : s;
+  });
+}
+
 function addStops(g: CanvasGradient, stops: { color: string; at: number }[]) {
   // Canvas wants 0..1; CSS allows stops past the ends (e.g. 120%). Clamp.
-  for (const s of stops) g.addColorStop(Math.min(1, Math.max(0, s.at)), s.color);
+  for (const s of clearStops(stops)) g.addColorStop(Math.min(1, Math.max(0, s.at)), s.color);
+}
+
+/** A radial gradient's "RX% RY% at X% Y%" as fractions of the canvas, or null. */
+export function radialShape(arg: string): [number, number, number, number] | null {
+  const m = arg.match(/^(-?[\d.]+)%\s+(-?[\d.]+)%\s+at\s+(-?[\d.]+)%\s+(-?[\d.]+)%$/);
+  return m ? [m[1], m[2], m[3], m[4]].map((x) => Number(x) / 100) as [number, number, number, number] : null;
 }
 
 function drawLayer(ctx: CanvasRenderingContext2D, layer: string, w: number, h: number) {
@@ -78,18 +110,16 @@ function drawLayer(ctx: CanvasRenderingContext2D, layer: string, w: number, h: n
     ctx.fillRect(0, 0, w, h);
     return;
   }
-  // radial-gradient(RX% RY% at X% Y%, stops…) — the only shape the presets use.
+  // radial-gradient(RX% RY% at X% Y%, stops…): the only shape the presets use
+  // (a centre may be off the canvas: -5%, 108%).
   let rx = 0.5 * w;
   let ry = 0.5 * h;
   let cx = w / 2;
   let cy = h / 2;
-  const shape = args[0].match(/^([\d.]+)%\s+([\d.]+)%\s+at\s+([\d.]+)%\s+([\d.]+)%$/);
+  const shape = radialShape(args[0]);
   if (shape) {
     args.shift();
-    rx = (Number(shape[1]) / 100) * w;
-    ry = (Number(shape[2]) / 100) * h;
-    cx = (Number(shape[3]) / 100) * w;
-    cy = (Number(shape[4]) / 100) * h;
+    [rx, ry, cx, cy] = [shape[0] * w, shape[1] * h, shape[2] * w, shape[3] * h];
   }
   const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
   addStops(g, parseStops(args));
