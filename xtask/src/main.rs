@@ -11,6 +11,9 @@
 //!   images/examples/), written to `<dir>/template` and
 //!   `<dir>/customization`; one line per layer on stdout:
 //!   `<key> <image ref> <FROM> <sha>`. images/build.sh --example uses it.
+//!
+//! Its tests check repo files no other crate owns (the base image's start-up
+//! banner).
 
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -117,6 +120,31 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("xtask: {e}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::root;
+
+    /// The base image's start-up banner (linuxserver's init-adduser prints it
+    /// with `cat`): it shows the same in any terminal and in podman logs or
+    /// journalctl, so plain printable ASCII, LF line ends, no trailing spaces,
+    /// narrower than 80 columns, ending in a newline.
+    #[test]
+    fn the_branding_is_terminal_safe() {
+        let path = root().join("images/base/root/etc/s6-overlay/s6-rc.d/init-adduser/branding");
+        let text = std::fs::read(&path).expect("the branding file");
+        assert!(text.ends_with(b"\n"), "ends in a newline");
+        for (n, line) in text.split(|&b| b == b'\n').enumerate() {
+            let n = n + 1;
+            assert!(
+                line.iter().all(|&b| (b' '..=b'~').contains(&b)),
+                "line {n}: printable ASCII only (no tabs, CR or UTF-8)"
+            );
+            assert!(!line.ends_with(b" "), "line {n}: trailing spaces");
+            assert!(line.len() <= 80, "line {n}: wider than 80 columns");
         }
     }
 }

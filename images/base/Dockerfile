@@ -41,7 +41,11 @@ LABEL build_version="WadSpaces base version:- ${VERSION} Build-date:- ${BUILD_DA
 LABEL maintainer="dwadsworth"
 LABEL org.opencontainers.image.source="https://github.com/HungGod/Workspace-Switcher"
 
-ENV HOME="/config" \
+# The start-up log's banner is ours (root/etc/s6-overlay/s6-rc.d/
+# init-adduser/branding, printed with `cat`); LSIO_FIRST_PARTY=false keeps
+# linuxserver's start-up code from writing theirs over it.
+ENV LSIO_FIRST_PARTY=false \
+    HOME="/config" \
     TITLE="WadSpaces" \
     DESKTOP_DIR="/config/Desktop" \
     GITHUB_TOKEN_FILE="/run/secrets/github_token" \
