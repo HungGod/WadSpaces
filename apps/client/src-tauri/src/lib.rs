@@ -10,6 +10,7 @@ mod rswadd;
 mod spike;
 mod theme;
 mod wadd;
+mod webicon;
 mod window;
 
 use specta_typescript::Typescript;
@@ -42,6 +43,7 @@ fn commands() -> tauri_specta::Builder<tauri::Wry> {
             github::github_pending,
             github::github_save_token,
             theme::set_theme,
+            theme::hud_bar_open,
             wadd::wadd_request,
             wadd::wadd_last_state,
         ])
@@ -92,6 +94,16 @@ fn run(kiosk: bool) {
         }))
         .manage(github::GithubState::new())
         .manage(wadd::Wadd::new())
+        .manage(theme::Kiosk(kiosk))
+        // Web apps' icons, through wadd (webicon.rs); the app's own window only.
+        .register_asynchronous_uri_scheme_protocol(webicon::SCHEME, |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            if ctx.webview_label() != window::MAIN {
+                responder.respond(tauri::http::Response::builder().status(403).body(Vec::new()).expect("a response"));
+                return;
+            }
+            tauri::async_runtime::spawn(async move { responder.respond(webicon::serve(&app, request.uri()).await) });
+        })
         .invoke_handler({
             let typed = commands.invoke_handler();
             move |invoke| {

@@ -36,6 +36,13 @@ export const commands = {
 } | null) => __TAURI_INVOKE<GithubSignedIn>("github_save_token", { account }),
 	/**  Tells the HUD which theme the app shows. */
 	setTheme: (theme: Theme) => __TAURI_INVOKE<null>("set_theme", { theme }),
+	/**
+	 *  Whether the HUD's bar is out along the bottom (not tucked behind its
+	 *  arrow), so the app keeps what's at its bottom edge clear of it. Only the
+	 *  machine's app has the HUD over it; the HUD remembers its bar in
+	 *  ~/.config/wadspaces/hud.json (no file yet: it's out).
+	 */
+	hudBarOpen: () => __TAURI_INVOKE<boolean>("hud_bar_open"),
 	/**  Calls wadd's API: `path` is like `/api/projects?x=1` or `/v1/images`. */
 	waddRequest: (method: Method, path: string, body: unknown | null) => __TAURI_INVOKE<Json>("wadd_request", { method, path, body }),
 	/**  The last `state` event (wadd's snapshot), if one has arrived. */

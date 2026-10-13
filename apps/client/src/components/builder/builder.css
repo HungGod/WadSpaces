@@ -1020,7 +1020,7 @@ body.is-dragging * {
 .wb .toasts {
   position: fixed;
   left: 50%;
-  bottom: 84px;
+  bottom: calc(84px + var(--hud-room, 0px));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -2613,7 +2613,9 @@ body.is-dragging .wb .delete-area .bucket.drop-ok {
 /* ─────────── build + delete, centred along the bottom ─────────── */
 .wb .bottom-buckets {
   position: relative;
-  height: 66px;
+  /* Taller by the HUD's bar while it's out (--hud-room, lib/hud.ts): the buckets sit above it. */
+  height: calc(66px + var(--hud-room, 0px));
+  transition: height 0.18s;
   border-top: 1px solid var(--line);
   background: var(--bg-2);
   z-index: 20;
@@ -2622,7 +2624,8 @@ body.is-dragging .wb .delete-area .bucket.drop-ok {
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: 9px;
+  bottom: calc(9px + var(--hud-room, 0px));
+  transition: bottom 0.18s;
   display: flex;
   justify-content: center;
   align-items: flex-end;

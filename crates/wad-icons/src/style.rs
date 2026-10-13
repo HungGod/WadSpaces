@@ -38,6 +38,41 @@ pub fn plain(img: &RgbaImage) -> RgbaImage {
     letterbox(img, SIZE)
 }
 
+/// A site's icon as it is (in colour), fitted to `size`: how WadSpaces Client
+/// shows a web app. Dark ink on nothing (GitHub's mark) would vanish on a dark
+/// desktop: it goes on a white rounded tile.
+pub fn fit(img: &RgbaImage, size: u32) -> RgbaImage {
+    if !dark_ink(img) {
+        return letterbox(img, size);
+    }
+    let mut tile = Pixmap::new(size, size).expect("a tile pixmap");
+    fill_rounded(&mut tile, 0.0, 0.0, size as f32, size as f32, size as f32 * 0.22, [255, 255, 255, 255]);
+    let mut out = to_image(&tile);
+    let inner = (size as f32 * 0.72).round() as u32;
+    let at = (size - inner) / 2;
+    for (x, y, p) in letterbox(img, inner).enumerate_pixels() {
+        if p[3] > 0 {
+            over(out.get_pixel_mut(x + at, y + at), p.0);
+        }
+    }
+    out
+}
+
+/// Mostly dark where it's drawn, and see-through around it.
+fn dark_ink(img: &RgbaImage) -> bool {
+    let (mut drawn, mut light, mut clear) = (0u64, 0f64, 0u64);
+    for p in img.pixels() {
+        if p[3] < 16 {
+            clear += 1;
+        } else if p[3] >= 128 {
+            drawn += 1;
+            light += (0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64) / 255.0;
+        }
+    }
+    let all = img.width() as u64 * img.height() as u64;
+    drawn > 0 && clear * 10 >= all && light / (drawn as f64) < 0.25
+}
+
 /// A card for a site with no icon to use: `label` (its host) in white on a
 /// black rounded square.
 pub fn text_card(label: &str) -> RgbaImage {
@@ -403,6 +438,23 @@ fn chop_multiply(a: u8, b: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn dark_marks_get_a_white_tile_and_colour_stays_as_it_is() {
+        // A black disc on nothing (GitHub's), and a coloured one.
+        let disc = |c: [u8; 4]| {
+            RgbaImage::from_fn(64, 64, |x, y| {
+                let (dx, dy) = (x as i32 - 32, y as i32 - 32);
+                if dx * dx + dy * dy < 400 { Rgba(c) } else { Rgba([0, 0, 0, 0]) }
+            })
+        };
+        let dark = fit(&disc([20, 20, 20, 255]), 128);
+        assert_eq!(dark.get_pixel(64, 6).0, [255, 255, 255, 255]); // the tile, above the mark
+        assert!(dark.get_pixel(64, 64)[0] < 60); // the mark
+        let colour = fit(&disc([234, 67, 53, 255]), 128);
+        assert_eq!(colour.get_pixel(64, 6)[3], 0);
+    }
+
     use super::*;
 
     #[test]

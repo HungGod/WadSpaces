@@ -6,6 +6,7 @@ import { APPS as CATALOG_APPS, EXTENSIONS as CATALOG_EXTENSIONS, TOOLS as CATALO
 import { WALLPAPER_PRESETS } from "@/components/desktop/wallpapers";
 import type { AppSubKey, KeyGroup, Layer, SecretKind, SecretRef, SecretsSub, Stack, WebApp } from "./model";
 import { appsOf, subOf } from "./model";
+import { siteIcon } from "@/lib/webIcon";
 
 export interface CatalogApp {
   id: string;
@@ -68,15 +69,8 @@ export const WALLPAPERS = WALLPAPER_PRESETS.map((p) => ({ ...p.wallpaper, name: 
 export const wallpaperCss = (w: { type: string; value: string } | undefined) =>
   !w ? "linear-gradient(135deg,#140d22,#241a39)" : w.type === "image" ? `center / cover no-repeat url("${w.value}")` : w.value;
 
-const FAVICONS: Record<string, string> = { "claude.ai": "/icons/claude.png", "chatgpt.com": "/icons/codex.png" };
-export const webappIcon = (w: WebApp) => {
-  try {
-    const host = new URL(w.url).hostname;
-    return FAVICONS[host] ?? `https://www.google.com/s2/favicons?sz=64&domain=${host}`;
-  } catch {
-    return "/favicon.svg";
-  }
-};
+/** A web app's icon (lib/webIcon.ts): the site's own, fetched once and kept. */
+export const webappIcon = (w: WebApp) => siteIcon(w.url);
 
 export const webappId = (name: string) =>
   name

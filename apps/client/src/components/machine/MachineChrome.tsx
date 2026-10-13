@@ -139,7 +139,7 @@ export function MachineChrome() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 12 }}
-            className="fixed bottom-6 left-1/2 z-[90] flex -translate-x-1/2 items-center gap-3 rounded-full bg-bg-2/95 px-5 py-2.5 text-sm shadow-deep ring-1 ring-line-strong"
+            className="fixed bottom-[calc(1.5rem+var(--hud-room,0px))] left-1/2 z-[90] flex -translate-x-1/2 items-center gap-3 rounded-full bg-bg-2/95 px-5 py-2.5 text-sm shadow-deep ring-1 ring-line-strong"
           >
             <Loader2 className="size-4 animate-spin text-accent" />
             <span className="font-medium">Starting {pending.name}</span>

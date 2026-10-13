@@ -74,17 +74,28 @@ impl Resolver {
         if let Some((png, source)) = self.cache.as_ref().and_then(|c| c.get(&key)) {
             return Icon { png, source };
         }
-        let fetched = match Url::parse(site) {
-            Ok(u) if matches!(u.scheme(), "http" | "https") && !self.local(&u) => {
-                tokio::time::timeout(SITE_BUDGET, self.best_icon(&u)).await.ok().flatten()
-            }
-            _ => None,
-        };
-        let (img, source) = match fetched {
+        let (img, source) = match self.fetch(site).await {
             Some(img) => (style::card(&img), Kind::Site),
             None => (style::text_card(&label_for(site)), Kind::Fallback),
         };
         self.keep(&key, img, source)
+    }
+
+    /// The site's own icon in colour, `px` square (how WadSpaces Client shows a
+    /// web app), or None when it has none. Kept like the cards: a site that
+    /// gave nothing is asked again after a day.
+    pub async fn favicon(&self, site: &str, px: u32) -> Option<Vec<u8>> {
+        let key = format!("favicon {px} {site}");
+        if let Some((png, source)) = self.cache.as_ref().and_then(|c| c.get(&key)) {
+            return (source == Kind::Site).then_some(png);
+        }
+        match self.fetch(site).await {
+            Some(img) => Some(self.keep(&key, style::fit(&img, px), Kind::Site).png),
+            None => {
+                self.keep(&key, RgbaImage::new(1, 1), Kind::Fallback);
+                None
+            }
+        }
     }
 
     /// The user's picture, as it is; None if it can't be had (the site's icon
@@ -111,6 +122,23 @@ impl Resolver {
             tracing::warn!(%e, "can't keep the icon");
         }
         Icon { png, source }
+    }
+
+    /// The site's best icon, within the site's budget. An app page with none of
+    /// its own (a console behind a sign-in) gets its parent site's:
+    /// console.firebase.google.com's from firebase.google.com.
+    async fn fetch(&self, site: &str) -> Option<RgbaImage> {
+        let u = Url::parse(site).ok().filter(|u| matches!(u.scheme(), "http" | "https") && !self.local(u))?;
+        let found = async {
+            match self.best_icon(&u).await {
+                Some(img) => Some(img),
+                None => match parent_site(&u) {
+                    Some(p) => self.best_icon(&p).await,
+                    None => None,
+                },
+            }
+        };
+        tokio::time::timeout(SITE_BUDGET, found).await.ok().flatten()
     }
 
     /// The best icon the page at `page` offers: an SVG if it has one, else the
@@ -229,3 +257,25 @@ fn percent_decode(s: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests;
+
+/// The site one level up from `u`'s host (`https://firebase.google.com/` for
+/// console.firebase.google.com), when that's still more than a domain's end.
+fn parent_site(u: &Url) -> Option<Url> {
+    let host = u.host_str()?;
+    let (_, rest) = host.split_once('.')?;
+    (rest.matches('.').count() >= 1 && u.domain().is_some()).then(|| Url::parse(&format!("https://{rest}/")).ok())?
+}
+
+#[cfg(test)]
+mod parent_tests {
+    use super::*;
+
+    #[test]
+    fn parents() {
+        let p = |s: &str| parent_site(&Url::parse(s).unwrap()).map(|u| u.to_string());
+        assert_eq!(p("https://console.firebase.google.com/x"), Some("https://firebase.google.com/".into()));
+        assert_eq!(p("https://mail.google.com/"), Some("https://google.com/".into()));
+        assert_eq!(p("https://github.com/"), None);
+        assert_eq!(p("http://10.0.0.1/"), None);
+    }
+}

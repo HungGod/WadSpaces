@@ -124,6 +124,7 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/workspaces/{id}", get(workspace).put(workspace_put).delete(workspace_delete))
         .route("/v1/workspaces/{id}/state", get(workspace_state))
         .route("/v1/workspaces/{id}/icon", get(workspace_icon))
+        .route("/v1/webapp-icon", get(webapp_icon))
         .route(
             "/v1/workspaces/{id}/wallpaper",
             axum::routing::put(workspace_wallpaper).layer(axum::extract::DefaultBodyLimit::max(WALLPAPER_BODY)),
@@ -242,6 +243,26 @@ async fn workspace_icon(
     let (mime, bytes) = themed.and_then(|p| icon_file(&p, &own)).or_else(|| icon_file(&path, &own)).ok_or_else(none)?;
     Ok(([(axum::http::header::CONTENT_TYPE, mime), (axum::http::header::CACHE_CONTROL, "max-age=3600")], bytes)
         .into_response())
+}
+
+#[derive(Deserialize)]
+struct SiteQuery {
+    site: String,
+}
+
+/// A web app's icon as WadSpaces Client shows it: the site's own, in colour,
+/// fetched once and kept (`{"png": base64}`); 404 when the site has none.
+async fn webapp_icon(
+    State(app): State<Arc<AppState>>,
+    Query(q): Query<SiteQuery>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    let png = app
+        .builds
+        .icons()
+        .favicon(&q.site)
+        .await
+        .ok_or_else(|| Failure(ApiError::new(ErrorCode::NotFound, format!("{} has no icon to show", q.site))))?;
+    Ok(Json(serde_json::json!({ "png": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png) })))
 }
 
 /// `dir/name-<theme>.ext` for `dir/name.ext`.

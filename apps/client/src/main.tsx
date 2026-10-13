@@ -7,6 +7,7 @@ import "@fontsource/space-grotesk/600.css";
 import "@fontsource/space-grotesk/700.css";
 import "./styles/globals.css";
 import { tellHud } from "./components/ThemeToggle";
+import { followHud } from "./lib/hud";
 import { initCore } from "./core/wasm";
 import { initBackend } from "./data";
 
@@ -18,6 +19,8 @@ try {
 }
 // The machine app: the HUD starts out in the same theme.
 tellHud(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+// And keeps clear of its bar.
+followHud();
 
 // The core (WebAssembly) and the backend (wadd offline, Firebase online) are
 // ready before anything renders.

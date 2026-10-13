@@ -8,7 +8,7 @@ export function Toaster() {
   const toasts = useApp((s) => s.toasts);
   const dismiss = useApp((s) => s.dismiss);
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[340px] flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-[calc(1rem+var(--hud-room,0px))] right-4 z-[100] flex w-[340px] flex-col gap-2">
       <AnimatePresence initial={false}>
         {toasts.map((t) => (
           <motion.div

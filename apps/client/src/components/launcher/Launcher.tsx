@@ -15,7 +15,8 @@
 import { useState } from "react";
 import { Check, Lock, Play, Plus, SlidersHorizontal, Timer, Trash2, X } from "lucide-react";
 import clsx from "clsx";
-import { browserSlots, desktopFor, knownWebapps, named, resolveStack, slotsFor, webappIcon, webappId, type BrowserSetup, type SignInRef, type Wadspace, type WebApp } from "@core/layers";
+import { browserSlots, desktopFor, knownWebapps, named, resolveStack, slotsFor, webappId, type BrowserSetup, type SignInRef, type Wadspace, type WebApp } from "@core/layers";
+import { noIcon, siteIcon } from "@/lib/webIcon";
 import { backend } from "@/data";
 import { DEFAULT_BROWSERS, layerOf, wadspaceName, type BrowserConfig, type RunItem, type RunOverrides } from "@/data/layers";
 import { clockTime } from "@/lib/format";
@@ -582,7 +583,7 @@ function BrowserRun({ base, savedId, onCancel, onRun, onSaved }: { base: Browser
           <div className="space-y-1">
             {webapps.map((w) => (
               <div key={w.id} className="flex items-center gap-2.5 rounded-xl bg-surface-2 px-2.5 py-1.5 ring-1 ring-line">
-                <img src={webappIcon(w.url)} alt="" className="size-4 shrink-0" />
+                <img src={siteIcon(w.url)} onError={noIcon} alt="" className="size-4 shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm">{w.name}</span>
                   <span className="block truncate text-[11px] text-muted">{w.url}</span>
@@ -603,7 +604,7 @@ function BrowserRun({ base, savedId, onCancel, onRun, onSaved }: { base: Browser
                   className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2 py-1 text-xs ring-1 ring-line hover:ring-line-strong"
                   aria-label={`Add ${w.name}`}
                 >
-                  <img src={webappIcon(w.url)} alt="" className="size-3.5" /> {w.name} <Plus className="size-3 text-faint" />
+                  <img src={siteIcon(w.url)} onError={noIcon} alt="" className="size-3.5" /> {w.name} <Plus className="size-3 text-faint" />
                 </button>
               ))}
             </div>

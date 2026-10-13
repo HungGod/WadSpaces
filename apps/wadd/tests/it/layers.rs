@@ -441,6 +441,33 @@ async fn web_apps_get_their_icons_before_the_build() {
     }
 }
 
+#[tokio::test]
+async fn web_apps_show_in_the_client_with_their_sites_own_icons() {
+    use wiremock::matchers::path;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let site = MockServer::start().await;
+    Mock::given(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html><head></head></html>"))
+        .mount(&site)
+        .await;
+    let favicon = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, DOT).unwrap();
+    Mock::given(path("/favicon.ico"))
+        .respond_with(ResponseTemplate::new(200).insert_header("content-type", "image/png").set_body_bytes(favicon))
+        .expect(1) // and kept: asked once
+        .mount(&site)
+        .await;
+    let d = tempfile::tempdir().unwrap();
+    let icons = Icons::for_tests_kept(d.path());
+    for _ in 0..2 {
+        let png = icons.favicon(&site.uri()).await.expect("the site's icon");
+        // A PNG's size is in its header.
+        let side = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
+        assert_eq!((&png[1..4], side(16), side(20)), (&b"PNG"[..], 128, 128));
+    }
+    // Nobody answers there: nothing to show (the client shows its own).
+    assert!(icons.favicon("http://127.0.0.1:9/").await.is_none());
+}
+
 #[test]
 fn a_wadspace_cannot_take_an_apps_id() {
     let current = vec![common::app("terminal", "/usr/bin/foot"), ws("w", "i", Display::Host, None)];

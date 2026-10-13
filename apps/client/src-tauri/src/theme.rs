@@ -40,3 +40,25 @@ pub fn set_theme(theme: Theme) -> Result<(), ApiError> {
     };
     write().map_err(|e| ApiError::new(ErrorCode::Internal, format!("{}: {e}", path.display())))
 }
+
+/// Whether this is the machine's own app (`--kiosk`), under the HUD.
+pub struct Kiosk(pub bool);
+
+/// Whether the HUD's bar is out along the bottom (not tucked behind its
+/// arrow), so the app keeps what's at its bottom edge clear of it. Only the
+/// machine's app has the HUD over it; the HUD remembers its bar in
+/// ~/.config/wadspaces/hud.json (no file yet: it's out).
+#[tauri::command]
+#[specta::specta]
+pub fn hud_bar_open(kiosk: tauri::State<'_, Kiosk>) -> bool {
+    #[derive(Deserialize)]
+    struct Hud {
+        #[serde(default)]
+        collapsed: bool,
+    }
+    kiosk.0
+        && std::fs::read(file().with_file_name("hud.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Hud>(&b).ok())
+            .is_none_or(|h| !h.collapsed)
+}

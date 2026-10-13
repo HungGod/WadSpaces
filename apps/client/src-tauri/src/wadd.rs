@@ -70,6 +70,11 @@ impl Wadd {
         Self { rs: crate::rswadd::RsWadd::new(sock), last_state: Mutex::default() }
     }
 
+    /// A call of the app's own (not the page's).
+    pub async fn request(&self, method: Method, path: &str) -> Result<Value, WaddFailure> {
+        self.rs.request(method, path, None).await
+    }
+
     /// Sets a podman secret on this machine.
     pub async fn put_secret(&self, name: &str, value: &str) -> Result<(), WaddFailure> {
         self.rs.put_secret(name, value).await

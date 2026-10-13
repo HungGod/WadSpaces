@@ -46,8 +46,19 @@ impl Icons {
         Arc::new(Self { resolver: Resolver::new(None).allow_local() })
     }
 
+    /// The same, with a cache in `dir` (tests).
+    pub fn for_tests_kept(dir: &std::path::Path) -> Arc<Self> {
+        Arc::new(Self { resolver: Resolver::new(Some(Cache::new(dir))).allow_local() })
+    }
+
     pub async fn icon(&self, site: &str, custom: Option<&str>) -> Icon {
         self.resolver.icon(site, custom).await
+    }
+
+    /// A web app's icon as WadSpaces Client shows it: the site's own, in
+    /// colour (PNG, 128 px); None when it has none.
+    pub async fn favicon(&self, site: &str) -> Option<Vec<u8>> {
+        self.resolver.favicon(site, 128).await
     }
 
     /// A build's icons, by app id, within the build's budget.

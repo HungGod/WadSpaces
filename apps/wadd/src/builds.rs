@@ -288,6 +288,11 @@ impl Builds {
         })
     }
 
+    /// Web apps' icons (and their cache), for builds and for WadSpaces Client.
+    pub fn icons(&self) -> &Arc<Icons> {
+        &self.icons
+    }
+
     /// Builds a layer's image (what it builds on first when needed); it
     /// waits its turn behind another build.
     pub fn create_layer(&self, req: &LayerBuildRequest) -> Result<Build, ApiError> {

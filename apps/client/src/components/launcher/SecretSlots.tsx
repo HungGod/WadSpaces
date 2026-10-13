@@ -7,6 +7,7 @@ import { fits, type SignInRef, type Slot } from "@core/layers";
 import { useApp } from "@/lib/store";
 import { Input, Segmented } from "../ui";
 import { choiceFor, defaultSecretName, resolvedName, type SlotChoice, type SlotDraft } from "./slots";
+import { iconSrc, noIcon } from "@/lib/webIcon";
 
 /**
  * A choice per slot: save a new secret, use one of the same kind already
@@ -65,7 +66,7 @@ function SlotRow({ slot, slots, w, saved, sharedWith, dontSave, onChange }: { sl
   return (
     <div className="rounded-2xl bg-surface-2/50 p-3 ring-1 ring-line">
       <div className="flex items-center gap-2.5">
-        <img src={slot.iconUrl} alt="" className="size-5 shrink-0 object-contain" />
+        <img src={iconSrc(slot.iconUrl)} onError={noIcon} alt="" className="size-5 shrink-0 object-contain" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{slot.label}</div>
           <div className="truncate text-[11px] text-muted">{SECRET_KINDS[slot.kind].label}</div>
