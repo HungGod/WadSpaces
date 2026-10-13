@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:machine": "VITE_TARGET=machine vite",
+    "dev:fake": "VITE_TARGET=fake vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",

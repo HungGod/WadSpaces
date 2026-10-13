@@ -158,6 +158,8 @@ export interface Wadspace {
   draftTemplate?: { name: string; description: string };
   /** Its Extensions layer, made on `template`. */
   extensions?: string;
+  /** Extensions with no template under them yet (the board's), kept here until there is one. */
+  draftExtensions?: { name: string } & Omit<Setup, "templateId">;
   customization?: StackCustomization;
   createdAt: string;
   updatedAt: string;

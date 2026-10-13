@@ -23,6 +23,12 @@ export async function initBackend(): Promise<Backend> {
     await (await import("./machine/boot")).forgetSignInAfterReboot();
     const { MachineBackend } = await import("./machine");
     backend = new MachineBackend();
+  } else if (import.meta.env.DEV && import.meta.env.VITE_TARGET === "fake") {
+    // `npm run dev:fake`: the tests' fake backend, in a browser, with the
+    // sample library (or none: ?empty). Nothing is built or launched.
+    const { FakeBackend } = await import("../test/fakeBackend");
+    const { sampleBackend } = await import("../test/sample");
+    backend = new URLSearchParams(location.search).has("empty") ? new FakeBackend() : sampleBackend();
   } else {
     const { LocalBackend } = await import("./local");
     backend = new LocalBackend();

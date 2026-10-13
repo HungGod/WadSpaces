@@ -5,7 +5,7 @@
 import type { BrowserSetup, Extensions, LayerKey, Template, Wadspace } from "@core/layers";
 import { chainOf, extensionsLayer, templateLayer } from "@core/layers";
 import type { StoredWadspace } from "@/data/migrate";
-import type { Project, ProjectDraft } from "@core/projects";
+import type { GithubRepo, Project, ProjectDraft } from "@core/projects";
 import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
 import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser } from "@/lib/types";
 import type { Backend, BuildProgress, Caps, LayerLibrary, LayerPatch, Topic } from "@/data/backend";
@@ -33,6 +33,10 @@ export class FakeBackend implements Backend {
   installed = new Map<string, Wadspace>();
   /** Copies made on "the machine": their paths. */
   copies = new Map<string, string[]>();
+  /** Your GitHub repositories, as a machine lists them. */
+  repos: GithubRepo[] = [];
+  /** The machine's folders you can copy from: folder → its folders and files. */
+  folders: Record<string, { dirs: string[]; files: string[] }> = {};
   browsers = new Map<string, BrowserSetup>();
   images = new Map<LayerKey, ImageRow>();
   /** Layer builds asked for, oldest first. */
@@ -280,7 +284,16 @@ export class FakeBackend implements Backend {
     return { token: false, login: null };
   }
   async listGithubRepos() {
-    return { login: null, repos: [], updatedAt: null };
+    return { login: this.repos.length ? "me" : null, repos: this.repos, updatedAt: null };
+  }
+  async browseFolders(q: { path?: string; files?: boolean }) {
+    const at = q.path ?? null;
+    const name = (x: string) => x.split("/").pop()!;
+    if (!at) return { path: null, parent: null, dirs: Object.keys(this.folders).filter((f) => !Object.values(this.folders).some((v) => v.dirs.includes(f))).map((f) => ({ name: f, path: f })) };
+    const here = this.folders[at];
+    if (!here) throw new Error(`${at} isn't there`);
+    const parent = Object.entries(this.folders).find(([, v]) => v.dirs.includes(at))?.[0] ?? null;
+    return { path: at, parent, dirs: here.dirs.map((d) => ({ name: name(d), path: d })), ...(q.files && { files: here.files.map((f) => ({ name: name(f), path: f })) }) };
   }
   createGithubRepo = nope("createGithubRepo");
   cancelLaunch = nope("cancelLaunch");

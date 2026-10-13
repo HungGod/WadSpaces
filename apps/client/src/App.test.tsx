@@ -26,6 +26,7 @@ beforeAll(() => {
     disconnect() {}
   };
   Element.prototype.scrollIntoView ??= () => {};
+  Element.prototype.scrollTo ??= () => {};
 });
 
 let fake: FakeBackend;
@@ -61,6 +62,31 @@ describe("loading", () => {
     await waitFor(() => expect([...legacy.wadspaces.values()].every((w) => w.version === 3)).toBe(true));
     expect([...legacy.extensions.keys()]).toEqual(["vanua-academy-dev"]);
     expect(legacy.customizations.size).toBe(0);
+  });
+});
+
+describe("the Builder's board", () => {
+  const stackNames = () => [...document.querySelectorAll(".wb .stacks > .stack .stack-name")].map((e) => e.textContent);
+
+  it("shows the stacks, and saves a new one made with Create", async () => {
+    await open("/builder");
+    await waitFor(() => expect(stackNames()).toEqual(["Cosmic Bodybuilding", "VanuaAcademy"]));
+    fireEvent.click(screen.getByRole("button", { name: /Create/ }));
+    await waitFor(() => expect(stackNames()).toEqual(["Cosmic Bodybuilding", "VanuaAcademy", "New template"]));
+    // Written behind: a stack whose template has no apps yet.
+    await waitFor(() => expect([...fake.wadspaces.values()].find((w) => w.version === 3 && w.draftTemplate)).toBeTruthy());
+    const made = [...fake.wadspaces.values()].find((w) => w.version === 3 && w.draftTemplate);
+    expect(made && made.version === 3 && [made.order, made.draftTemplate, made.template]).toEqual([3, { name: "New template", description: "" }, undefined]);
+  });
+
+  it("copies a stack beside it when asked to (a wadspace's Copy)", async () => {
+    await open("/builder?stack=cosmic-bodybuilding&copy=1");
+    await waitFor(() => expect(stackNames()).toEqual(["Cosmic Bodybuilding", "Cosmic Bodybuilding - 1", "VanuaAcademy"]));
+    await waitFor(() => expect(fake.wadspaces.size).toBe(3));
+    const copy = [...fake.wadspaces.values()].find((w) => w.version === 3 && w.customization?.name === "Cosmic Bodybuilding - 1");
+    // The same template (shared, not copied), its own customization.
+    expect(copy && copy.version === 3 && [copy.template, copy.order]).toEqual(["writing", 2]);
+    expect(fake.templates.size).toBe(2);
   });
 });
 
@@ -224,6 +250,7 @@ describe("Home", () => {
     await open("/");
     expect(await screen.findByRole("heading", { name: "Your wadspaces" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open VanuaAcademy in the Builder" }));
-    expect(await screen.findByText(/Cosmic Bodybuilding · VanuaAcademy/)).toBeTruthy();
+    // The board, its stacks in order.
+    await waitFor(() => expect([...document.querySelectorAll(".wb .stack .stack-name")].map((e) => e.textContent)).toEqual(["Cosmic Bodybuilding", "VanuaAcademy"]));
   });
 });

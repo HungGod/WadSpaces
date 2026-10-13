@@ -119,6 +119,13 @@ export function sampleBackend(target: "offline" | "online" | "machine" = "offlin
   const td = { layer: "template:dev" as const, ref: "localhost/wadspaces-template-dev:latest", id: "img-dev", dockerfileSha: templateLayer(dev).sha, builtAt: Date.parse(at(29)) / 1000, sizeMb: 2400, from: "base" };
   const cv = { layer: "custom:vanua-academy-dev" as const, ref: "localhost/wadspaces-custom-vanua-academy-dev:latest", id: "img-vanua-dev", dockerfileSha: extensionsLayer(vanuaDev, dev).sha, builtAt: Date.parse(at(12)) / 1000, sizeMb: 2650, from: "img-dev" };
   for (const row of [tw, td, cv]) b.images.set(row.layer, row);
+  const repo = (name: string, priv = true) => ({ fullName: `HungGod/${name}`, name, private: priv, url: `https://github.com/HungGod/${name}`, defaultBranch: "main", pushedAt: at(2), description: null });
+  b.repos = [repo("Writing"), repo("VanuaAcademy"), repo("WadSpaces", false)];
+  b.folders = {
+    "/var/home/wad": { dirs: ["/var/home/wad/Notes", "/var/home/wad/Pictures"], files: ["/var/home/wad/todo.md"] },
+    "/var/home/wad/Notes": { dirs: [], files: ["/var/home/wad/Notes/ideas.md", "/var/home/wad/Notes/plan.md"] },
+    "/var/home/wad/Pictures": { dirs: [], files: ["/var/home/wad/Pictures/beach.jpg"] },
+  };
   return b;
 }
 
