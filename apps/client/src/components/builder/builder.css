@@ -3418,3 +3418,9 @@ body.is-dragging .wb .bucket-row .bucket-build.drop-ok {
   padding: 8px 10px;
   border-top: 1px solid var(--line);
 }
+
+/* The board's documents aren't all saved: kept on this machine, retried. */
+.wb .btn-ghost.not-saved {
+  border-color: color-mix(in srgb, var(--unbuilt) 60%, transparent);
+  color: var(--unbuilt);
+}

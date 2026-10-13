@@ -7,8 +7,7 @@
 // ?stack=<id> scrolls to that stack; with &copy=1, a copy of it goes beside it.
 import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router";
-import { Plus, Undo2 } from "lucide-react";
-import { useApp } from "@/lib/store";
+import { CloudOff, Plus, Undo2 } from "lucide-react";
 import { Buckets, ConfirmDeleteDialog, Stacks, Toasts } from "./Board";
 import { DragProvider } from "./drag";
 import { EditorLayer } from "./editors/Editor";
@@ -21,15 +20,9 @@ export function BoardPage() {
   const canUndo = useBoard((s) => s.past.length > 0);
   const stacks = useBoard((s) => s.stacks);
   const { undo } = useBoard.getState();
-  const templates = useApp((s) => s.templates);
-  const extensions = useApp((s) => s.extensions);
-  const wadspaces = useApp((s) => s.wadspaces);
+  const saveError = useBoard((s) => s.saveError);
   const [params, setParams] = useSearchParams();
-
-  // The documents as stacks (and what changes in them elsewhere).
-  useEffect(() => {
-    useBoard.getState().load({ templates, extensions, wadspaces });
-  }, [templates, extensions, wadspaces]);
+  // The documents become the board in the Shell (useBoardSync).
 
   // Opened on a stack (Home, a wadspace's actions): to it, or to a copy of it. Once per ask.
   const handled = useRef<string | null>(null);
@@ -96,6 +89,11 @@ export function BoardPage() {
               </span>
             </div>
             <div className="spacer" />
+            {saveError && (
+              <button className="btn-ghost not-saved" onClick={() => useBoard.getState().retrySave()} title={`${saveError} Your changes are kept on this machine. Click to try again.`}>
+                <CloudOff size={14} /> Not saved · Retry
+              </button>
+            )}
             <button className="btn-ghost" disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">
               <Undo2 size={14} /> Undo
             </button>

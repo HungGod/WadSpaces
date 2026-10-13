@@ -10,6 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import App from "./App";
 import { setBackendForTests } from "./data";
 import { useApp } from "./lib/store";
+import { forgetWritesForTests, useBoard } from "./components/builder/store";
 import { useUi } from "./lib/ui";
 import type { FakeBackend } from "./test/fakeBackend";
 import { GOOGLE, legacyBackend, sampleBackend } from "./test/sample";
@@ -35,7 +36,11 @@ beforeEach(() => {
   fake = sampleBackend();
   setBackendForTests(fake);
   useUi.setState({ detailsId: null, launcher: null });
-  useApp.setState({ toasts: [], builds: [], launches: [], templates: [], extensions: [], wadspaces: [], browsers: [], images: {}, signIns: [], projects: [] });
+  useApp.setState({ layersLoaded: false, toasts: [], builds: [], launches: [], templates: [], extensions: [], wadspaces: [], browsers: [], images: {}, signIns: [], projects: [] });
+  // The board (and what it keeps on this machine) starts again too.
+  localStorage.removeItem("wadspaces.builder");
+  forgetWritesForTests();
+  useBoard.setState({ stacks: [], loaded: false, unsaved: null, saveError: null, past: [], deleted: [] });
 });
 
 afterEach(cleanup);
@@ -87,6 +92,55 @@ describe("the Builder's board", () => {
     // The same template (shared, not copied), its own customization.
     expect(copy && copy.version === 3 && [copy.template, copy.order]).toEqual(["writing", 2]);
     expect(fake.templates.size).toBe(2);
+  });
+});
+
+describe("unsaved work on the board", () => {
+  const stackNames = () => [...document.querySelectorAll(".wb .stacks > .stack .stack-name")].map((e) => e.textContent);
+  const drafts = () => [...fake.wadspaces.values()].filter((w) => w.version === 3 && w.draftTemplate);
+
+  it("keeps a stack the account refuses, and saves it on Retry", async () => {
+    const save = fake.saveWadspace.bind(fake);
+    fake.saveWadspace = async () => {
+      throw new Error("Missing or insufficient permissions.");
+    };
+    await open("/builder");
+    await waitFor(() => expect(stackNames()).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: /Create/ }));
+    // Refused: still on the board, kept on this machine, and said so.
+    const retry = await screen.findByRole("button", { name: /Not saved · Retry/ });
+    expect(stackNames()).toEqual(["Cosmic Bodybuilding", "VanuaAcademy", "New template"]);
+    expect(JSON.parse(localStorage.getItem("wadspaces.builder")!).state.unsaved).toHaveLength(3);
+    expect(drafts()).toEqual([]);
+    // The account takes it now.
+    fake.saveWadspace = save;
+    fireEvent.click(retry);
+    await waitFor(() => expect(drafts()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Not saved/ })).toBeNull());
+    expect(JSON.parse(localStorage.getItem("wadspaces.builder")!).state.unsaved).toBeNull();
+  });
+
+  it("saves work a restart cut off when the app starts again, Builder open or not", async () => {
+    // A save that never finished (no network, then the machine restarted).
+    fake.saveWadspace = () => new Promise(() => {});
+    await open("/builder");
+    await waitFor(() => expect(stackNames()).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: /Create/ }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("wadspaces.builder")!).state.unsaved).toHaveLength(3));
+    cleanup();
+
+    // Started again: the account never got it; what this machine kept is written.
+    const kept = localStorage.getItem("wadspaces.builder");
+    fake = sampleBackend();
+    setBackendForTests(fake);
+    useApp.setState({ layersLoaded: false, templates: [], extensions: [], wadspaces: [] });
+    useBoard.setState({ stacks: [], loaded: false, unsaved: null, past: [] });
+    localStorage.setItem("wadspaces.builder", kept!);
+    forgetWritesForTests();
+    await useBoard.persist.rehydrate();
+    await open("/");
+    await waitFor(() => expect(drafts()).toHaveLength(1));
+    expect(useApp.getState().wadspaces.some((w) => w.draftTemplate)).toBe(true);
   });
 });
 

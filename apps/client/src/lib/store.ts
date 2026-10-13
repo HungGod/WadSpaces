@@ -67,6 +67,8 @@ interface AppState {
   /** Quiet notices that surface from the profile icon, e.g. "your wadspace is ready". */
   notices: Notice[];
   // The Builder's documents, deleted ones included (`deletedAt`): see `alive`.
+  /** Whether they've been read from the backend yet (the board takes them in after). */
+  layersLoaded: boolean;
   templates: Template[];
   extensions: Extensions[];
   /** The board's stacks. */
@@ -225,6 +227,7 @@ export const useApp = create<AppState>((set, get) => {
     signIns: [],
     launches: [],
     notices: [],
+    layersLoaded: false,
     templates: [],
     extensions: [],
     wadspaces: [],
@@ -257,10 +260,10 @@ export const useApp = create<AppState>((set, get) => {
       const projects = backend.caps.projects && stored.some((w) => w.version === 2) ? await backend.listProjects().catch(() => []) : [];
       const m = migration({ templates, customizations, extensions, wadspaces: stored, projects });
       if (!m) {
-        set({ templates, extensions, wadspaces: stored.filter((w): w is Wadspace => w.version === 3), browsers, machineScreen });
+        set({ templates, extensions, wadspaces: stored.filter((w): w is Wadspace => w.version === 3), browsers, machineScreen, layersLoaded: true });
       } else {
         // Shown as moved at once; written behind (and moved again next time if a write fails).
-        set({ templates, ...applied(stored, extensions, m), browsers, machineScreen });
+        set({ templates, ...applied(stored, extensions, m), browsers, machineScreen, layersLoaded: true });
         void moveToStacks(m);
       }
       await get().loadImages();

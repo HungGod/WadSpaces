@@ -25,6 +25,7 @@ import { ActivityTray, BuildLog, LaunchLog } from "./ActivityTray";
 import { ProfileNotices } from "./ProfileNotices";
 import { LaunchDialog } from "./launcher/Launcher";
 import { wadspaceName } from "@/data/layers";
+import { useBoardSync } from "./builder/store";
 
 const NAV = [
   { href: "/", label: "Home", icon: Home },
@@ -56,6 +57,7 @@ export function Shell({ user, children }: { user: PublicUser; children: React.Re
   }, [user, setUser, loadAll]);
 
   useFocusPolling();
+  useBoardSync();
 
   const toggle = () => {
     setCollapsed((c) => {

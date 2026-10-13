@@ -4,6 +4,7 @@
 // a change made elsewhere (another device) is taken in when nothing of the
 // board's is still being written. Images and builds are the launch
 // machine's (the app store's); keys are its saved sign-ins.
+import { useEffect } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { repoFullName } from "@core/projects";
@@ -84,6 +85,12 @@ interface State extends Snapshot {
   repos: GithubRepo[] | null;
   /** Reads the board from the documents (or takes in what changed there). */
   load(docs: Docs, force?: boolean): void;
+  /** The board while its documents aren't all saved (kept on this machine, across a restart); null when they are. */
+  unsaved: Stack[] | null;
+  /** Why the last save failed, until one goes through. */
+  saveError: string | null;
+  /** Writes what isn't saved yet again. */
+  retrySave(): void;
   loadRepos(): Promise<void>;
   editing: Editing | null;
   /** The stack being previewed. */
@@ -157,13 +164,33 @@ const docsNow = (): Docs => {
 
 /** Writes in flight: while any are, a change in the documents is the board's own. */
 let pending = 0;
+/** After a failed write, until the app's lists are read back: they're the board's, not what's saved. */
+let stale = false;
 
-/** Writes the board's documents: the app's lists at once, the backend behind. */
+/** Tests: the app started again (no writes out). */
+export function forgetWritesForTests() {
+  pending = 0;
+  stale = false;
+}
+
+/** Writes the board's documents: the app's lists at once, the backend behind.
+ *  Until every write is in, the board is kept on this machine too (`unsaved`):
+ *  a write that fails, no network, or a restart between loses nothing; the
+ *  board is written again (on the next change, Retry, or the next start). */
 async function save(stacks: Stack[]): Promise<Stack[]> {
+  if (stale) {
+    useBoard.setState({ unsaved: stacks });
+    return stacks;
+  }
   const p = plan(stacks, docsNow(), backend.owner(), new Date().toISOString());
-  if (!writes(p)) return stacks;
+  if (!writes(p)) {
+    if (!pending) useBoard.setState({ unsaved: null, saveError: null });
+    return stacks;
+  }
   const { templates, extensions, wadspaces } = p.docs;
   useApp.setState({ templates, extensions, wadspaces });
+  const kept = withRefs(stacks, p.refs);
+  useBoard.setState({ unsaved: kept });
   pending++;
   void (async () => {
     try {
@@ -172,16 +199,21 @@ async function save(stacks: Stack[]): Promise<Stack[]> {
       for (const w of p.wadspaces) await backend.saveWadspace(w);
       for (const id of p.deleted) await backend.patchWadspace(id, { deletedAt: new Date().toISOString() });
     } catch (e) {
-      useApp.getState().toast({ title: "Couldn't save the board", body: (e as Error).message, tone: "error" });
-      // What's saved is what's shown.
-      await useApp.getState().loadLayers().catch(() => {});
+      const why = (e as Error).message;
+      if (!useBoard.getState().saveError)
+        useApp.getState().toast({ title: "Couldn't save the board", body: `${why} Your changes are kept on this machine and saved when they can be.`, tone: "error" });
+      useBoard.setState({ saveError: why, unsaved: useBoard.getState().stacks });
+      // The app's lists back to what's saved; the board keeps its work.
+      stale = true;
       pending = 0;
-      useBoard.getState().load(docsNow(), true);
+      await useApp.getState().loadLayers().catch(() => {});
+      stale = false;
       return;
     }
     pending = Math.max(0, pending - 1);
+    if (!pending && !stale) useBoard.setState({ unsaved: null, saveError: null });
   })();
-  return withRefs(stacks, p.refs);
+  return kept;
 }
 
 /** Every key there is of a kind: the machine's saved sign-ins and the ones the board's stacks keep. */
@@ -443,12 +475,29 @@ export const useBoard = create<State>()(
         selected: [],
         toasts: [],
 
+        unsaved: null,
+        saveError: null,
+
         load(docs, force) {
           const s = get();
+          // Work not saved yet (a save that failed, or one a restart cut off) is
+          // the board, whatever the documents say, and it's written again.
+          if (s.unsaved) {
+            if (!s.loaded) {
+              set({ stacks: s.unsaved, loaded: true, past: [] });
+              get().retrySave();
+            }
+            return;
+          }
           // While the board's own writes are out, a change is theirs.
           if (!force && pending) return;
           if (!force && s.loaded && !writes(plan(s.stacks, docs, "", ""))) return;
           set({ stacks: toBoard(docs), loaded: true, ...(s.loaded && !force ? {} : { past: [] }) });
+        },
+
+        retrySave() {
+          if (pending || stale || !get().unsaved) return;
+          void save(get().stacks).then((stacks) => stacks !== get().stacks && set({ stacks }));
         },
 
         async loadRepos() {
@@ -820,12 +869,13 @@ export const useBoard = create<State>()(
       };
     },
     {
-      // Only Recently deleted is kept here (this browser's); the stacks are the documents.
+      // Recently deleted is kept here (this browser's), and the board while it
+      // isn't all saved; otherwise the stacks are the documents.
       name: "wadspaces.builder",
       version: 1,
       migrate: () => ({ deleted: [] }) as never,
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ deleted: s.deleted }),
+      partialize: (s) => ({ deleted: s.deleted, unsaved: s.unsaved }),
     },
   ),
 );
@@ -835,4 +885,22 @@ export function grab(stack: Stack, moduleId: string, only: boolean): Module[] {
   const all = modulesOf(stack);
   const at = all.findIndex((x) => x.id === moduleId);
   return at < 0 ? [] : only ? [all[at]] : all.slice(at);
+}
+
+/** The board kept in step with the documents, from wherever the app is (the
+ *  Shell): so work a restart cut off is written again at start, Builder open
+ *  or not, and when the network comes back. */
+export function useBoardSync() {
+  const loaded = useApp((s) => s.layersLoaded);
+  const templates = useApp((s) => s.templates);
+  const extensions = useApp((s) => s.extensions);
+  const wadspaces = useApp((s) => s.wadspaces);
+  useEffect(() => {
+    if (loaded) useBoard.getState().load({ templates, extensions, wadspaces });
+  }, [loaded, templates, extensions, wadspaces]);
+  useEffect(() => {
+    const again = () => useBoard.getState().retrySave();
+    addEventListener("online", again);
+    return () => removeEventListener("online", again);
+  }, []);
 }
