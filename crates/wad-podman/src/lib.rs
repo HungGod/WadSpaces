@@ -57,6 +57,37 @@ pub fn demux(b: &[u8]) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// `podman system df -v`, in bytes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Df {
+    /// All the images' layers together (each counted once).
+    pub images_size: u64,
+    pub images: Vec<DfImage>,
+    /// Each container's id and its own changes (its writable layer).
+    pub containers: Vec<(String, u64)>,
+    pub volumes: Vec<DfVolume>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DfImage {
+    pub id: String,
+    /// "repo:tag", or empty for an image with no name.
+    pub name: String,
+    pub size: u64,
+    /// What only this image has (no other image shares it).
+    pub unique: u64,
+    /// Containers made from it.
+    pub containers: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DfVolume {
+    pub name: String,
+    pub size: u64,
+    /// Containers using it.
+    pub links: u64,
+}
+
 /// An image as `images_labelled` and `image_info` see it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageInfo {
@@ -314,14 +345,57 @@ impl Podman {
     /// Each named volume's size in bytes (`podman system df -v`: podman
     /// counts the files, so it takes a moment).
     pub async fn volume_sizes(&self) -> Result<Vec<(String, u64)>, Error> {
+        Ok(self.system_df().await?.volumes.into_iter().map(|v| (v.name, v.size)).collect())
+    }
+
+    /// What podman keeps on the disk (`podman system df -v`): every image
+    /// (all of it, and what only it has), the containers' own changes, the volumes.
+    pub async fn system_df(&self) -> Result<Df, Error> {
         let df = self.get_json("disk usage", "/system/df").await?.unwrap_or(Value::Null);
-        Ok(df
-            .get("Volumes")
-            .and_then(Value::as_array)
+        let list = |k: &str| df.get(k).and_then(Value::as_array).cloned().unwrap_or_default();
+        let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+        let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+        Ok(Df {
+            images_size: n(&df, "ImagesSize"),
+            images: list("Images")
+                .iter()
+                .map(|i| DfImage {
+                    id: s(i, "ImageID"),
+                    name: match (s(i, "Repository"), s(i, "Tag")) {
+                        (r, _) if r.is_empty() || r == "<none>" => String::new(),
+                        (r, t) => format!("{r}:{t}"),
+                    },
+                    size: n(i, "Size"),
+                    unique: n(i, "UniqueSize"),
+                    containers: n(i, "Containers"),
+                })
+                .collect(),
+            containers: list("Containers").iter().map(|c| (s(c, "ContainerID"), n(c, "RWSize"))).collect(),
+            volumes: list("Volumes")
+                .iter()
+                .map(|v| DfVolume { name: s(v, "VolumeName"), size: n(v, "Size"), links: n(v, "Links") })
+                .collect(),
+        })
+    }
+
+    /// Every image here, with its labels and names (intermediate ones too).
+    pub async fn images_all(&self) -> Result<Vec<ImageInfo>, Error> {
+        let list = self.get_json("list images", "/images/json?all=true").await?.unwrap_or(Value::Null);
+        Ok(list
+            .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|v| {
-                Some((v.get("VolumeName")?.as_str()?.to_string(), v.get("Size").and_then(Value::as_u64).unwrap_or(0)))
+            .map(|i| ImageInfo {
+                id: i.get("Id").and_then(Value::as_str).unwrap_or_default().to_string(),
+                created: i.get("Created").and_then(Value::as_f64).unwrap_or(0.0),
+                size: i.get("Size").and_then(Value::as_u64).unwrap_or(0),
+                labels: i.get("Labels").and_then(Value::as_object).cloned().unwrap_or_default(),
+                tags: i
+                    .get("RepoTags")
+                    .or_else(|| i.get("Names"))
+                    .and_then(Value::as_array)
+                    .map(|t| t.iter().filter_map(Value::as_str).map(String::from).collect())
+                    .unwrap_or_default(),
             })
             .collect())
     }

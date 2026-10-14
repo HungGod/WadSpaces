@@ -89,6 +89,7 @@ RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd /usr/bin/client /usr/bin/wa
     systemctl enable greetd.service podman.socket wadd.socket wadd.service \
       wadspaces-admin-password.service wadspaces-import.service && \
     systemctl mask tailscaled.service && \
+    systemctl mask bootc-fetch-apply-updates.timer bootc-fetch-apply-updates.service && \
     systemctl set-default graphical.target && \
     systemctl mask getty@tty1.service && \
     rm -rf /var/log/dnf5.log* /var/lib/dnf /var/cache/libdnf5 /run/dnf && \

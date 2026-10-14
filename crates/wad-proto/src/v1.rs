@@ -1113,6 +1113,8 @@ pub struct Storage {
     pub homes: Vec<HomeBytes>,
     /// Files copied in for wadspaces (POST /v1/copies).
     pub copies: Vec<CopyBytes>,
+    /// Everything else on the disk, part by part (so none of it is a mystery).
+    pub other: Vec<OtherPart>,
     /// Unix seconds.
     pub measured_at: f64,
 }
@@ -1129,6 +1131,16 @@ pub struct StorageDelete {
     /// copies only they had). Their designs stay in the library.
     #[serde(default)]
     pub wadspaces: Vec<String>,
+    /// Other images, by id (older bases, images from before layers, build
+    /// leftovers): not while a container or an image here needs one.
+    #[serde(default)]
+    pub images: Vec<String>,
+    /// Volumes no wadspace here has (homes of wadspaces long gone).
+    #[serde(default)]
+    pub volumes: Vec<String>,
+    /// The copy the last stick update left (not while it waits to be applied).
+    #[serde(default)]
+    pub update_copy: bool,
 }
 
 /// POST /v1/storage/delete and /v1/storage/prune: what went.
@@ -1142,6 +1154,9 @@ pub struct Freed {
     pub kept: Vec<String>,
     /// The wadspaces taken off this machine, their files with them.
     pub uninstalled: Vec<String>,
+    /// What couldn't go, and why.
+    #[serde(default)]
+    pub failed: Vec<String>,
     /// About how much of the disk came back.
     pub bytes: u64,
 }
@@ -1173,6 +1188,34 @@ pub struct HomeBytes {
     pub workspace_id: String,
     pub volume: String,
     pub bytes: u64,
+}
+
+/// A part of the disk that isn't the wadspaces' layers, homes or copies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherPart {
+    /// "system", "update-copy", "images", "shared", "containers", "volumes",
+    /// "logs", "wadd", "people", "unaccounted".
+    pub key: String,
+    pub label: String,
+    /// What it is, and whether it can go.
+    pub detail: String,
+    pub bytes: u64,
+    /// Its pieces, when it has some to show (each image, each volume).
+    pub items: Vec<OtherItem>,
+    /// Whether the whole part can be deleted (the update copy).
+    pub deletable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherItem {
+    /// An image's id, or a volume's name.
+    pub id: String,
+    pub label: String,
+    pub detail: String,
+    pub bytes: u64,
+    pub deletable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]

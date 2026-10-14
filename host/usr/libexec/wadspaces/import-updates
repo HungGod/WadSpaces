@@ -6,7 +6,8 @@
 #   host     a new system image -> `bootc switch` (or `bootc upgrade` when this
 #            machine already follows incoming:host), checked, then one restart into it
 # Runs once per copy (incoming/pending), before the kiosk and wadd start.
-# incoming/ is kept so the next copy only has to send what changed.
+# Once it's all imported (or staged), incoming/ is deleted: it's as big as the
+# system and the bases together, and the next copy sends it all again.
 set -uo pipefail
 IN=/var/lib/wadspaces/incoming
 APPLIED=/var/lib/wadspaces/host.applied
@@ -66,6 +67,8 @@ if [[ -f "${IN}/host.id" ]] && [[ "$(cat "${IN}/host.id")" != "$(cat "${APPLIED}
         if [[ -n "${want}" && "${staged}" == "${want}" ]]; then
             cp "${IN}/host.id" "${APPLIED}"
             rm -f "${IN}/pending"
+            # Staged: the system holds it now, the copy isn't needed.
+            rm -rf "${IN}"
             say "restarting into the new system image"
             systemctl reboot
             exit 0
@@ -74,4 +77,6 @@ if [[ -f "${IN}/host.id" ]] && [[ "$(cat "${IN}/host.id")" != "$(cat "${APPLIED}
     fi
 fi
 rm -f "${IN}/pending"
+# Imported: what the copy held is in podman's storage (or the system) now.
+rm -rf "${IN}"
 say "done"

@@ -340,7 +340,7 @@ impl Server {
             logs,
             policy,
             store: wad_store::State::new(&config.daemon.state_dir),
-            storage: storage::Storage::new(&config.daemon.state_dir),
+            storage: storage::Storage::with(&config.daemon.state_dir, profile == Profile::System),
         });
         Ok(Self {
             listener,

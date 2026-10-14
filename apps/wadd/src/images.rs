@@ -154,6 +154,7 @@ pub async fn delete_selected(
     builds: &Builds,
     copies: &crate::copies::Copies,
     backend: &dyn Backend,
+    state_dir: &Path,
     pick: &StorageDelete,
 ) -> Result<Freed, ApiError> {
     if let Some(l) = pick.layers.iter().find(|l| !layer_ok(l)) {
@@ -244,6 +245,57 @@ pub async fn delete_selected(
                     freed.kept.push(l.clone());
                 }
                 Err(e) => tracing::info!("an old build of {l} stays ({}): {e}", i.id),
+            }
+        }
+    }
+    // Other images: each on its own (podman refuses one something needs).
+    let sizes = backend.system_df().await.unwrap_or_default();
+    for id in &pick.images {
+        let bytes = sizes
+            .images
+            .iter()
+            .find(|i| i.id.trim_start_matches("sha256:") == id.trim_start_matches("sha256:"))
+            .map(|i| i.unique)
+            .unwrap_or(0);
+        match backend.remove_image_id(id).await {
+            Ok(true) => {
+                freed.bytes += bytes;
+                freed.removed.push(id.clone());
+            }
+            Ok(false) => {}
+            Err(e) => freed.failed.push(format!("image {}: {e}", &id[..id.len().min(12)])),
+        }
+    }
+    // Volumes no wadspace here has.
+    for name in &pick.volumes {
+        if installed.iter().any(|w| format!("wad-{}-config", w.id) == *name) {
+            freed.failed.push(format!("{name} is a wadspace's home here: delete the wadspace instead"));
+            continue;
+        }
+        let bytes = sizes.volumes.iter().find(|v| v.name == *name).map(|v| v.size).unwrap_or(0);
+        match backend.remove_volume(name).await {
+            Ok(true) => {
+                freed.bytes += bytes;
+                freed.removed.push(name.clone());
+            }
+            Ok(false) => {}
+            Err(e) => freed.failed.push(format!("{name}: {e}")),
+        }
+    }
+    // The copy a stick update left, once it's applied.
+    if pick.update_copy {
+        let dir = state_dir.join(crate::storage::UPDATE_COPY);
+        if dir.join("pending").exists() {
+            freed.failed.push("the stick update's copy is waiting to be applied at the next start".into());
+        } else {
+            let bytes = crate::storage::dir_bytes(&dir);
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => {
+                    freed.bytes += bytes;
+                    freed.removed.push("the last stick update's copy".into());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => freed.failed.push(format!("the update copy: {e}")),
             }
         }
     }

@@ -523,28 +523,40 @@ async fn whats_picked_comes_off_the_disk_and_nothing_else() {
         e.reg.clone(),
     );
     let pick = |layers: &[&str], wadspaces: &[&str]| StorageDelete {
+        images: vec![],
+        volumes: vec![],
+        update_copy: false,
         layers: layers.iter().map(|x| x.to_string()).collect(),
         wadspaces: wadspaces.iter().map(|x| x.to_string()).collect(),
     };
     let images_here = || e.fake.0.lock().unwrap().images.clone();
 
     // The template alone: its name goes; its files stay, the Extensions are built on it.
-    let f = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &pick(&["template:dev"], &[])).await.unwrap();
+    let f = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &e.state, &pick(&["template:dev"], &[]))
+        .await
+        .unwrap();
     assert_eq!((f.removed.len(), f.kept.clone(), f.bytes), (0, vec!["template:dev".to_string()], 0));
     assert!(!images_here().contains(T_REF) && images_here().contains(C_REF));
     assert!(e.reg.workspaces().iter().any(|w| w.id == "academy"));
 
     // The Extensions, with a wadspace on them that isn't picked: refused.
-    let err = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &pick(&["custom:dev-plus"], &[]))
+    let err = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &e.state, &pick(&["custom:dev-plus"], &[]))
         .await
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
     assert!(err.message.contains("pick it too"), "{}", err.message);
 
     // With it: the wadspace off the machine, its files gone; the image gone.
-    let f = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &pick(&["custom:dev-plus"], &["academy"]))
-        .await
-        .unwrap();
+    let f = images::delete_selected(
+        &e.reg,
+        &e.builds,
+        &copies,
+        &e.fake,
+        &e.state,
+        &pick(&["custom:dev-plus"], &["academy"]),
+    )
+    .await
+    .unwrap();
     assert_eq!(f.removed, vec!["custom:dev-plus".to_string()]);
     assert_eq!(f.uninstalled.len(), 1);
     assert_eq!(f.bytes, 700 + 600);
@@ -557,6 +569,67 @@ async fn whats_picked_comes_off_the_disk_and_nothing_else() {
     let f = images::prune(&e.fake).await.unwrap();
     assert_eq!((f.removed.len(), f.bytes), (1, 2_000));
     assert!(images_here().iter().all(|i| i == BASE));
+}
+
+#[tokio::test]
+async fn everything_else_on_the_disk_is_named_and_what_can_go_goes() {
+    use wad_proto::v1::StorageDelete;
+    let e = env().await;
+    let l = wait(&e, &e.builds.create_layer(&custom(dev(), plus())).unwrap().id).await;
+    assert_eq!(l.build.status, BuildStatus::Done, "{l:?}");
+    let req = Install { wadspace: wadspace("academy"), template: dev(), extensions: Some(plus()), tz: None };
+    images::install(&e.reg, &e.fake, "academy", &req).await.unwrap();
+    e.fake.with(|m| {
+        for (n, b) in [(BASE, 3_000), (T_REF, 5_000), (C_REF, 5_600)] {
+            m.image_sizes.insert(n.into(), b);
+        }
+        // An image from before layers, and a step a build left.
+        m.images.insert("localhost/wadspaces-kale-b:latest".into());
+        m.image_unique.insert("localhost/wadspaces-kale-b:latest".into(), 900);
+        m.images.insert("<none>@step".into());
+        m.image_unique.insert("<none>@step".into(), 40);
+        // All the layers: 3000 + 2000 + 600 ours, 940 theirs, 460 shared by older images.
+        m.images_size = Some(7_000);
+        m.volume_bytes.insert("wad-academy-config".into(), 700);
+        m.volume_bytes.insert("wad-iq-dev-config".into(), 1_200);
+    });
+    std::fs::create_dir_all(e.state.join("incoming/blobs")).unwrap();
+    std::fs::write(e.state.join("incoming/blobs/a"), vec![0u8; 8192]).unwrap();
+
+    let backend: Arc<dyn wadd::backend::Backend> = Arc::new(e.fake.clone());
+    let r = wadd::storage::Storage::new(&e.state).report(&backend, &e.reg, true).await;
+    let part = |k: &str| r.other.iter().find(|p| p.key == k).unwrap_or_else(|| panic!("no {k} in {:?}", r.other));
+    let images = part("images");
+    assert_eq!(images.bytes, 940);
+    let named: Vec<(&str, bool)> = images.items.iter().map(|i| (i.label.as_str(), i.deletable)).collect();
+    assert_eq!(named, [("kale-b", true), ("A build step", true)]);
+    assert_eq!(part("shared").bytes, 460);
+    let vols = part("volumes");
+    assert_eq!(vols.items.iter().map(|i| (i.label.as_str(), i.bytes)).collect::<Vec<_>>(), [("iq-dev's home", 1_200)]);
+    let copy = part("update-copy");
+    assert!(copy.deletable && copy.bytes >= 8192, "{copy:?}");
+
+    // Gone: the old image, the build step, the home left behind, the update's copy.
+    let copies = wadd::copies::Copies::new(
+        &e.state,
+        vec![],
+        1000,
+        Arc::new(|| ("local".into(), "Surface".into())),
+        Arc::new(wadd::drives::Drives::new(1000, Arc::new(wadd::drives::System), false)),
+        e.reg.clone(),
+    );
+    let pick = StorageDelete {
+        images: images.items.iter().map(|i| i.id.clone()).collect(),
+        volumes: vec!["wad-iq-dev-config".into(), "wad-academy-config".into()],
+        update_copy: true,
+        ..Default::default()
+    };
+    let f = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &e.state, &pick).await.unwrap();
+    assert_eq!(f.removed.len(), 4, "{f:?}");
+    // A wadspace's home here goes with the wadspace, not on its own.
+    assert_eq!(f.failed.len(), 1, "{f:?}");
+    assert!(!e.state.join("incoming").exists());
+    assert!(e.fake.0.lock().unwrap().volume_bytes.contains_key("wad-academy-config"));
 }
 
 #[test]
@@ -684,4 +757,3 @@ async fn a_stack_installs_on_its_extensions_with_its_keys() {
     let bare = Install { wadspace: bare, template: dev(), extensions: Some(plus()), tz: None };
     assert!(images::install(&e.reg, &e.fake, "academy", &bare).await.unwrap_err().message.contains("customization"));
 }
-

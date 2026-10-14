@@ -332,7 +332,10 @@ async fn workspace_put(
 async fn workspace_delete(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, Failure> {
     // The machine's own apps are the system's: they stay.
     if let Some(w) = app.registry.workspaces().into_iter().find(|w| w.id == id && w.kind == wad_proto::v1::Kind::App) {
-        return Err(Failure(ApiError::new(ErrorCode::Conflict, format!("{} is one of this machine's own apps: it stays", w.name))));
+        return Err(Failure(ApiError::new(
+            ErrorCode::Conflict,
+            format!("{} is one of this machine's own apps: it stays", w.name),
+        )));
     }
     if app.registry.state(&id).is_some_and(|s| s.container == "running") {
         app.view.stop(&id).await?;
@@ -605,7 +608,8 @@ async fn storage_delete(
     Json(pick): Json<wad_proto::v1::StorageDelete>,
 ) -> Result<Json<wad_proto::v1::Freed>, Failure> {
     let backend = app.registry_backend.as_ref();
-    let freed = crate::images::delete_selected(&app.registry, &app.builds, &app.copies, backend, &pick).await?;
+    let freed =
+        crate::images::delete_selected(&app.registry, &app.builds, &app.copies, backend, &app.store.dir, &pick).await?;
     app.storage.forget().await;
     Ok(Json(freed))
 }

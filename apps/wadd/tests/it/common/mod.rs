@@ -41,6 +41,9 @@ pub struct Machine {
     pub image_sizes: HashMap<String, u64>,
     /// Volumes' sizes in bytes (podman system df).
     pub volume_bytes: HashMap<String, u64>,
+    /// What only an image has (podman system df's UniqueSize), and all the images' layers together.
+    pub image_unique: HashMap<String, u64>,
+    pub images_size: Option<u64>,
     pub build_fails: Option<String>,
     pub build_slow: bool,
     /// podman's secrets: name -> value.
@@ -272,6 +275,36 @@ impl Backend for Fake {
         }
         m.images.remove(&name);
         Ok(true)
+    }
+    async fn system_df(&self) -> Result<wadd::backend::Df, String> {
+        let m = self.0.lock().unwrap();
+        let id_of = |name: &str| m.image_ids.get(name).cloned().unwrap_or_else(|| format!("{:x<64}", name.len()));
+        let size = |name: &str| m.image_sizes.get(name).copied().unwrap_or(2_000_000_000);
+        let images: Vec<wadd::backend::DfImage> = m
+            .images
+            .iter()
+            .map(|n| wadd::backend::DfImage {
+                id: id_of(n),
+                name: if n.starts_with("<none>") { String::new() } else { n.clone() },
+                size: size(n),
+                unique: m.image_unique.get(n).copied().unwrap_or(0),
+                containers: 0,
+            })
+            .collect();
+        Ok(wadd::backend::Df {
+            images_size: m.images_size.unwrap_or_else(|| images.iter().map(|i| i.unique).sum()),
+            images,
+            containers: vec![],
+            volumes: m.volume_bytes.iter().map(|(k, v)| wadd::backend::DfVolume { name: k.clone(), size: *v, links: 0 }).collect(),
+        })
+    }
+    async fn images_all(&self) -> Result<Vec<wadd::backend::ImageInfo>, String> {
+        let names: Vec<String> = self.0.lock().unwrap().images.iter().cloned().collect();
+        let mut out = vec![];
+        for n in names {
+            out.extend(self.image_info(&n).await?);
+        }
+        Ok(out)
     }
     async fn remove_volume(&self, name: &str) -> Result<bool, String> {
         self.with(|m| m.calls.push(format!("volume rm {name}")));

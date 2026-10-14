@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
-pub use wad_podman::ImageInfo;
 use wad_podman::Podman;
+pub use wad_podman::{Df, DfImage, DfVolume, ImageInfo};
 use wad_proto::v1::Workspace;
 use wad_systemd::{Systemd, TransientSpec};
 
@@ -114,6 +114,14 @@ pub trait Backend: Send + Sync + 'static {
     }
     /// Removes a named volume and its files. False if there was none.
     async fn remove_volume(&self, _name: &str) -> Result<bool, String> {
+        Err("no podman".into())
+    }
+    /// What podman keeps on the disk, image by image.
+    async fn system_df(&self) -> Result<Df, String> {
+        Err("no podman".into())
+    }
+    /// Every image here, with its labels and names.
+    async fn images_all(&self) -> Result<Vec<ImageInfo>, String> {
         Err("no podman".into())
     }
 }
@@ -390,6 +398,14 @@ impl Backend for Real {
 
     async fn remove_volume(&self, name: &str) -> Result<bool, String> {
         self.podman.remove_volume(name).await.map_err(|e| e.to_string())
+    }
+
+    async fn system_df(&self) -> Result<Df, String> {
+        self.podman.system_df().await.map_err(|e| e.to_string())
+    }
+
+    async fn images_all(&self) -> Result<Vec<ImageInfo>, String> {
+        self.podman.images_all().await.map_err(|e| e.to_string())
     }
 
     async fn github_token(&self) -> Option<String> {
