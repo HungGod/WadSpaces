@@ -337,6 +337,25 @@ describe("Machines", () => {
   });
 });
 
+describe("Machines' storage", () => {
+  it("deletes just what's picked, once what runs on it is picked too", async () => {
+    fake.thisMachine = true;
+    fake.installed.set("cosmic-bodybuilding", fake.wadspaces.get("cosmic-bodybuilding") as Wadspace);
+    await open("/machines");
+    const node = async (name: string) => (await screen.findAllByRole("button", { pressed: false })).find((b) => b.textContent?.includes(name))!;
+    fireEvent.click(await node("Writing"));
+    // Cosmic is installed on Writing's image: it has to go too.
+    expect(await screen.findByText(/Cosmic Bodybuilding runs on a picked image/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Delete…/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Pick it too" }));
+    fireEvent.click(screen.getByRole("button", { name: /Delete…/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Delete, freeing/ }));
+    await waitFor(() => expect(fake.deleted).toEqual([{ layers: ["template:writing"], wadspaces: ["cosmic-bodybuilding"] }]));
+    // Dev and its Extensions stay.
+    expect(fake.images.has("template:dev")).toBe(true);
+  });
+});
+
 describe("Secrets", () => {
   it("shows each key with the apps it signs in and the wadspaces it's in", async () => {
     await open("/secrets");

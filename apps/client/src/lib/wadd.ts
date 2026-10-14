@@ -364,6 +364,10 @@ export const wadd = {
   deleteCopy: (id: string) => call("DELETE", `/api/copies/${encodeURIComponent(id)}`),
   /** What WadSpaces takes on this machine's disk (wadd measures at most once a minute; `fresh` now). */
   storage: (fresh = false) => call<Storage>("GET", `/v1/storage${fresh ? "?fresh=true" : ""}`),
+  /** Picked layers' images and wadspaces (with their files here) off this machine's disk. */
+  deleteFromDisk: (pick: { layers: string[]; wadspaces: string[] }) => call<Freed>("POST", "/v1/storage/delete", pick),
+  /** Older builds of layers that nothing needs, removed. */
+  pruneOld: () => call<Freed>("POST", "/v1/storage/prune", {}),
   // Tailscale on this machine (wadd/tailnet.py)
   tailnet: () => call<TailnetStatus>("GET", "/api/tailnet"),
   tailnetLogin: () => call<{ url: string | null; online?: boolean }>("POST", "/api/tailnet/login"),
@@ -454,6 +458,17 @@ export function waddEvents(on: (event: string, data: unknown) => void, onDrop: (
 }
 
 // ------------------------------------------------------------ formatting
+/** What a delete took off the disk (wad-proto's Freed). */
+export interface Freed {
+  /** Images removed: a layer's, or an old build's id. */
+  removed: string[];
+  /** Layers whose name went, their files kept by an image built on them. */
+  kept: string[];
+  /** Wadspaces taken off the machine, with their files. */
+  uninstalled: string[];
+  bytes: number;
+}
+
 /** GET /v1/storage (wad-proto's Storage). */
 export interface Storage {
   disk: { path: string; freeBytes: number; totalBytes: number };
@@ -461,6 +476,8 @@ export interface Storage {
   base: { ref: string; id: string; bytes: number } | null;
   /** Each layer image: all of it, and its own share (what it adds to the image it's built on). */
   layers: { layer: string; id: string; from: string; bytes: number; ownBytes: number }[];
+  /** Older builds of layers that nothing needs any more. */
+  leftovers: { layer: string; id: string; from: string; bytes: number; ownBytes: number }[];
   /** Each wadspace's home (its /config). */
   homes: { workspaceId: string; volume: string; bytes: number }[];
   /** Files copied in for wadspaces. */

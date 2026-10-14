@@ -167,6 +167,17 @@ export class LocalBackend implements Backend {
   storage(fresh?: boolean) {
     return wadd.storage(fresh);
   }
+  async deleteFromDisk(pick: { layers: string[]; wadspaces: string[] }) {
+    const freed = await wadd.deleteFromDisk(pick);
+    this.emit("images");
+    this.emit("machines");
+    return freed;
+  }
+  async pruneOld() {
+    const freed = await wadd.pruneOld();
+    this.emit("images");
+    return freed;
+  }
   deleteCopy(id: string) {
     return this.machine.deleteCopy(id);
   }

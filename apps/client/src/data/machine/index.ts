@@ -114,6 +114,12 @@ export class MachineBackend implements Backend {
   storage(fresh?: boolean) {
     return this.local.storage(fresh);
   }
+  deleteFromDisk(pick: { layers: string[]; wadspaces: string[] }) {
+    return this.local.deleteFromDisk(pick);
+  }
+  pruneOld() {
+    return this.local.pruneOld();
+  }
   deleteCopy(id: string) {
     return this.local.deleteCopy(id);
   }

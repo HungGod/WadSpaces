@@ -5,17 +5,21 @@
 // shows its own share (what it adds to the image under it), and a wadspace
 // its own files (its home and what it copied in). What a wadspace really
 // costs is its own files plus the layers only it uses.
+//
+// Templates, Extensions and Customizations (a wadspace here, with its files)
+// are picked in the tree and deleted from the disk, just what's picked: a
+// layer something else is built on keeps its files until that goes too.
+// Older builds nothing needs go on their own line.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HardDrive, Loader2, RefreshCw } from "lucide-react";
+import { Check, HardDrive, Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
 import { wadspaceName } from "@/data/layers";
 import { chainOf, type LayerKey, type Wadspace } from "@core/layers";
 import { alive, useApp } from "@/lib/store";
 import type { Machine } from "@/lib/types";
-import { useUi } from "@/lib/ui";
-import { formatBytes, type Storage } from "@/lib/wadd";
-import { IconButton } from "./ui";
+import { formatBytes, type Freed, type Storage } from "@/lib/wadd";
+import { Button, IconButton, Modal } from "./ui";
 
 type Kind = "base" | "template" | "extensions" | "wadspace";
 
@@ -31,7 +35,13 @@ interface Node {
   note?: string;
   tone?: "on" | "dim" | "warn";
   wadspaceId?: string;
+  /** A wadspace: on this machine (and running). */
+  installed?: boolean;
+  running?: boolean;
 }
+
+/** What can be picked to delete: a built layer (not the base), or a wadspace on this machine. */
+const pickable = (n: Node) => (n.kind === "wadspace" ? !!n.installed : n.kind !== "base" && n.bytes !== null);
 
 const COLOR: Record<Kind, string> = {
   base: "var(--muted)",
@@ -43,7 +53,7 @@ const KIND_LABEL: Record<Kind, string> = {
   base: "Base",
   template: "Template",
   extensions: "Extensions",
-  wadspace: "Wadspace",
+  wadspace: "Customization",
 };
 
 const NODE_W = 184;
@@ -75,6 +85,23 @@ export function MachineStorage({ m }: { m: Machine }) {
     return () => clearInterval(t);
   }, [load]);
 
+  // The tree's nodes, and what's picked in it.
+  const nodes = useStorageNodes(s, m);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const toggle = (key: string) => setPicked((p) => (p.has(key) ? new Set([...p].filter((k) => k !== key)) : new Set([...p, key])));
+  const done = (f: Freed) => {
+    setPicked(new Set());
+    const what = [f.removed.length && `${f.removed.length} image${f.removed.length === 1 ? "" : "s"}`, f.uninstalled.length && `${f.uninstalled.join(", ")} and ${f.uninstalled.length === 1 ? "its" : "their"} files`].filter(Boolean).join(" and ");
+    useApp.getState().toast({
+      title: `Freed about ${formatBytes(f.bytes)}`,
+      body: `${what ? `Deleted ${what}.` : "Nothing needed deleting."}${f.kept.length ? ` ${f.kept.join(", ")} kept ${f.kept.length === 1 ? "its" : "their"} files: an image here is built on ${f.kept.length === 1 ? "it" : "them"}.` : ""}`,
+      tone: "success",
+    });
+    void load(true);
+    void useApp.getState().loadImages();
+    void useApp.getState().loadMachines();
+  };
+
   return (
     <div className="overflow-hidden rounded-3xl border border-line bg-surface">
       <div className="flex items-center justify-between border-b border-line px-5 py-4">
@@ -82,7 +109,9 @@ export function MachineStorage({ m }: { m: Machine }) {
           <h3 className="flex items-center gap-2 font-display text-lg font-semibold">
             <HardDrive className="size-4 text-accent" /> Storage
           </h3>
-          <p className="mt-0.5 text-xs text-muted">What your wadspaces take on {m.label}&apos;s disk. Layers are shared: each shows what it adds to the one under it.</p>
+          <p className="mt-0.5 text-xs text-muted">
+            What your wadspaces take on {m.label}&apos;s disk. Layers are shared: each shows what it adds to the one under it. Click templates, Extensions or Customizations to delete them from this machine.
+          </p>
         </div>
         <IconButton label="Measure again" onClick={() => void load(true)} disabled={busy}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
@@ -94,8 +123,9 @@ export function MachineStorage({ m }: { m: Machine }) {
         <p className="p-5 text-sm text-muted">Measuring…</p>
       ) : (
         <div className="space-y-6 p-5">
-          <DiskBar s={s} />
-          <LayerTree s={s} m={m} />
+          <DiskBar s={s} onFreed={done} />
+          <LayerTree nodes={nodes} picked={picked} onToggle={toggle} />
+          {picked.size > 0 && <PickedBar nodes={nodes} picked={picked} setPicked={setPicked} onFreed={done} />}
         </div>
       )}
     </div>
@@ -103,7 +133,19 @@ export function MachineStorage({ m }: { m: Machine }) {
 }
 
 /** The disk: images, wadspaces' files, copies, everything else, and what's free. */
-function DiskBar({ s }: { s: Storage }) {
+function DiskBar({ s, onFreed }: { s: Storage; onFreed: (f: Freed) => void }) {
+  const old = (s.leftovers ?? []).reduce((n, l) => n + l.ownBytes, 0);
+  const [pruning, setPruning] = useState(false);
+  const prune = async () => {
+    setPruning(true);
+    try {
+      onFreed(await backend.pruneOld!());
+    } catch (e) {
+      useApp.getState().toast({ title: "Couldn't delete the old builds", body: (e as Error).message, tone: "error" });
+    } finally {
+      setPruning(false);
+    }
+  };
   const images = (s.base?.bytes ?? 0) + s.layers.reduce((n, l) => n + l.ownBytes, 0);
   const homes = s.homes.reduce((n, h) => n + h.bytes, 0);
   const copies = s.copies.reduce((n, c) => n + c.bytes, 0);
@@ -158,19 +200,36 @@ function DiskBar({ s }: { s: Storage }) {
           <span className="size-2.5 rounded-sm bg-surface-3 ring-1 ring-line" /> Free <span className="font-mono text-fg">{formatBytes(s.disk.freeBytes)}</span>
         </span>
       </div>
+      {s.leftovers?.length > 0 && backend.pruneOld && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-surface-2 px-3 py-2 text-xs ring-1 ring-line">
+          <span className="min-w-0 flex-1 text-muted">
+            <span className="font-medium text-fg">Old builds</span>: {s.leftovers.length} earlier build{s.leftovers.length === 1 ? "" : "s"} of layers nothing needs any more, {formatBytes(old)}.
+          </span>
+          <Button size="sm" variant="ghost" disabled={pruning} onClick={() => void prune()}>
+            {pruning ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />} Delete them
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
 /** The wadspaces as their layers make them: base → templates → Extensions → wadspaces. */
-function LayerTree({ s, m }: { s: Storage; m: Machine }) {
+function useStorageNodes(s: Storage | null, m: Machine): Node[] {
   const templates = useApp((x) => x.templates);
   const extensions = useApp((x) => x.extensions);
   const wadspaces = useApp((x) => x.wadspaces);
   // The layers' notes (update, building) follow the images and builds.
   const images = useApp((x) => x.images);
   const builds = useApp((x) => x.builds);
-  const openDetails = useUi((x) => x.openDetails);
+  return useMemo(
+    () => (s ? treeOf(s, m, { templates: alive(templates), extensions: alive(extensions) }, alive(wadspaces)) : []),
+    // images and builds aren't read here, but they change what imageState says.
+    [s, m, templates, extensions, wadspaces, images, builds],
+  );
+}
+
+function LayerTree({ nodes, picked, onToggle }: { nodes: Node[]; picked: Set<string>; onToggle: (key: string) => void }) {
   // The columns share the card's width (scrolling sideways only when they can't fit).
   const box = useRef<HTMLDivElement>(null);
   const [avail, setAvail] = useState(0);
@@ -182,11 +241,6 @@ function LayerTree({ s, m }: { s: Storage; m: Machine }) {
     return () => ro.disconnect();
   }, []);
 
-  const nodes = useMemo(
-    () => treeOf(s, m, { templates: alive(templates), extensions: alive(extensions) }, alive(wadspaces)),
-    // images and builds aren't read here, but they change what imageState says.
-    [s, m, templates, extensions, wadspaces, images, builds],
-  );
   const laid = useMemo(() => layout(nodes), [nodes]);
   const colW = laid.cols && avail ? Math.max(MIN_COL_W, Math.floor((avail - NODE_W) / laid.cols)) : MIN_COL_W;
   const width = laid.cols * colW + NODE_W;
@@ -224,6 +278,7 @@ function LayerTree({ s, m }: { s: Storage; m: Machine }) {
         </svg>
         {nodes.map((n) => {
           const p = at(n);
+          const on = picked.has(n.key);
           const body = (
             <>
               <span className="absolute inset-y-1.5 left-1.5 w-1 rounded-full" style={{ background: COLOR[n.kind] }} />
@@ -239,19 +294,25 @@ function LayerTree({ s, m }: { s: Storage; m: Machine }) {
                   <span className={clsx("block text-[10px]", n.tone === "on" ? "text-accent" : n.tone === "warn" ? "text-[var(--layer-template)]" : "text-faint")}>{n.note}</span>
                 )}
               </span>
+              {on && (
+                <span className="absolute -right-1.5 -top-1.5 grid size-4 place-items-center rounded-full bg-danger text-white ring-2 ring-surface">
+                  <Check className="size-2.5" strokeWidth={3} />
+                </span>
+              )}
             </>
           );
           const cls = clsx(
-            "absolute flex items-center rounded-xl bg-surface-2 py-1.5 pr-2.5 text-left ring-1 transition-colors",
-            n.bytes === null && n.kind !== "wadspace" ? "opacity-70 ring-line [outline:1px_dashed_var(--line-strong)]" : "ring-line",
+            "absolute flex items-center rounded-xl bg-surface-2 py-1.5 pr-2.5 text-left transition-all",
+            on ? "ring-2 ring-danger" : "ring-1 ring-line",
+            n.bytes === null && n.kind !== "wadspace" && "opacity-70 [outline:1px_dashed_var(--line-strong)]",
           );
           const style = { left: p.x, top: p.y, width: NODE_W, height: NODE_H };
-          return n.wadspaceId ? (
-            <button key={n.key} type="button" className={clsx(cls, "hover:ring-line-strong")} style={style} onClick={() => openDetails(n.wadspaceId!)} title="See this wadspace">
+          return pickable(n) ? (
+            <button key={n.key} type="button" aria-pressed={on} className={clsx(cls, !on && "hover:ring-line-strong")} style={style} onClick={() => onToggle(n.key)} title={on ? "Picked to delete: click to leave it" : "Click to pick it to delete"}>
               {body}
             </button>
           ) : (
-            <div key={n.key} className={cls} style={style} title={n.bytes === null ? "Not built on this machine" : undefined}>
+            <div key={n.key} className={cls} style={style} title={n.kind === "base" ? "The base every template builds on: it stays" : n.bytes === null ? "Not on this machine" : undefined}>
               {body}
             </div>
           );
@@ -337,6 +398,8 @@ function treeOf(
       parent,
       col: depth + 2,
       wadspaceId: w.id,
+      installed: !!c,
+      running: c?.status === "running",
       ...(c?.status === "running" ? { note: "running", tone: "on" as const } : c ? { note: "installed", tone: "dim" as const } : { note: "not built here", tone: "dim" as const }),
     });
   }
@@ -368,4 +431,112 @@ function layout(nodes: Node[]): {
   // Only the base and what's built on it (nothing at all when there are no wadspaces).
   if (nodes.some((n) => n.kind === "wadspace")) place("base");
   return { y, rows: row, cols: Math.max(0, ...nodes.map((n) => n.col)) };
+}
+
+/** What's picked: what it frees, what stops it, and the delete (after a look at what goes). */
+function PickedBar({ nodes, picked, setPicked, onFreed }: { nodes: Node[]; picked: Set<string>; setPicked: (p: Set<string>) => void; onFreed: (f: Freed) => void }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const kids = (key: string) => nodes.filter((n) => n.parent === key);
+  const descendants = (key: string): Node[] => kids(key).flatMap((k) => [k, ...descendants(k.key)]);
+  const sel = nodes.filter((n) => picked.has(n.key) && pickable(n));
+  const layers = sel.filter((n) => n.kind === "template" || n.kind === "extensions");
+  const wadspaces = sel.filter((n) => n.kind === "wadspace");
+  // What stops it: a picked wadspace running; one on a picked layer's image, not picked.
+  const running = wadspaces.filter((n) => n.running);
+  const onIt = layers.flatMap((l) => kids(l.key).filter((k) => k.kind === "wadspace" && k.installed && !picked.has(k.key)));
+  // A layer something unpicked is built on: its name goes, its files stay.
+  const keptBy = (l: Node) => kids(l.key).filter((k) => k.kind !== "wadspace" && k.bytes !== null && !picked.has(k.key));
+  const frees = [...wadspaces, ...layers.filter((l) => !keptBy(l).length)].reduce((n, x) => n + (x.bytes ?? 0), 0);
+  const more = [...new Set(layers.flatMap((l) => descendants(l.key)))].filter((n) => pickable(n) && !picked.has(n.key));
+  const blocked = running.length > 0 || onIt.length > 0;
+  const add = (list: Node[]) => setPicked(new Set([...picked, ...list.map((n) => n.key)]));
+
+  const go = async () => {
+    setBusy(true);
+    try {
+      onFreed(await backend.deleteFromDisk!({ layers: layers.map((n) => n.key), wadspaces: wadspaces.map((n) => n.wadspaceId!) }));
+      setAsking(false);
+    } catch (e) {
+      useApp.getState().toast({ title: "Couldn't delete them", body: (e as Error).message, tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl bg-surface-2 p-3 ring-1 ring-danger/40">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 text-sm">
+          <span className="font-semibold">{sel.length} picked</span>
+          <span className="text-muted"> · frees about {formatBytes(frees)}</span>
+        </span>
+        {more.length > 0 && (
+          <Button size="sm" variant="ghost" onClick={() => add(more)} title={more.map((n) => n.name).join(", ")}>
+            Pick what&apos;s built on {layers.length === 1 ? "it" : "them"} (+{more.length})
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>
+          <X className="size-3.5" /> Clear
+        </Button>
+        <Button size="sm" variant="danger" disabled={blocked || !backend.deleteFromDisk} onClick={() => setAsking(true)}>
+          <Trash2 className="size-3.5" /> Delete…
+        </Button>
+      </div>
+      {(running.length > 0 || onIt.length > 0 || layers.some((l) => keptBy(l).length)) && (
+        <ul className="mt-2 space-y-1 text-xs text-muted">
+          {running.map((n) => (
+            <li key={`run-${n.key}`} className="text-danger">
+              {n.name} is running: stop it first.
+            </li>
+          ))}
+          {onIt.map((n) => (
+            <li key={`on-${n.key}`} className="flex flex-wrap items-center gap-2">
+              <span className="text-danger">{n.name} runs on a picked image.</span>
+              <button type="button" className="font-medium text-fg underline underline-offset-2" onClick={() => add([n])}>
+                Pick it too
+              </button>
+            </li>
+          ))}
+          {layers
+            .filter((l) => keptBy(l).length)
+            .map((l) => (
+              <li key={`kept-${l.key}`}>
+                {l.name}&apos;s files stay while {keptBy(l).map((k) => k.name).join(", ")} {keptBy(l).length === 1 ? "is" : "are"} built on it: only its name goes.
+              </li>
+            ))}
+        </ul>
+      )}
+      <Modal open={asking} onClose={() => !busy && setAsking(false)} title="Delete from this machine?" subtitle="Only from this machine's disk: your library keeps every design, to build again." width={560}>
+        <ul className="space-y-2 text-sm">
+          {wadspaces.map((n) => (
+            <li key={n.key} className="rounded-xl bg-surface-2 px-3 py-2 ring-1 ring-line">
+              <span className="font-medium">{n.name}</span> <span className="text-muted">(Customization)</span>
+              <div className="text-xs text-muted">
+                Taken off this machine, and its files here deleted for good: what&apos;s in its home and the copies only it had{n.bytes ? ` (${formatBytes(n.bytes)})` : ""}.
+              </div>
+            </li>
+          ))}
+          {layers.map((n) => (
+            <li key={n.key} className="rounded-xl bg-surface-2 px-3 py-2 ring-1 ring-line">
+              <span className="font-medium">{n.name}</span> <span className="text-muted">({KIND_LABEL[n.kind]})</span>
+              <div className="text-xs text-muted">
+                {keptBy(n).length
+                  ? `Its name goes; its files stay while ${keptBy(n).map((k) => k.name).join(", ")} ${keptBy(n).length === 1 ? "is" : "are"} built on it.`
+                  : `Its image deleted, and its older builds${n.bytes ? ` (${formatBytes(n.bytes)})` : ""}. Built again when a wadspace on it is built.`}
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" disabled={busy} onClick={() => setAsking(false)}>
+            Cancel
+          </Button>
+          <Button variant="danger" disabled={busy} onClick={() => void go()}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Delete, freeing about {formatBytes(frees)}
+          </Button>
+        </div>
+      </Modal>
+    </div>
+  );
 }

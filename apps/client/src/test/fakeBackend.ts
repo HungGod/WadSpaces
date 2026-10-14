@@ -129,8 +129,16 @@ export class FakeBackend implements Backend {
     return { id, files: paths.length, bytes: 100 * paths.length };
   }
   /** What WadSpaces takes on the disk: the base, each built layer's own share, each home (bytes set in `sizes`). */
-  sizes: { base: number; layers: Record<string, number>; homes: Record<string, number>; copies: Record<string, number>; disk: { total: number; free: number } } = {
+  sizes: {
+    base: number;
+    layers: Record<string, number>;
+    leftovers: { layer: string; id: string; from: string; bytes: number; ownBytes: number }[];
+    homes: Record<string, number>;
+    copies: Record<string, number>;
+    disk: { total: number; free: number };
+  } = {
     base: 3.1e9,
+    leftovers: [],
     layers: {},
     homes: {},
     copies: {},
@@ -141,11 +149,31 @@ export class FakeBackend implements Backend {
     return {
       disk: { path: "/var/lib/containers", totalBytes: z.disk.total, freeBytes: z.disk.free },
       base: { ref: "localhost/wadspaces-base:trixie", id: "base", bytes: z.base },
-      layers: [...this.images.values()].map((r) => ({ layer: r.layer, id: r.id, from: r.from, bytes: 0, ownBytes: z.layers[r.layer] ?? r.sizeMb * 1e6 })),
+      layers: [...this.images.values()].filter((r) => r.layer !== ("base" as string)).map((r) => ({ layer: r.layer, id: r.id, from: r.from, bytes: 0, ownBytes: z.layers[r.layer] ?? r.sizeMb * 1e6 })),
+      leftovers: z.leftovers,
       homes: [...this.installed.keys()].map((id) => ({ workspaceId: id, volume: `wad-${id}-config`, bytes: z.homes[id] ?? 0 })),
       copies: Object.entries(z.copies).map(([id, bytes]) => ({ id, bytes })),
       measuredAt: Date.now() / 1000,
     };
+  }
+  /** Picked off "the machine's" disk: as wadd does, refusing a running wadspace. */
+  deleted: { layers: string[]; wadspaces: string[] }[] = [];
+  async deleteFromDisk(pick: { layers: string[]; wadspaces: string[] }) {
+    const running = pick.wadspaces.find((id) => this.running.has(id));
+    if (running) throw new Error(`${running} is running: stop it first`);
+    this.deleted.push(pick);
+    let bytes = 0;
+    for (const id of pick.wadspaces) (this.installed.delete(id), (bytes += this.sizes.homes[id] ?? 0));
+    for (const l of pick.layers) (this.images.delete(l as LayerKey), (bytes += this.sizes.layers[l] ?? 0));
+    this.emit("images");
+    this.emit("machines");
+    return { removed: pick.layers, kept: [], uninstalled: pick.wadspaces, bytes };
+  }
+  async pruneOld() {
+    const removed = this.sizes.leftovers.map((l) => l.id);
+    const bytes = this.sizes.leftovers.reduce((n, l) => n + l.ownBytes, 0);
+    this.sizes = { ...this.sizes, leftovers: [] };
+    return { removed, kept: [], uninstalled: [], bytes };
   }
   async deleteCopy(id: string) {
     this.copies.delete(id);
