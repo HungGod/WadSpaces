@@ -96,6 +96,21 @@ describe("the Builder's board", () => {
   });
 });
 
+describe("Builds in the sidebar", () => {
+  it("stops a running build and takes it off the list, for good", async () => {
+    let cancelled = "";
+    fake.cancelBuild = async (id: string) => void (cancelled = id);
+    await open("/");
+    act(() => useApp.getState().applyBuild({ id: "b1", wadspaceId: "", name: "Dev", progress: 0.4, from: 0, lines: [], status: "building", error: null, layer: "template:dev" } as never));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop Dev's build" }));
+    expect(cancelled).toBe("b1");
+    expect(useApp.getState().builds).toEqual([]);
+    // Its cancelling reports in: it stays off.
+    act(() => useApp.getState().applyBuild({ id: "b1", wadspaceId: "", name: "Dev", progress: 0.4, from: 0, lines: [], status: "error", error: "cancelled", layer: "template:dev" } as never));
+    expect(useApp.getState().builds).toEqual([]);
+  });
+});
+
 describe("Storage's report", () => {
   it("opens with everything that can go ticked, deleted in one go", async () => {
     const { SAMPLE_OTHER } = await import("./test/fakeBackend");

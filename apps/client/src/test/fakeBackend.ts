@@ -320,6 +320,8 @@ export class FakeBackend implements Backend {
   async users() {
     return [await this.me()];
   }
+  /** Stopping a build (a test sets it to watch). */
+  cancelBuild?: (id: string) => Promise<void>;
   /** "This machine", with the stacks installed (and `running`); off unless asked for (dev:fake). */
   thisMachine = false;
   running = new Set<string>();

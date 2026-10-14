@@ -64,6 +64,11 @@ function BuildsTray({ narrow }: { narrow: boolean }) {
     <div className="rounded-2xl bg-surface/60 p-2 ring-1 ring-line">
       <div className="flex items-center gap-1.5 px-1.5 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
         <Hammer className="size-3.5 text-accent" /> Builds
+        {builds.some((b) => b.status !== "building") && (
+          <button type="button" className="ml-auto rounded px-1 normal-case tracking-normal hover:text-fg" onClick={() => builds.filter((b) => b.status !== "building").forEach((b) => removeBuild(b.id))} title="Take every finished build off the list">
+            Clear
+          </button>
+        )}
       </div>
       {builds.map((b) => (
         <div key={b.id} className="group flex items-center gap-1 rounded-xl hover:bg-surface-2">
@@ -86,11 +91,19 @@ function BuildsTray({ narrow }: { narrow: boolean }) {
               <Play className="size-3.5 fill-current" />
             </button>
           )}
-          {b.status !== "building" && (
-            <button type="button" onClick={() => removeBuild(b.id)} className="mr-1 grid size-7 shrink-0 place-items-center rounded-lg text-faint hover:bg-surface-3 hover:text-fg" aria-label="Dismiss" title="Dismiss">
-              <X className="size-3.5" />
-            </button>
-          )}
+          {/* Off the list; one still going is stopped first. */}
+          <button
+            type="button"
+            onClick={() => {
+              if (b.status === "building") void cancelBuild(b.id);
+              removeBuild(b.id);
+            }}
+            className="mr-1 grid size-7 shrink-0 place-items-center rounded-lg text-faint hover:bg-surface-3 hover:text-fg"
+            aria-label={b.status === "building" ? `Stop ${b.name}'s build` : `Dismiss ${b.name}'s build`}
+            title={b.status === "building" ? "Stop it, and take it off the list" : "Dismiss"}
+          >
+            <X className="size-3.5" />
+          </button>
         </div>
       ))}
     </div>

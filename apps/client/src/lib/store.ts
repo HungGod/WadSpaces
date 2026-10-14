@@ -152,6 +152,9 @@ export interface Notice {
 }
 
 /** Not deleted. */
+/** Builds taken off the sidebar's list (by id): later news of them is ignored. */
+const dismissedBuilds = new Set<string>();
+
 export const alive = <T extends { deletedAt?: string | null }>(list: T[]): T[] => list.filter((x) => !x.deletedAt);
 
 const now = () => new Date().toISOString();
@@ -459,10 +462,15 @@ export const useApp = create<AppState>((set, get) => {
     },
     dismiss: (id) => set({ toasts: get().toasts.filter((x) => x.id !== id) }),
 
-    removeBuild: (id) => set({ builds: get().builds.filter((x) => x.id !== id), buildLog: get().buildLog === id ? null : get().buildLog }),
+    removeBuild: (id) => {
+      dismissedBuilds.add(id);
+      set({ builds: get().builds.filter((x) => x.id !== id), buildLog: get().buildLog === id ? null : get().buildLog });
+    },
     setBuildLog: (buildLog) => set({ buildLog }),
     setLaunchLog: (launchLog) => set({ launchLog }),
     applyBuild: (b) => {
+      // One taken off the list stays off (its cancelling still reports in).
+      if (dismissedBuilds.has(b.id)) return;
       const prev = get().builds.find((x) => x.id === b.id);
       const lines = prev ? [...prev.lines.slice(0, b.from), ...b.lines] : b.lines;
       const job: BuildJob = {
