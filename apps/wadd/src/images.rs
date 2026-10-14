@@ -263,6 +263,8 @@ pub async fn delete_selected(
                 freed.removed.push(id.clone());
             }
             Ok(false) => {}
+            // A step another image is built from stays with that image.
+            Err(e) if e.contains("dependent child") => freed.kept.push(format!("image {}", &id[..id.len().min(12)])),
             Err(e) => freed.failed.push(format!("image {}: {e}", &id[..id.len().min(12)])),
         }
     }

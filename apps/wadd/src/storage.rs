@@ -198,10 +198,16 @@ impl Storage {
             if let Some(b) = &r.base {
                 counted.insert(short(&b.id));
             }
+            // What images here are built on: none of those can go.
+            let under: HashSet<String> = all
+                .iter()
+                .filter_map(|a| a.labels.get(crate::builds::FROM_LABEL).and_then(Value::as_str))
+                .map(short)
+                .collect();
             let mut items = vec![];
             for i in df.images.iter().filter(|i| !counted.contains(&short(&i.id))) {
                 let info = all.iter().find(|a| short(&a.id) == short(&i.id));
-                let (label, detail, deletable) = classify(i, info);
+                let (label, detail, deletable) = classify(i, info, under.contains(&short(&i.id)));
                 items.push(OtherItem {
                     id: short(&i.id),
                     label,
@@ -292,7 +298,11 @@ impl Storage {
 }
 
 /// What an image the layers don't count is, and whether it can go.
-fn classify(i: &crate::backend::DfImage, info: Option<&crate::backend::ImageInfo>) -> (String, String, bool) {
+fn classify(
+    i: &crate::backend::DfImage,
+    info: Option<&crate::backend::ImageInfo>,
+    built_on: bool,
+) -> (String, String, bool) {
     let label = |k: &str| info.and_then(|x| x.labels.get(k)).and_then(Value::as_str).unwrap_or_default().to_string();
     let layer = label(crate::builds::LAYER_LABEL);
     if !layer.is_empty() {
@@ -303,11 +313,15 @@ fn classify(i: &crate::backend::DfImage, info: Option<&crate::backend::ImageInfo
         );
     }
     if label("build_version").contains("WadSpaces base") || i.name.starts_with("localhost/wadspaces-base") {
-        return (
-            "An older base".into(),
-            "Templates built before the last base update still stand on it: update them, and it can go.".into(),
-            true,
-        );
+        return if built_on {
+            (
+                "An older base".into(),
+                "Templates built before the last base update still stand on it: update them, and it can go.".into(),
+                false,
+            )
+        } else {
+            ("An older base".into(), "Nothing stands on it any more.".into(), true)
+        };
     }
     if let Some(name) = i.name.strip_prefix("localhost/wadspaces-") {
         return (

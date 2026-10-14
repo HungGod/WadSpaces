@@ -11,7 +11,7 @@
 // layer something else is built on keeps its files until that goes too.
 // Older builds nothing needs go on their own line.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, HardDrive, Loader2, RefreshCw, Trash2, X } from "lucide-react";
+import { Check, ChevronUp, FileSearch, HardDrive, Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
 import { wadspaceName } from "@/data/layers";
@@ -124,7 +124,16 @@ export function MachineStorage({ m }: { m: Machine }) {
       ) : (
         <div className="space-y-6 p-5">
           <DiskBar s={s} onFreed={done} />
-          <OtherBreakdown s={s} picked={picked} onToggle={toggle} />
+          <OtherBreakdown
+            s={s}
+            picked={picked}
+            onToggle={toggle}
+            onReport={(open) => {
+              // Opened: everything in it that can go, ticked; closed: unticked.
+              const keys = otherPicks(s).map((x) => x.key);
+              setPicked((p) => (open ? new Set([...p, ...keys]) : new Set([...p].filter((k) => !keys.includes(k)))));
+            }}
+          />
           <LayerTree nodes={nodes} picked={picked} onToggle={toggle} />
           {picked.size > 0 && <PickedBar s={s} nodes={nodes} picked={picked} setPicked={setPicked} onFreed={done} />}
         </div>
@@ -570,18 +579,41 @@ function otherPicks(s: Storage): { key: string; kind: "image" | "volume" | "upda
 }
 
 /** "Everything else", part by part: what each is, how big, and (where it can go) a box to pick it. */
-function OtherBreakdown({ s, picked, onToggle }: { s: Storage; picked: Set<string>; onToggle: (key: string) => void }) {
+function OtherBreakdown({ s, picked, onToggle, onReport }: { s: Storage; picked: Set<string>; onToggle: (key: string) => void; onReport: (open: boolean) => void }) {
+  const [open, setOpen] = useState(false);
   const parts = [...(s.other ?? [])].sort((a, b) => b.bytes - a.bytes);
   if (!parts.length) return null;
+  const freeable = otherPicks(s);
+  if (!open)
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3 ring-1 ring-line">
+        <span className="min-w-0 flex-1 text-sm">
+          <span className="font-semibold">Everything else</span>
+          <span className="text-muted">
+            {" "}
+            · {formatBytes(parts.reduce((n, p) => n + p.bytes, 0))} in {parts.length} parts
+            {freeable.length ? `, ${formatBytes(freeable.reduce((n, x) => n + x.bytes, 0))} of it can go` : ""}
+          </span>
+        </span>
+        <Button size="sm" variant="secondary" onClick={() => (setOpen(true), onReport(true))}>
+          <FileSearch className="size-3.5" /> Report
+        </Button>
+      </div>
+    );
   const total = parts.reduce((n, p) => n + p.bytes, 0);
   const Pick = ({ k, label }: { k: string; label: string }) => (
     <input type="checkbox" className="size-4 shrink-0 accent-[var(--danger)]" checked={picked.has(k)} onChange={() => onToggle(k)} aria-label={`Pick ${label} to delete`} />
   );
   return (
     <div className="overflow-hidden rounded-2xl ring-1 ring-line">
-      <div className="flex items-baseline justify-between bg-surface-2 px-4 py-2.5">
+      <div className="flex items-center justify-between gap-3 bg-surface-2 px-4 py-2.5">
         <span className="text-sm font-semibold">Everything else, part by part</span>
-        <span className="font-mono text-xs text-muted">{formatBytes(total)}</span>
+        <span className="flex items-center gap-3">
+          <span className="font-mono text-xs text-muted">{formatBytes(total)}</span>
+          <Button size="sm" variant="ghost" onClick={() => (setOpen(false), onReport(false))}>
+            <ChevronUp className="size-3.5" /> Hide
+          </Button>
+        </span>
       </div>
       <ul className="divide-y divide-line">
         {parts.map((p) => (

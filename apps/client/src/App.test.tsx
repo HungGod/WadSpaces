@@ -96,6 +96,25 @@ describe("the Builder's board", () => {
   });
 });
 
+describe("Storage's report", () => {
+  it("opens with everything that can go ticked, deleted in one go", async () => {
+    const { SAMPLE_OTHER } = await import("./test/fakeBackend");
+    fake.thisMachine = true;
+    fake.sizes = { ...fake.sizes, other: SAMPLE_OTHER };
+    await open("/machines");
+    // Closed at first: just a line.
+    expect(await screen.findByRole("button", { name: /Report/ })).toBeTruthy();
+    expect(screen.queryByText("Everything else, part by part")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Report/ }));
+    expect(await screen.findByText("Everything else, part by part")).toBeTruthy();
+    expect(await screen.findByText(/7 picked/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Delete…/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Delete, freeing/ }));
+    await waitFor(() => expect(fake.deleted).toHaveLength(1));
+    expect(fake.deleted[0]).toEqual(expect.objectContaining({ images: ["aa11", "bb22", "cc33", "dd44"], volumes: ["wad-iq-dev-config", "wad-kale-p-config"], updateCopy: true }));
+  });
+});
+
 describe("Files on the machine", () => {
   it("looks through what's saved, edits a text file and deletes a folder", async () => {
     fake.thisMachine = true;
