@@ -258,8 +258,15 @@ pub struct Builds {
     tasks: Mutex<HashMap<String, JoinHandle<()>>>,
     sent: Mutex<HashMap<String, u64>>,
     last_publish: Mutex<Option<Instant>>,
-    one_at_a_time: tokio::sync::Mutex<()>,
+    /// Builds at once (the rest wait their turn, Queued).
+    slots: tokio::sync::Semaphore,
+    /// One build at a time on each image: two builds that both need a
+    /// template take turns on it (the second finds it built, and skips it).
+    images_busy: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
+
+/// How many builds run at once: their downloads and builds side by side.
+pub const AT_ONCE: usize = 3;
 
 impl Builds {
     pub fn new(backend: Arc<dyn Backend>, bus: Bus, state_dir: &Path, min_free_gb: u64) -> Arc<Self> {
@@ -284,7 +291,8 @@ impl Builds {
             tasks: Mutex::default(),
             sent: Mutex::default(),
             last_publish: Mutex::default(),
-            one_at_a_time: tokio::sync::Mutex::new(()),
+            slots: tokio::sync::Semaphore::new(AT_ONCE),
+            images_busy: Mutex::default(),
         })
     }
 
@@ -431,7 +439,7 @@ impl Builds {
     // ----------------------------------------------------------- running
     async fn run(self: Arc<Self>, id: String) {
         let r = {
-            let _turn = self.one_at_a_time.lock().await;
+            let _turn = self.slots.acquire().await;
             self.go(&id).await
         };
         match r {
@@ -454,6 +462,30 @@ impl Builds {
         self.with(&id, |b| b.finished = Some(now()));
         self.tasks.lock().unwrap().remove(&id);
         self.publish(&id, true);
+        // The last build out tidies up: older images nothing needs any more
+        // (a layer's earlier build, an older base no template stands on).
+        let busy = self.jobs.lock().unwrap().iter().any(|j| !j.build.status.finished());
+        if !busy
+            && let Ok(f) = crate::images::prune(self.backend.as_ref()).await
+            && !f.removed.is_empty()
+        {
+            tracing::info!("after the builds: removed {} older images ({} MB)", f.removed.len(), f.bytes / 1_000_000);
+            self.line(
+                &id,
+                &format!(
+                    "» removed {} older image{} nothing needs, freeing {} MB",
+                    f.removed.len(),
+                    if f.removed.len() == 1 { "" } else { "s" },
+                    f.bytes / 1_000_000
+                ),
+            );
+            self.publish(&id, true);
+        }
+    }
+
+    /// The lock for building `tag`.
+    fn image_lock(&self, tag: &str) -> Arc<tokio::sync::Mutex<()>> {
+        self.images_busy.lock().unwrap().entry(tag.to_string()).or_default().clone()
     }
 
     /// The build; the last image's tag when it's done.
@@ -480,6 +512,9 @@ impl Builds {
         let mut last = String::new();
         for (i, step) in steps.into_iter().enumerate() {
             self.jobs.lock().unwrap().iter_mut().filter(|j| j.build.id == id).for_each(|j| j.group = i as u32);
+            // Another build making this image: after it, then (most likely) skipped.
+            let lock = self.image_lock(&step.tag);
+            let _held = lock.lock().await;
             let Some(from) = self.backend.image_info(&step.from).await? else {
                 let hint = if is_local_base(&step.from) && !step.from.contains("-template-") {
                     " — update the drive with host/build.sh update --bases"

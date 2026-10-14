@@ -320,7 +320,34 @@ pub async fn prune(backend: &dyn Backend) -> Result<Freed, ApiError> {
             Err(e) => tracing::info!("an old build stays for now ({}): {e}", i.id),
         }
     }
+    // Older bases (a stick update brought a newer one) nothing stands on any more.
+    for i in old_bases(backend).await {
+        match backend.remove_image_id(&i.id).await {
+            Ok(true) => {
+                freed.bytes += i.size;
+                freed.removed.push(i.id);
+            }
+            Ok(false) => {}
+            Err(e) => tracing::info!("an older base stays for now ({}): {e}", i.id),
+        }
+    }
     Ok(freed)
+}
+
+/// Bases that aren't the base any more (localhost/wadspaces-base:trixie
+/// names a newer one) and that no image here is built on.
+async fn old_bases(backend: &dyn Backend) -> Vec<ImageInfo> {
+    let base = wad_core::spec::DEFAULT_BASE_IMAGE;
+    let Ok(all) = backend.images_all().await else { return vec![] };
+    let short = |id: &str| id.trim_start_matches("sha256:").to_string();
+    let under: std::collections::HashSet<String> = all.iter().map(|i| short(from_of(i))).collect();
+    all.into_iter()
+        .filter(|i| {
+            let is_base =
+                i.labels.get("build_version").and_then(Value::as_str).is_some_and(|v| v.contains("WadSpaces base"));
+            is_base && !i.tags.iter().any(|t| t == base) && !under.contains(&short(&i.id))
+        })
+        .collect()
 }
 
 /// PUT /v1/wadspaces/{id}: a wadspace and the layers it's on.

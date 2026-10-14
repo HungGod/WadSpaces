@@ -381,26 +381,47 @@ async fn short_on_disk_and_failed_builds() {
 }
 
 #[tokio::test]
-async fn one_build_at_a_time_and_cancelling() {
+async fn three_builds_at_once_and_cancelling() {
     let e = env().await;
     e.fake.with(|m| m.build_slow = true);
-    let first = e.builds.create_layer(&template(dev())).unwrap();
-    let err = e.builds.create_layer(&template(dev())).unwrap_err();
+    let t = |id: &str| {
+        let mut x = dev();
+        x["id"] = id.into();
+        x["apps"] = json!(["obsidian"]);
+        template(x)
+    };
+    let ids: Vec<String> = ["a", "b", "c", "d"].iter().map(|id| e.builds.create_layer(&t(id)).unwrap().id).collect();
+    let err = e.builds.create_layer(&t("a")).unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict); // the same one: once
-    let mut writing = dev();
-    writing["id"] = "writing".into();
-    writing["apps"] = json!(["obsidian"]);
-    let second = e.builds.create_layer(&template(writing)).unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(e.builds.log(&first.id, 0).unwrap().build.status, BuildStatus::Building);
-    assert_eq!(e.builds.log(&second.id, 0).unwrap().build.status, BuildStatus::Queued); // waits its turn
-    assert_eq!(e.builds.cancel(&first.id).unwrap().status, BuildStatus::Cancelled);
-    assert_eq!(e.builds.log(&first.id, 0).unwrap().lines.last().map(String::as_str), Some("✗ cancelled"));
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(e.builds.log(&second.id, 0).unwrap().build.status, BuildStatus::Building); // its turn now
-    e.builds.cancel(&second.id).unwrap();
-    assert_eq!(e.builds.list().len(), 2);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let status = |id: &str| e.builds.log(id, 0).unwrap().build.status;
+    // Three side by side; the fourth waits its turn.
+    assert_eq!(
+        ids.iter().map(|i| status(i)).collect::<Vec<_>>(),
+        [BuildStatus::Building, BuildStatus::Building, BuildStatus::Building, BuildStatus::Queued]
+    );
+    assert_eq!(e.builds.cancel(&ids[0]).unwrap().status, BuildStatus::Cancelled);
+    assert_eq!(e.builds.log(&ids[0], 0).unwrap().lines.last().map(String::as_str), Some("✗ cancelled"));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(status(&ids[3]), BuildStatus::Building); // its turn now
+    for id in &ids[1..] {
+        e.builds.cancel(id).unwrap();
+    }
+    assert_eq!(e.builds.list().len(), 4);
     assert_eq!(e.builds.log("nope", 0).unwrap_err().code, ErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn two_builds_needing_one_template_build_it_once() {
+    let e = env().await;
+    // The template, and an Extensions layer on it, asked for together.
+    let a = e.builds.create_layer(&template(dev())).unwrap().id;
+    let b = e.builds.create_layer(&custom(dev(), plus())).unwrap().id;
+    assert_eq!(wait(&e, &a).await.build.status, BuildStatus::Done);
+    let l = wait(&e, &b).await;
+    assert_eq!(l.build.status, BuildStatus::Done, "{l:?}");
+    let built: Vec<String> = e.fake.0.lock().unwrap().builds.iter().map(|(t, _, _)| t.clone()).collect();
+    assert_eq!(built, [T_REF, C_REF], "Dev built once");
 }
 
 const DOT: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
