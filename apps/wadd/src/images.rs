@@ -64,6 +64,19 @@ pub async fn list(backend: &dyn Backend) -> Result<Vec<ImageRow>, ApiError> {
         })
         .collect();
     rows.sort_by(|a, b| a.layer.cmp(&b.layer));
+    // The base too (layer "base"): a template built on an older one has an update.
+    let base = wad_core::spec::DEFAULT_BASE_IMAGE;
+    if let Ok(Some(i)) = backend.image_info(base).await {
+        rows.push(ImageRow {
+            layer: "base".into(),
+            image_ref: base.into(),
+            id: i.id,
+            dockerfile_sha: String::new(),
+            built_at: i.created,
+            size_mb: (i.size as f64 / 1_000_000.0).round(),
+            from: String::new(),
+        });
+    }
     Ok(rows)
 }
 

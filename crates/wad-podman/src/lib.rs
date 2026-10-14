@@ -300,6 +300,21 @@ impl Podman {
         })
     }
 
+    /// Each named volume's size in bytes (`podman system df -v`: podman
+    /// counts the files, so it takes a moment).
+    pub async fn volume_sizes(&self) -> Result<Vec<(String, u64)>, Error> {
+        let df = self.get_json("disk usage", "/system/df").await?.unwrap_or(Value::Null);
+        Ok(df
+            .get("Volumes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|v| {
+                Some((v.get("VolumeName")?.as_str()?.to_string(), v.get("Size").and_then(Value::as_u64).unwrap_or(0)))
+            })
+            .collect())
+    }
+
     /// Where a named volume's files are on the host; None if there's no such volume.
     pub async fn volume_mountpoint(&self, name: &str) -> Result<Option<String>, Error> {
         let info =

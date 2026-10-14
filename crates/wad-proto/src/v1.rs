@@ -1094,6 +1094,62 @@ pub struct DiagDisk {
     pub total_bytes: u64,
 }
 
+/// GET /v1/storage: what WadSpaces takes on this machine's disk, measured
+/// at most once a minute (a wadspace's files take a while to count).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Storage {
+    /// The disk the images are on.
+    pub disk: DiagDisk,
+    /// The base every template builds on; None if it isn't here.
+    pub base: Option<ImageBytes>,
+    /// Each layer's image: all of it, and its own share (what it adds to the
+    /// image it's built on).
+    pub layers: Vec<LayerBytes>,
+    /// Each wadspace's home (its /config volume).
+    pub homes: Vec<HomeBytes>,
+    /// Files copied in for wadspaces (POST /v1/copies).
+    pub copies: Vec<CopyBytes>,
+    /// Unix seconds.
+    pub measured_at: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageBytes {
+    #[serde(rename = "ref")]
+    pub image_ref: String,
+    pub id: String,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerBytes {
+    /// "template:<id>" or "custom:<id>".
+    pub layer: String,
+    pub id: String,
+    /// The image it was built on.
+    pub from: String,
+    pub bytes: u64,
+    pub own_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HomeBytes {
+    pub workspace_id: String,
+    pub volume: String,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyBytes {
+    pub id: String,
+    pub bytes: u64,
+}
+
 /// GET /v1/logs/unit/{unit} and /v1/logs/workspace/{id}: redacted text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

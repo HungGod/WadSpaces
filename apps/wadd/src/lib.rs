@@ -26,6 +26,7 @@ pub mod registry;
 pub mod screen;
 pub mod secrets;
 pub mod signins;
+pub mod storage;
 pub mod systemd;
 pub mod view;
 
@@ -339,6 +340,7 @@ impl Server {
             logs,
             policy,
             store: wad_store::State::new(&config.daemon.state_dir),
+            storage: storage::Storage::new(&config.daemon.state_dir),
         });
         Ok(Self {
             listener,

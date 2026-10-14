@@ -98,6 +98,10 @@ pub trait Backend: Send + Sync + 'static {
     async fn images_labelled(&self, _label: &str) -> Result<Vec<ImageInfo>, String> {
         Err("no podman".into())
     }
+    /// Each named volume's size in bytes.
+    async fn volume_sizes(&self) -> Result<Vec<(String, u64)>, String> {
+        Err("no podman".into())
+    }
     /// Removes an image (just its name, when others are built on it). False
     /// if there was none.
     async fn remove_image(&self, _image: &str) -> Result<bool, String> {
@@ -361,6 +365,10 @@ impl Backend for Real {
 
     async fn images_labelled(&self, label: &str) -> Result<Vec<ImageInfo>, String> {
         self.podman.images_labelled(label).await.map_err(|e| e.to_string())
+    }
+
+    async fn volume_sizes(&self) -> Result<Vec<(String, u64)>, String> {
+        self.podman.volume_sizes().await.map_err(|e| e.to_string())
     }
 
     async fn remove_image(&self, image: &str) -> Result<bool, String> {

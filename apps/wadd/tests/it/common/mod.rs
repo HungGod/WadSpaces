@@ -37,6 +37,10 @@ pub struct Machine {
     pub builds: Vec<(String, String, Vec<u8>)>,
     /// Each built image's id (a new one each build).
     pub image_ids: HashMap<String, String>,
+    /// Images' sizes in bytes (else 2 GB).
+    pub image_sizes: HashMap<String, u64>,
+    /// Volumes' sizes in bytes (podman system df).
+    pub volume_bytes: HashMap<String, u64>,
     pub build_fails: Option<String>,
     pub build_slow: bool,
     /// podman's secrets: name -> value.
@@ -197,14 +201,20 @@ impl Backend for Fake {
         });
         Ok(())
     }
+    async fn volume_sizes(&self) -> Result<Vec<(String, u64)>, String> {
+        Ok(self.0.lock().unwrap().volume_bytes.iter().map(|(k, v)| (k.clone(), *v)).collect())
+    }
     async fn image_info(&self, image: &str) -> Result<Option<wadd::backend::ImageInfo>, String> {
         let m = self.0.lock().unwrap();
-        Ok(m.images.contains(image).then(|| wadd::backend::ImageInfo {
-            id: m.image_ids.get(image).cloned().unwrap_or_else(|| format!("{:x<64}", image.len())),
+        let id_of = |name: &str| m.image_ids.get(name).cloned().unwrap_or_else(|| format!("{:x<64}", name.len()));
+        // By name, or by id as podman takes either.
+        let image = m.images.iter().find(|n| *n == image || id_of(n) == image).cloned().unwrap_or_default();
+        Ok(m.images.contains(&image).then(|| wadd::backend::ImageInfo {
+            id: id_of(&image),
             created: 1_700_000_000.0,
-            size: 2_000_000_000,
-            labels: m.image_labels.get(image).cloned().unwrap_or_default(),
-            tags: vec![image.into()],
+            size: m.image_sizes.get(&image).copied().unwrap_or(2_000_000_000),
+            labels: m.image_labels.get(&image).cloned().unwrap_or_default(),
+            tags: vec![image],
         }))
     }
     async fn images_labelled(&self, label: &str) -> Result<Vec<wadd::backend::ImageInfo>, String> {

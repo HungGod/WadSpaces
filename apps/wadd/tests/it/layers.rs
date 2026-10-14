@@ -168,8 +168,10 @@ async fn images_list_with_their_shas_and_a_rebuilt_template_shows() {
     wait(&e, &b.id).await;
     let rows = images::list(&e.fake).await.unwrap();
     let layers: Vec<&str> = rows.iter().map(|r| r.layer.as_str()).collect();
-    assert_eq!(layers, ["custom:dev-plus", "template:dev"]);
+    // The base last: a template built on an older one has an update.
+    assert_eq!(layers, ["custom:dev-plus", "template:dev", "base"]);
     let (c, t) = (&rows[0], &rows[1]);
+    assert_eq!(rows[1].from, rows[2].id);
     assert_eq!(c.image_ref, C_REF);
     assert_eq!(c.dockerfile_sha, wad_core::layers::extensions_layer(&plus(), &dev())["sha"].as_str().unwrap());
     // Built on the template's image as it is: unchanged.
@@ -466,6 +468,36 @@ async fn web_apps_show_in_the_client_with_their_sites_own_icons() {
     }
     // Nobody answers there: nothing to show (the client shows its own).
     assert!(icons.favicon("http://127.0.0.1:9/").await.is_none());
+}
+
+#[tokio::test]
+async fn the_disk_report_counts_each_layers_own_share_and_each_home() {
+    let e = env().await;
+    let l = wait(&e, &e.builds.create_layer(&custom(dev(), plus())).unwrap().id).await;
+    assert_eq!(l.build.status, BuildStatus::Done, "{l:?}");
+    e.fake.with(|m| {
+        m.image_sizes.insert(BASE.into(), 3_000);
+        m.image_sizes.insert(T_REF.into(), 5_000);
+        m.image_sizes.insert(C_REF.into(), 5_600);
+        m.volume_bytes.insert("wad-academy-config".into(), 700);
+        m.volume_bytes.insert("someone-elses".into(), 9);
+    });
+    let req = Install { wadspace: wadspace("academy"), template: dev(), extensions: Some(plus()), tz: None };
+    images::install(&e.reg, &e.fake, "academy", &req).await.unwrap();
+    std::fs::create_dir_all(e.state.join("copies/c1/files/a")).unwrap();
+    std::fs::write(e.state.join("copies/c1/files/a/f"), vec![0u8; 42]).unwrap();
+
+    let backend: Arc<dyn wadd::backend::Backend> = Arc::new(e.fake.clone());
+    let r = wadd::storage::Storage::new(&e.state).report(&backend, &e.reg, true).await;
+    assert_eq!(r.base.as_ref().map(|b| b.bytes), Some(3_000));
+    let own: Vec<(String, u64)> = r.layers.iter().map(|l| (l.layer.clone(), l.own_bytes)).collect();
+    // Each layer: what it adds to the one under it.
+    assert_eq!(own, vec![("custom:dev-plus".into(), 600), ("template:dev".into(), 2_000)]);
+    assert_eq!(r.homes.iter().map(|h| (h.workspace_id.as_str(), h.bytes)).collect::<Vec<_>>(), vec![("academy", 700)]);
+    assert_eq!(r.copies.iter().map(|c| (c.id.as_str(), c.bytes)).collect::<Vec<_>>(), vec![("c1", 42)]);
+    // And the base in the images list, so a template on an older one shows an update.
+    let rows = images::list(&e.fake).await.unwrap();
+    assert!(rows.iter().any(|r| r.layer == "base" && r.image_ref == BASE), "{rows:?}");
 }
 
 #[test]

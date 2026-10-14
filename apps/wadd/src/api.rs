@@ -59,6 +59,8 @@ pub struct AppState {
     pub policy: Policy,
     /// What's on disk (the Python wadd's formats).
     pub store: wad_store::State,
+    /// What WadSpaces takes on the disk (GET /v1/storage).
+    pub storage: crate::storage::Storage,
 }
 
 /// An ApiError as an HTTP response.
@@ -131,6 +133,7 @@ pub fn router(app: Arc<AppState>) -> Router {
         )
         .route("/v1/wadspaces/{id}", axum::routing::put(wadspace_install))
         .route("/v1/images", get(images))
+        .route("/v1/storage", get(storage))
         .route("/v1/images/build", post(image_build))
         .route("/v1/images/{layer}", delete(image_delete))
         .route("/v1/workspaces/{id}/start", post(start))
@@ -564,6 +567,17 @@ async fn launch_batch(
 /// The layer images here.
 async fn images(State(app): State<Arc<AppState>>) -> Result<Json<Vec<ImageRow>>, Failure> {
     Ok(Json(crate::images::list(app.registry_backend.as_ref()).await?))
+}
+
+#[derive(Deserialize)]
+struct StorageQuery {
+    #[serde(default)]
+    fresh: bool,
+}
+
+/// What WadSpaces takes on this machine's disk (`?fresh=true` counts again now).
+async fn storage(State(app): State<Arc<AppState>>, Query(q): Query<StorageQuery>) -> Json<wad_proto::v1::Storage> {
+    Json(app.storage.report(&app.registry_backend, &app.registry, q.fresh).await)
 }
 
 /// Builds a layer's image (what it builds on first, when needed).
