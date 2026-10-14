@@ -34,7 +34,7 @@ src/core/              shared with wad-core (crates/wad-core, as WebAssembly in 
   generator/           the Dockerfile, root/ overlay and quadlet wadd writes, byte for byte
 src/data/              backend.ts, layers.ts (shared by the backends), migrate.ts,
                        local/ (wadd), cloud/ (Firebase, the relay), machine/ (both)
-src/pages/             Home, Builder, Projects, Secrets, Machines, Login/Welcome
+src/pages/             Home, Builder, Secrets, Machines, Login/Welcome
 src/components/        Shell, the Builder's board (builder/: the board, its editors, and
                        sync.ts between it and the documents), the launcher (launcher/),
                        the desktop as the image draws it (desktop/), the details drawer

@@ -1,5 +1,5 @@
 // The WadSpaces Client's routes: sign-in (with an account), then the app
-// inside the Shell: Home, the Builder, Projects, Secrets and Machines.
+// inside the Shell: Home, the Builder, Secrets and Machines.
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router";
 import { Loader2 } from "lucide-react";
@@ -9,7 +9,6 @@ import type { PublicUser } from "@/lib/types";
 import Builder from "@/pages/Builder";
 import Home from "@/pages/Home";
 import Machines from "@/pages/Machines";
-import Projects from "@/pages/Projects";
 import Secrets from "@/pages/Secrets";
 
 // Account pages load Firebase Auth: the web portal and the machine app have
@@ -78,7 +77,6 @@ export default function App() {
       <Route element={<AppLayout />}>
         <Route index element={<Home />} />
         <Route path="builder" element={<Builder />} />
-        <Route path="projects" element={<Projects />} />
         <Route path="secrets" element={<Secrets />} />
         <Route path="machines" element={<Machines />} />
         {/* Older addresses: the library is Step 1 of the Builder now, the launcher is in the sidebar. */}

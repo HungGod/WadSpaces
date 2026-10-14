@@ -5,7 +5,7 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ChevronsLeft, ChevronsRight, FolderGit2, Home, KeyRound, LayoutGrid, Lock, LogOut, Play, Server, Wand2 } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Home, KeyRound, LayoutGrid, Lock, LogOut, Play, Server, Wand2 } from "lucide-react";
 import clsx from "clsx";
 import { backend } from "@/data";
 import { wadd } from "@/lib/wadd";
@@ -30,7 +30,6 @@ import { useBoardSync } from "./builder/store";
 const NAV = [
   { href: "/", label: "Home", icon: Home },
   { href: "/builder", label: "Builder", icon: Wand2 },
-  { href: "/projects", label: "Projects", icon: FolderGit2 },
   { href: "/secrets", label: "Secrets", icon: KeyRound },
   { href: "/machines", label: "Machines", icon: Server },
 ];
@@ -111,7 +110,7 @@ export function Shell({ user, children }: { user: PublicUser; children: React.Re
               <Link
                 key={href}
                 to={href}
-                data-tour={href === "/builder" ? "nav-builder" : href === "/projects" ? "nav-projects" : undefined}
+                data-tour={href === "/builder" ? "nav-builder" : undefined}
                 title={narrow ? label : undefined}
                 className={clsx(
                   "relative flex h-10 items-center gap-3 rounded-xl text-sm font-medium transition-colors",

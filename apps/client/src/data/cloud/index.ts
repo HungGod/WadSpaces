@@ -179,7 +179,7 @@ export class CloudBackend implements Backend {
     };
     for (const [q, into, topic] of watched) watch(q, into, topic);
     this.unsubs.push(onSnapshot(doc(db, "profiles", uid), () => this.emit("session")));
-    // The repo list your machines share; not part of `loaded` (only the Projects page needs it).
+    // The repo list your machines share; not part of `loaded` (the Builder asks for it when it needs it).
     let seen!: () => void;
     this.githubSeen = new Promise((r) => (seen = r));
     this.unsubs.push(
