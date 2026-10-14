@@ -17,7 +17,7 @@ import { collection, deleteDoc, doc, getDoc, onSnapshot, setDoc, updateDoc, type
 import { STARTERS } from "@core/catalog/catalog";
 import { stackImageKey, type BrowserSetup, type Extensions, type LayerKey, type Template, type Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch, Topic } from "../backend";
-import { byLayer, imageState, installBody, launchItem, layerRequest, notReady, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
+import { byLayer, imageState, needsBuild, installBody, launchItem, layerRequest, notReady, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
 import type { StoredWadspace } from "../migrate";
 import { db } from "./firebase";
 import { commandResult, sendCommand, type RelayImage, type RelayScreen, type RelaySignIn } from "./relay";
@@ -209,7 +209,7 @@ export class RelayMachine {
       if (!w) continue;
       await this.install(w, lib);
       const key = stackImageKey(w);
-      if (key && ["never", "changed"].includes(imageState(key, lib, images, this.building()))) await this.build(key, lib);
+      if (key && needsBuild(imageState(key, lib, images, this.building()))) await this.build(key, lib);
     }
     const launchItems = await Promise.all(items.map((it, i) => launchItem(it, { background: i > 0, lib })));
     const cmd = await sendCommand(uid, mid, "launch-run", undefined, clean({ items: launchItems, focusMinutes }));

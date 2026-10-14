@@ -45,13 +45,21 @@ export interface ImageRow {
   from: string;
 }
 
-export type ImageState = "never" | "building" | "built" | "changed";
+export type ImageState = "never" | "building" | "built" | "update" | "changed";
 
 /**
- * How a layer's image stands on the machine: built from the layer as it is
- * now, on what's under it as that is now (a template on its parent's image,
- * an Extensions layer on its template's), all the way down. A template on
- * the base is taken as built on it (the base comes on the update drive).
+ * How a layer's image stands on the machine:
+ * - built: from the layer as it is now, on what's under it as that is now (a
+ *   template on its parent's image or the base, an Extensions layer on its
+ *   template's), all the way down;
+ * - update: built from the layer as it is, but on an older image of what's
+ *   under it (a newer base came with a stick update, or a template under it
+ *   was built again since): it runs as it is, and building it again brings
+ *   it up to date;
+ * - changed: the layer, or one under it, changed since it was built: build it
+ *   to run it as it is now.
+ * The base's own row ("base", from wadd's /v1/images) tells a template on an
+ * older base; a wadd that doesn't send it can't, and the template counts as built.
  */
 export function imageState(key: LayerKey, lib: Library, images: Partial<Record<LayerKey, ImageRow>>, building: ReadonlySet<string>): ImageState {
   if (building.has(key)) return "building";
@@ -59,11 +67,15 @@ export function imageState(key: LayerKey, lib: Library, images: Partial<Record<L
   if (!row) return "never";
   const under = (parentKey: LayerKey | null, sha: string): ImageState => {
     if (row.dockerfileSha !== sha) return "changed";
-    if (!parentKey) return "built";
-    const parent = images[parentKey];
-    if (!parent || parent.id !== row.from) return "changed";
+    if (!parentKey) {
+      const base = (images as Partial<Record<string, ImageRow>>).base;
+      return base && row.from && base.id !== row.from ? "update" : "built";
+    }
     const p = imageState(parentKey, lib, images, building);
-    return p === "built" ? "built" : "changed";
+    if (p === "changed" || p === "never") return "changed";
+    const parent = images[parentKey];
+    if (!parent || parent.id !== row.from) return "update";
+    return p === "update" ? "update" : "built";
   };
   if (key.startsWith("template:")) {
     const t = lib.templates.find((x) => x.id === key.slice(9));
@@ -77,6 +89,9 @@ export function imageState(key: LayerKey, lib: Library, images: Partial<Record<L
   if (!e || !t) return "built";
   return under(`template:${t.id}`, extensionsLayer(e, t).sha);
 }
+
+/** Whether a layer's image must be built before it runs (an update can wait). */
+export const needsBuild = (s: ImageState) => s === "never" || s === "changed";
 
 /** The image rows by layer. */
 export const byLayer = (rows: ImageRow[]): Partial<Record<LayerKey, ImageRow>> => Object.fromEntries(rows.map((r) => [r.layer, r]));

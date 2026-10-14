@@ -2609,6 +2609,23 @@ body.is-dragging .wb .delete-area .bucket.drop-ok {
   color: var(--accent);
   border-color: rgb(198 255 31 / 0.4);
 }
+/* Built on an older base: runs as it is; a click builds it again. */
+.wb .build-tag.update {
+  background: color-mix(in srgb, var(--k-template) 16%, transparent);
+  color: var(--k-template);
+}
+.wb button.status-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--k-template);
+  border-color: color-mix(in srgb, var(--k-template) 50%, transparent);
+  background: color-mix(in srgb, var(--k-template) 8%, transparent);
+  cursor: pointer;
+}
+.wb button.status-update:hover {
+  background: color-mix(in srgb, var(--k-template) 18%, transparent);
+}
 
 /* ─────────── build + delete, centred along the bottom ─────────── */
 .wb .bottom-buckets {

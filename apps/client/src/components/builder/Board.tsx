@@ -10,10 +10,10 @@
 // Deleting a whole stack asks first.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ChevronLeft, ChevronRight, Eye, Hammer, Plus, Trash2, Undo2, Wrench, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Eye, Hammer, Plus, RefreshCw, Trash2, Undo2, Wrench, X } from "lucide-react";
 import { app, problemsOf, subFits } from "./catalog";
 import { BLANK_WALLPAPER, LAYER_INFO, appsOf, lookOf, fitTemplates, moduleName, modulesOf, stackName, statusOf, uid, type AnySub, type AppSub, type AppSubKey, type CustomSub, type Layer, type Module, type Stack, type TemplateModule } from "./model";
-import { NEW, buildStateOf, grab, isBuilding, nameClash, unbuiltOf, useBoard, useImages, type ModuleSource } from "./store";
+import { NEW, buildStateOf, grab, isBuilding, nameClash, unbuiltOf, updatesOf, useBoard, useImages, type ModuleSource } from "./store";
 import { useDraggable, useDropTarget, useDrag, type Payload } from "./drag";
 import { AppSubWindow, BlankCustomization, BlankExtensions, BlankWindow, ChipFace, PromptFace, type Prompt, LAYER_ICON, ModuleFace, Pile, TrayFace, subSummary } from "./faces";
 
@@ -317,6 +317,7 @@ function StackColumn({ stack }: { stack: Stack }) {
   useImages();
   const building = isBuilding(stack);
   const unbuilt = unbuiltOf(stack).length;
+  const updates = updatesOf(stack).length;
   // Ready to deploy: everything built, and a named customization on top.
   const chip = problems.length
     ? { cls: "status-broken", text: "Needs fixing" }
@@ -328,7 +329,9 @@ function StackColumn({ stack }: { stack: Stack }) {
           ? { cls: "status-unbuilt", text: `Not built · ${unbuilt}` }
           : !lookOf(stack)?.name.trim()
             ? { cls: "status-no-customization", text: "Needs a name" }
-            : { cls: "status-ready", text: "Ready" };
+            : updates
+              ? { cls: "status-update", text: "Update available" }
+              : { cls: "status-ready", text: "Ready" };
   return (
     <div {...drop.props} data-stack={stack.id} className={`stack${problems.length ? " broken" : ""}${fresh ? " fresh" : ""}${dropClass(drop)}`}>
       {problems.length > 0 && (
@@ -348,9 +351,19 @@ function StackColumn({ stack }: { stack: Stack }) {
         )}
       <div className="stack-foot">
         <span className="stack-name">{stackName(stack)}</span>
-        <span className={`status ${chip.cls}`} title={chip.cls === "status-ready" ? "Built and named: ready to deploy" : undefined}>
-          {chip.text}
-        </span>
+        {chip.cls === "status-update" ? (
+          <button
+            className={`status ${chip.cls}`}
+            onClick={() => useBoard.getState().buildStack(stack.id)}
+            title={`A newer base (or a template under it) since ${updates === 1 ? "one of its images was" : `${updates} of its images were`} built. It runs as it is; click to build again on what's there now.`}
+          >
+            <RefreshCw size={11} /> {chip.text}
+          </button>
+        ) : (
+          <span className={`status ${chip.cls}`} title={chip.cls === "status-ready" ? "Built and named: ready to deploy" : undefined}>
+            {chip.text}
+          </span>
+        )}
         <button className="btn-preview icon" onClick={() => openPreview(stack.id)} title="Preview: see the finished wadspace (nothing is launched)" aria-label="Preview">
           <Eye size={14} />
         </button>

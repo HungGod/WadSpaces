@@ -236,7 +236,7 @@ export function imageOf(m: Module): LayerKey | null {
   return m.layer === "template" ? `template:${m.ref}` : `custom:${m.ref}`;
 }
 
-export type BuildState = "built" | "unbuilt";
+export type BuildState = "built" | "update" | "unbuilt";
 
 /**
  * Where a module stands on the launch machine. A customization always counts
@@ -248,11 +248,15 @@ export function buildStateOf(m: Module): BuildState {
   if (m.layer === "customization") return "built";
   if (m.layer === "extensions" ? !m.subs.length : !m.apps.length) return "built";
   const img = imageOf(m);
-  return img && useApp.getState().imageState(img) === "built" ? "built" : "unbuilt";
+  const state = img ? useApp.getState().imageState(img) : "never";
+  return state === "built" ? "built" : state === "update" ? "update" : "unbuilt";
 }
 
 /** The modules in a stack still to build. */
 export const unbuiltOf = (stack: Stack) => modulesOf(stack).filter((m) => buildStateOf(m) === "unbuilt");
+
+/** The modules in a stack built on an older base (or template): building again updates them. */
+export const updatesOf = (stack: Stack) => modulesOf(stack).filter((m) => buildStateOf(m) === "update");
 
 /** Whether a stack's image is building. */
 export const isBuilding = (stack: Stack) => modulesOf(stack).some((m) => {
@@ -740,10 +744,22 @@ export const useBoard = create<State>()(
           if (!stack.customization || !lookOf(stack)?.name.trim()) return get().toast(`${stackName(stack)} needs a named Customization to be built`);
           useTour.getState().signal("build-started");
           const todo = unbuiltOf(stack).length;
+          const updates = updatesOf(stack).length;
+          const plural = (n: number) => `${n} image${n === 1 ? "" : "s"}`;
           void useApp
             .getState()
             .buildStack(stackId)
-            .then((ok) => ok && get().toast(todo ? `Building ${stackName(stack)}: ${todo} image${todo === 1 ? "" : "s"}` : `${stackName(stack)} is installed, its images built already`));
+            .then(
+              (ok) =>
+                ok &&
+                get().toast(
+                  todo
+                    ? `Building ${stackName(stack)}: ${plural(todo)}`
+                    : updates
+                      ? `Updating ${stackName(stack)}: ${plural(updates)}, on what's under ${updates === 1 ? "it" : "them"} now`
+                      : `${stackName(stack)} is installed, its images built already`,
+                ),
+            );
         },
         buildSelected() {
           const s = get();

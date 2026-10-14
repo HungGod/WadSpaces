@@ -199,7 +199,7 @@ function Folders({ stack, sub, put }: { stack: Stack; sub: FoldersSub; put(s: Fo
       <div className="group-label">Your GitHub repositories</div>
       <div className="gh-list">
         {repos === null && <p className="faint small">Loading…</p>}
-        {repos?.length === 0 && <p className="faint small">None to show: sign in to GitHub on the Projects page (a machine lists them).</p>}
+        {repos?.length === 0 && <p className="faint small">None to show: sign this machine in to GitHub (Secrets, GitHub sign-in).</p>}
         {repos?.map((r) => (
           <button key={r.fullName} className={`gh-proj${cloned(r.fullName) ? " on" : ""}`} onClick={() => clone(r.fullName)} disabled={cloned(r.fullName)} title={r.description ?? r.fullName}>
             <FolderGit2 size={13} />

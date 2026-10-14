@@ -17,7 +17,7 @@ export function Heading({ children, hint }: { children: React.ReactNode; hint?: 
   );
 }
 
-const LABEL: Record<ImageState, string> = { never: "Not built", built: "Built", changed: "Changed since built", building: "Building" };
+const LABEL: Record<ImageState, string> = { never: "Not built", built: "Built", update: "Update available", changed: "Changed since built", building: "Building" };
 
 /** Where a layer's image stands on the launch machine (re-rendered as builds and images change). */
 export function useImageState(key: LayerKey | null): ImageState {
@@ -36,7 +36,7 @@ export function ImageBadge({ image, glass }: { image: LayerKey; glass?: boolean 
   const at = useApp((s) => s.images[image]?.builtAt);
   const job = useLayerBuild(image);
   return (
-    <Badge tone={glass ? "glass" : state === "changed" || state === "never" ? "accent-2" : "default"}>
+    <Badge tone={glass ? "glass" : state === "changed" || state === "never" || state === "update" ? "accent-2" : "default"}>
       {state === "building" && <Loader2 className="size-3 animate-spin" />}
       {state === "built" && at ? `Built ${timeAgo(at * 1000)}` : state === "building" && job?.status === "building" ? `Building ${Math.round(job.progress * 100)}%` : LABEL[state]}
     </Badge>
@@ -59,7 +59,7 @@ export function BuildButton({ image, size = "sm" }: { image: LayerKey; size?: "s
   if (state === "built") return null;
   return (
     <Button size={size} variant="secondary" disabled={state === "building"} onClick={() => void build(image)} title={imageRef(image)}>
-      {state === "building" ? <Loader2 className="size-3.5 animate-spin" /> : <Hammer className="size-3.5" />} {state === "building" ? "Building…" : state === "changed" ? "Rebuild" : "Build image"}
+      {state === "building" ? <Loader2 className="size-3.5 animate-spin" /> : <Hammer className="size-3.5" />} {state === "building" ? "Building…" : state === "changed" ? "Rebuild" : state === "update" ? "Update" : "Build image"}
     </Button>
   );
 }

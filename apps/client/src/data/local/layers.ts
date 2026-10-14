@@ -12,7 +12,7 @@ import { STARTERS } from "@core/catalog/catalog";
 import { stackImageKey, type BrowserSetup, type Extensions, type LayerKey, type Template, type Wadspace } from "@core/layers";
 import { wadd, type LibraryCollection } from "@/lib/wadd";
 import type { LayerLibrary, LayerPatch } from "../backend";
-import { byLayer, imageState, installBody, launchItem, layerRequest, notReady, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
+import { byLayer, imageState, needsBuild, installBody, launchItem, layerRequest, notReady, timeZone, wallpaperUpload, type ImageRow, type RunItem } from "../layers";
 import type { StoredWadspace } from "../migrate";
 
 type Doc = { id: string };
@@ -142,7 +142,7 @@ export class WaddMachine {
       if (!w) continue;
       await this.install(w, lib);
       const key = stackImageKey(w);
-      if (key && imageState(key, lib, images, this.building) !== "built" && !this.building.has(key)) await this.build(key, lib);
+      if (key && needsBuild(imageState(key, lib, images, this.building)) && !this.building.has(key)) await this.build(key, lib);
     }
     const launchItems = await Promise.all(items.map((it, i) => launchItem(it, { background: i > 0, lib })));
     return wadd.launchBatch(launchItems, focusMinutes);

@@ -285,12 +285,20 @@ export const belowOf = (stack: Stack, t: TemplateModule) => stack.templates[stac
  * layer strip (its name and the apps it adds) so a chain of templates stays
  * short; the top template shows the full desktop, inherited apps faded.
  */
-/** Where a module stands, as the board draws it: built, not built, or being built. */
-export type FaceState = "built" | "unbuilt" | "building";
+/** Where a module stands, as the board draws it: built, built on an older base (an update), not built, or being built. */
+export type FaceState = "built" | "update" | "unbuilt" | "building";
 
 const stateClass = (s?: FaceState) => (s && s !== "built" ? ` ${s}` : "");
 const StateTag = ({ s }: { s?: FaceState }) =>
-  s === "unbuilt" ? <span className="build-tag">Not built</span> : s === "building" ? <span className="build-tag building">Building…</span> : null;
+  s === "unbuilt" ? (
+    <span className="build-tag">Not built</span>
+  ) : s === "building" ? (
+    <span className="build-tag building">Building…</span>
+  ) : s === "update" ? (
+    <span className="build-tag update" title="Built on an older base: update it from the stack's Update available">
+      Update
+    </span>
+  ) : null;
 
 export function ModuleFace({ stack, module: m, slots = {}, compact, state }: { stack: Stack; module: Module; slots?: FaceSlots; compact?: boolean; state?: FaceState }) {
   const layer = m.layer;

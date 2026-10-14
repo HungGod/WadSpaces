@@ -30,17 +30,32 @@ describe("image states", () => {
     expect(imageState("custom:plus", lib, images, new Set(["custom:plus"]))).toBe("building");
     // The Extensions changed since.
     expect(imageState("custom:plus", { ...lib, extensions: [{ ...c, tools: [] }] }, images, new Set())).toBe("changed");
-    // Its template's image rebuilt since it was built on it.
-    expect(imageState("custom:plus", lib, { ...images, "template:dev": { ...tRow, id: "newer" } }, new Set())).toBe("changed");
+    // Its template's image rebuilt since it was built on it: it runs as it is, with an update.
+    expect(imageState("custom:plus", lib, { ...images, "template:dev": { ...tRow, id: "newer" } }, new Set())).toBe("update");
   });
 
   it("follows a template down its chain", () => {
     expect(imageState("template:game", lib, images, new Set())).toBe("built");
-    // Dev rebuilt under it: Game Dev is out of date even with the same build folder.
-    expect(imageState("template:game", lib, { ...images, "template:dev": { ...tRow, id: "newer" } }, new Set())).toBe("changed");
+    // Dev rebuilt under it: Game Dev, the same build folder, has an update.
+    expect(imageState("template:game", lib, { ...images, "template:dev": { ...tRow, id: "newer" } }, new Set())).toBe("update");
     // Dev changed (not rebuilt yet): so is what's on it.
     const devMore = { ...t, apps: ["wadbrowser", "vscode", "krita"] };
     expect(imageState("template:game", { ...lib, templates: [devMore, game] }, images, new Set())).toBe("changed");
+  });
+
+  it("has an update when the base is newer than the one a template was built on, all the way up", () => {
+    const base = { ...row("template:dev", ""), layer: "base" as ImageRow["layer"], id: "base" };
+    // The base it was built on (tRow's from is "base"): built.
+    expect(imageState("template:dev", lib, { ...images, base } as typeof images, new Set())).toBe("built");
+    // A newer base came with a stick update: the template, and what's on it, have an update.
+    const newer = { ...images, base: { ...base, id: "base-2" } } as typeof images;
+    expect(imageState("template:dev", lib, newer, new Set())).toBe("update");
+    expect(imageState("template:game", lib, newer, new Set())).toBe("update");
+    expect(imageState("custom:plus", lib, newer, new Set())).toBe("update");
+    // A change still comes first.
+    expect(imageState("custom:plus", { ...lib, extensions: [{ ...c, tools: [] }] }, newer, new Set())).toBe("changed");
+    // A wadd that doesn't send the base: taken as built.
+    expect(imageState("template:dev", lib, images, new Set())).toBe("built");
   });
 });
 

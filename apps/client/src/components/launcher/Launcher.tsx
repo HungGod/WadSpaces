@@ -320,7 +320,7 @@ function SpaceCard({ entry, w, on, onToggle, onCustomize, onRemove }: { entry: E
   const o = entry.item.kind === "wadspace" ? entry.item.overrides : undefined;
   const projects = (w.customization?.projects ?? []).map((p) => ({ id: p.id, name: p.as }));
   const count = `${projects.length} project${projects.length === 1 ? "" : "s"}`;
-  const note = state === "built" ? count : state === "building" ? `${count} · its image is building` : `${count} · its image builds first`;
+  const note = state === "built" ? count : state === "update" ? `${count} · an update is available` : state === "building" ? `${count} · its image is building` : `${count} · its image builds first`;
   return (
     <div className={clsx("flex items-center gap-3 rounded-2xl p-2 ring-1 transition-all", on ? "bg-accent-soft ring-2 ring-accent" : "bg-surface-2 ring-line hover:ring-line-strong")}>
       <button type="button" disabled={!r} onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-pressed={on}>
