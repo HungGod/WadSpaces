@@ -20,6 +20,18 @@ pub fn thumbnail(bytes: &[u8], size: u32) -> Option<Vec<u8>> {
     Some(out.into_inner())
 }
 
+/// `bytes` as a `w`×`h` PNG filling it, cropped from the centre (a desktop's preview).
+pub fn cover(bytes: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(bytes).ok()?;
+    if img.width() == 0 || img.height() == 0 || w == 0 || h == 0 {
+        return None;
+    }
+    let small = img.resize_to_fill(w, h, FilterType::Triangle);
+    let mut out = Cursor::new(Vec::new());
+    small.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    Some(out.into_inner())
+}
+
 /// `bytes` (any image the image crate reads) as a PNG fitted inside
 /// `w`×`h`, its shape kept: an image copy's preview.
 pub fn fit(bytes: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {

@@ -24,6 +24,7 @@ for theme in dark light; do
         for _ in $(seq 50); do [[ -S "$XDG_RUNTIME_DIR/wad-hud-$2" ]] && break; sleep 0.2; done
         WAYLAND_DISPLAY=wad-hud-$2 GDK_BACKEND=wayland GTK_A11Y=none \
             WADSPACES_HUD_SNAPSHOT="$0" WADSPACES_HUD_SNAPSHOT_ICON="$1" WADSPACES_HUD_THEME="$2" \
+            WADSPACES_HUD_SNAPSHOT_WALLPAPER="$3/apps/client/public/wallpapers/cosmic-bodybuilding.png" \
             WADD_URL=http://127.0.0.1:9 timeout 20 "$3/target/debug/wadspaces-hud" > "$0/log" 2>&1 || true
         kill $K
         # Whatever the bus started (portals) goes with it.

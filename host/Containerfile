@@ -57,6 +57,10 @@ RUN curl -fsSLo /etc/yum.repos.d/tailscale.repo https://pkgs.tailscale.com/stabl
     && dnf -y install tailscale \
     && dnf clean all
 
+# grim: the HUD's switcher (Super+Tab) shows each wadspace as it last looked,
+# a small screenshot taken as it opens. Its own layer, so those above stay cached.
+RUN dnf -y install grim && dnf clean all
+
 COPY host/etc/ /etc/
 COPY host/usr/ /usr/
 # The WadSpaces Client, the Tauri app (built by host/build.sh from apps/client).

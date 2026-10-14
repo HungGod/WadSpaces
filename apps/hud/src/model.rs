@@ -151,6 +151,9 @@ pub struct CarouselItem {
     pub name: String,
     #[serde(default)]
     pub icon: Option<String>,
+    /// A wadspace's desktop for it: its wallpaper (a /v1 path).
+    #[serde(default)]
+    pub preview: Option<String>,
     #[serde(default = "yes")]
     pub running: bool,
     /// "home" (WadSpaces), "space" (a wadspace) or "app" (WadBrowser, the

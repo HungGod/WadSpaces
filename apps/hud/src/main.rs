@@ -54,8 +54,6 @@ const LOGO_DARK: &[u8] = include_bytes!("../assets/logo-dark.png");
 const LOGO_LIGHT: &[u8] = include_bytes!("../assets/logo-light.png");
 /// WadNotes' icon (64 px) and logo (96 px tall), each theme's
 /// (apps/client/public/brand/wadnotes-*.svg).
-const NOTES_ICON_DARK: &[u8] = include_bytes!("../assets/wadnotes-icon-dark.png");
-const NOTES_ICON_LIGHT: &[u8] = include_bytes!("../assets/wadnotes-icon-light.png");
 const NOTES_LOGO_DARK: &[u8] = include_bytes!("../assets/wadnotes-logo-dark.png");
 const NOTES_LOGO_LIGHT: &[u8] = include_bytes!("../assets/wadnotes-logo-light.png");
 
@@ -82,6 +80,52 @@ fn square_image(texture: &gdk::Texture, px: i32, class: &str) -> gtk::Widget {
     }
     frame.append(&image);
     frame.upcast()
+}
+
+/// A wadspace's preview in the switcher: its desktop, screen-shaped.
+const PREVIEW_W: i32 = 144;
+const PREVIEW_H: i32 = 96;
+
+/// Drawn at the preview's size, whatever the picture's (it's made twice as
+/// big, to stay sharp on a 2× screen: a gtk::Picture would take that size).
+fn desktop_image(texture: &gdk::Texture) -> gtk::Widget {
+    let (tw, th) = (texture.width(), texture.height());
+    let stride = tw as usize * 4;
+    let mut pixels = vec![0u8; stride * th as usize];
+    // GDK's default memory format is cairo's ARGB32 (premultiplied BGRA).
+    texture.download(&mut pixels, stride);
+    let surface =
+        gtk::cairo::ImageSurface::create_for_data(pixels, gtk::cairo::Format::ARgb32, tw, th, stride as i32).ok();
+    let area = gtk::DrawingArea::new();
+    area.set_content_width(PREVIEW_W);
+    area.set_content_height(PREVIEW_H);
+    area.set_halign(gtk::Align::Center);
+    area.add_css_class("preview");
+    area.set_draw_func(move |_, cr, w, h| {
+        let Some(s) = &surface else { return };
+        let (w, h) = (w as f64, h as f64);
+        // Rounded like the switcher's icons.
+        let r = 12.0;
+        cr.new_sub_path();
+        cr.arc(w - r, r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+        cr.arc(w - r, h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+        cr.arc(r, h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+        cr.arc(r, r, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
+        cr.close_path();
+        cr.clip();
+        cr.scale(w / tw as f64, h / th as f64);
+        let _ = cr.set_source_surface(s, 0.0, 0.0);
+        let _ = cr.paint();
+    });
+    area.upcast()
+}
+
+/// The screen now, small (grim, on the machine's own display): None without it.
+fn screenshot() -> Option<Vec<u8>> {
+    let out = std::process::Command::new("grim").args(["-s", "0.25", "-t", "png", "-"]).output().ok()?;
+    (out.status.success() && !out.stdout.is_empty())
+        .then_some(out.stdout)
+        .and_then(|b| thumb::cover(&b, PREVIEW_W as u32 * 2, PREVIEW_H as u32 * 2))
 }
 
 /// wadd never sets the backlight lower (apps/wadd/src/screen.rs).
@@ -421,6 +465,9 @@ struct Hud {
     switcher_box: gtk::Box,
     carousel: RefCell<Carousel>,
     icons: RefCell<HashMap<String, Option<gdk::Texture>>>,
+    /// Each wadspace as it last looked on screen (by view), taken when the
+    /// switcher opens over it: its preview there.
+    shots: RefCell<HashMap<String, gdk::Texture>>,
     /// The site's colours, dark or light as WadSpaces Client is.
     theme: Cell<Theme>,
     css: gtk::CssProvider,
@@ -445,10 +492,11 @@ impl Hud {
         let done = label("Time's up", "pill");
         done.add_css_class("done");
         let timer = button("⏱", &["pill", "focus"]);
+        // Home (WadSpaces Client) and WadNotes: plain icons, the theme's colours.
         let home = gtk::Button::new();
+        home.set_child(Some(&icon("go-home-symbolic", 16)));
         home.add_css_class("pill");
-        home.add_css_class("logo-button");
-        home.set_label("Home"); // until the theme's logo is in (apply_theme)
+        home.add_css_class("icon-pill");
         home.set_tooltip_text(Some("Back to WadSpaces (Super+0)"));
         let net = button("Wi-Fi", &["pill"]);
         net.set_tooltip_text(Some("Networks"));
@@ -458,7 +506,7 @@ impl Hud {
         let power_button = icon_pill(&icon("system-shutdown-symbolic", 16), "Power");
         // WadNotes: away or back; its menu does the rest.
         let notes_button = gtk::Button::new();
-        notes_button.set_child(Some(&icon("accessories-text-editor-symbolic", 16))); // until the theme's icon (apply_theme)
+        notes_button.set_child(Some(&icon("document-edit-symbolic", 16)));
         notes_button.add_css_class("pill");
         notes_button.add_css_class("icon-pill");
         let clock = label("", "pill");
@@ -779,6 +827,7 @@ impl Hud {
             switcher_box,
             carousel: RefCell::default(),
             icons: RefCell::default(),
+            shots: RefCell::default(),
             theme: Cell::new(theme),
             css,
             logo: RefCell::default(),
@@ -940,17 +989,10 @@ impl Hud {
     fn apply_theme(self: &Rc<Self>, t: Theme) {
         self.theme.set(t);
         self.css.load_from_string(&theme::css(t));
-        let l = logo(t);
-        match &l {
-            Some(tex) => self.home.set_child(Some(&square_image(tex, 18, ""))),
-            None => self.home.set_label("Home"),
-        }
-        self.logo.replace(l);
-        // WadNotes' marks, in the theme's colours.
+        // The switcher's WadSpaces entry keeps the logo.
+        self.logo.replace(logo(t));
+        // WadNotes' mark in its menu, in the theme's colours.
         let light = t == Theme::Light;
-        if let Some(tex) = texture(if light { NOTES_ICON_LIGHT } else { NOTES_ICON_DARK }) {
-            self.notes_button.set_child(Some(&square_image(&tex, 18, "")));
-        }
         self.notes_menu.logo.set_paintable(texture(if light { NOTES_LOGO_LIGHT } else { NOTES_LOGO_DARK }).as_ref());
         if self.switcher.is_visible() {
             self.show_switcher();
@@ -1746,15 +1788,26 @@ impl Hud {
             if i == c.index {
                 cell.add_css_class("selected");
             }
+            // A wadspace is its desktop: as it last looked, else its wallpaper.
+            let preview = if item.kind == "space" {
+                self.shots
+                    .borrow()
+                    .get(&item.view)
+                    .cloned()
+                    .or_else(|| item.preview.as_ref().and_then(|p| self.wallpaper(p)))
+            } else {
+                None
+            };
             // WadSpaces Client (wadd's "home" view) is the WadSpaces logo.
             let texture = if item.view == "home" {
                 self.logo.borrow().clone()
             } else {
                 item.icon.as_ref().and_then(|p| self.icon(p))
             };
-            let face: gtk::Widget = match texture {
-                Some(t) => square_image(&t, 64, "icon"),
-                None => {
+            let face: gtk::Widget = match (preview, texture) {
+                (Some(p), _) => desktop_image(&p),
+                (None, Some(t)) => square_image(&t, 64, "icon"),
+                (None, None) => {
                     let initial = label(
                         &item.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(),
                         "icon",
@@ -1776,6 +1829,33 @@ impl Hud {
             self.switcher_box.append(&cell);
         }
         self.switcher.present();
+    }
+
+    /// A wadspace's wallpaper, made a small desktop-shaped picture: from the
+    /// cache, else fetched (the switcher redraws when it arrives).
+    fn wallpaper(self: &Rc<Self>, path: &str) -> Option<gdk::Texture> {
+        let key = format!("desktop {path}");
+        if let Some(t) = self.icons.borrow().get(&key) {
+            return t.clone();
+        }
+        self.icons.borrow_mut().insert(key.clone(), None);
+        let w = self.wadd.clone();
+        let h = self.clone();
+        let p = path.to_string();
+        background(
+            move || w.bytes(&p).and_then(|b| thumb::cover(&b, PREVIEW_W as u32 * 2, PREVIEW_H as u32 * 2)),
+            move |r| {
+                if let Some(bytes) = r
+                    && let Ok(t) = gdk::Texture::from_bytes(&glib::Bytes::from(&bytes))
+                {
+                    h.icons.borrow_mut().insert(key, Some(t));
+                    if h.switcher.is_visible() {
+                        h.show_switcher();
+                    }
+                }
+            },
+        );
+        None
     }
 
     /// A workspace's icon, in the theme's variant when it has one (WadBrowser
@@ -1848,8 +1928,23 @@ impl Hud {
                 }
             }
             Incoming::Event(name, data) if name == "carousel" => {
+                let was_open = self.carousel.borrow().open;
                 self.carousel.replace(serde_json::from_value(data).unwrap_or_default());
-                self.show_switcher();
+                let on_screen = self.state.borrow().view.clone();
+                // Opening over a wadspace: what it looks like now is its preview,
+                // taken before the switcher covers it.
+                match on_screen {
+                    Some(view) if !was_open && self.carousel.borrow().open && view != "home" => {
+                        let h = self.clone();
+                        background(screenshot, move |png| {
+                            if let Some(t) = png.and_then(|b| gdk::Texture::from_bytes(&glib::Bytes::from(&b)).ok()) {
+                                h.shots.borrow_mut().insert(view, t);
+                            }
+                            h.show_switcher();
+                        });
+                    }
+                    _ => self.show_switcher(),
+                }
             }
             // The old way the bar opened WadSpaces Client's menus: only power
             // and Wi-Fi asked, and both are here now.
@@ -1937,6 +2032,13 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
     {
         hud.icons.borrow_mut().insert("/v1/workspaces/writing/icon".into(), Some(t));
     }
+    // WADSPACES_HUD_SNAPSHOT_WALLPAPER: a picture to show as Writing's desktop (its preview).
+    if let Some(bytes) = std::env::var_os("WADSPACES_HUD_SNAPSHOT_WALLPAPER").and_then(|p| std::fs::read(p).ok())
+        && let Some(t) = thumb::cover(&bytes, PREVIEW_W as u32 * 2, PREVIEW_H as u32 * 2)
+            .and_then(|b| gdk::Texture::from_bytes(&glib::Bytes::from(&b)).ok())
+    {
+        hud.icons.borrow_mut().insert("desktop /v1/workspaces/writing/wallpaper".into(), Some(t));
+    }
     hud.state.replace(State {
         session: None,
         network: Some(model::Network {
@@ -2006,6 +2108,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
                 view: "home".into(),
                 name: "WadSpaces".into(),
                 icon: None,
+                preview: None,
                 running: true,
                 kind: "home".into(),
                 number: None,
@@ -2014,6 +2117,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
                 view: "workspace:writing".into(),
                 name: "Writing".into(),
                 icon: Some("/v1/workspaces/writing/icon".into()),
+                preview: Some("/v1/workspaces/writing/wallpaper".into()),
                 running: true,
                 kind: "space".into(),
                 number: Some(1),
@@ -2022,6 +2126,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
                 view: "workspace:iq-dev".into(),
                 name: "IntelligenceQuest Dev".into(),
                 icon: None,
+                preview: None,
                 running: true,
                 kind: "space".into(),
                 number: Some(2),
@@ -2030,6 +2135,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
                 view: "workspace:terminal".into(),
                 name: "WadTerminal".into(),
                 icon: None,
+                preview: None,
                 running: true,
                 kind: "app".into(),
                 number: Some(3),

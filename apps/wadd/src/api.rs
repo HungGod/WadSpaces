@@ -129,7 +129,9 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/webapp-icon", get(webapp_icon))
         .route(
             "/v1/workspaces/{id}/wallpaper",
-            axum::routing::put(workspace_wallpaper).layer(axum::extract::DefaultBodyLimit::max(WALLPAPER_BODY)),
+            get(workspace_wallpaper_get)
+                .put(workspace_wallpaper)
+                .layer(axum::extract::DefaultBodyLimit::max(WALLPAPER_BODY)),
         )
         .route("/v1/wadspaces/{id}", axum::routing::put(wadspace_install))
         .route("/v1/images", get(images))
@@ -628,6 +630,25 @@ async fn wadspace_install(
     Json(req): Json<crate::images::Install>,
 ) -> Result<Json<WorkspaceSaved>, Failure> {
     Ok(Json(crate::images::install(&app.registry, app.registry_backend.as_ref(), &id, &req).await?))
+}
+
+/// The wallpaper a wadspace starts with, as a picture (the switcher shows it).
+async fn workspace_wallpaper_get(
+    State(app): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Response, Failure> {
+    let ws = app.registry.workspaces().into_iter().find(|w| w.id == id).ok_or_else(|| no_workspace(&id))?;
+    let dir = crate::images::extra_dir(&app.store.dir, &ws.id);
+    for (ext, mime) in [("png", "image/png"), ("jpg", "image/jpeg")] {
+        if let Ok(bytes) = std::fs::read(dir.join(format!("wallpaper.{ext}"))) {
+            return Ok((
+                [(axum::http::header::CONTENT_TYPE, mime), (axum::http::header::CACHE_CONTROL, "max-age=60")],
+                bytes,
+            )
+                .into_response());
+        }
+    }
+    Err(Failure(ApiError::new(ErrorCode::NotFound, format!("{} has no wallpaper", ws.name))))
 }
 
 /// The wallpaper a wadspace starts with.

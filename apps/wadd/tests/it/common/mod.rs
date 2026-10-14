@@ -295,7 +295,11 @@ impl Backend for Fake {
             images_size: m.images_size.unwrap_or_else(|| images.iter().map(|i| i.unique).sum()),
             images,
             containers: vec![],
-            volumes: m.volume_bytes.iter().map(|(k, v)| wadd::backend::DfVolume { name: k.clone(), size: *v, links: 0 }).collect(),
+            volumes: m
+                .volume_bytes
+                .iter()
+                .map(|(k, v)| wadd::backend::DfVolume { name: k.clone(), size: *v, links: 0 })
+                .collect(),
         })
     }
     async fn images_all(&self) -> Result<Vec<wadd::backend::ImageInfo>, String> {

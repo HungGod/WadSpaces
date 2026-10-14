@@ -161,6 +161,10 @@ pub struct CarouselItem {
     pub name: String,
     /// The workspace's icon (a /v1 path), if it has one.
     pub icon: Option<String>,
+    /// A wadspace's desktop to show for it: its wallpaper (a /v1 path; 404
+    /// when it has none).
+    #[serde(default)]
+    pub preview: Option<String>,
     pub running: bool,
     /// "home" (WadSpaces), "space" (a wadspace) or "app" (WadBrowser, the
     /// terminal: what runs on the machine itself).
