@@ -1,5 +1,6 @@
 # Builds WadSpaces' programs that run inside workspaces (WadBrowser, the
-# wadspaces-icon helper) against Debian trixie, the workspaces' own system:
+# wadspaces-icon helper, the clipboard bridge, the selkies-desktop shell)
+# against Debian trixie, the workspaces' own system:
 # a binary built on the Fedora host would link another glibc and WebKitGTK.
 #
 #   images/build.sh builds this as localhost/wadspaces-builder:trixie and runs
@@ -13,6 +14,11 @@ RUN apt-get update && \
       libjavascriptcoregtk-4.1-dev \
       libsoup-3.0-dev \
       libwebkit2gtk-4.1-dev \
+      libcairo2-dev \
+      libwayland-dev \
+      libx11-dev \
+      libxext-dev \
+      wayland-protocols \
       pkg-config && \
     rm -rf /var/lib/apt/lists/*
 

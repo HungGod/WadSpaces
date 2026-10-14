@@ -1,6 +1,6 @@
-// The desktop as the image draws it: selkies-desktop's fixed sizes
-// (selkies-project/selkies-desktop, desktop.h and ui.c), in logical pixels.
-// The image has no settings for any of these, so neither does the Builder.
+// The desktop as the image draws it: selkies-desktop's fixed sizes as
+// WadSpaces builds it (apps/selkies-desktop, desktop.h and ui.c), in logical
+// pixels. The image has no settings for any of these, so neither does the Builder.
 
 export interface Size {
   w: number;
@@ -8,10 +8,14 @@ export interface Size {
 }
 
 /** The bottom panel. It reserves its height, so maximized windows stop above it. */
-export const PANEL_H = 30;
+export const PANEL_H = 44;
 /** The Start button's slot at the left of the panel (the button itself is 8px narrower). */
-export const START_W = 80;
-/** Icons in the panel and the Start menu. */
+export const START_W = 52;
+/** The WadSpaces logo on the Start button. */
+export const START_ICON = 34;
+/** Windows' icons in the panel. */
+export const TASK_ICON = 22;
+/** Icons in the Start menu. */
 export const SMALL_ICON = 16;
 /** A desktop icon's picture. */
 export const DESKTOP_ICON = 48;
@@ -42,7 +46,7 @@ export function cellAt(index: number, screenH: number) {
 export function taskButtonWidth(screenW: number, windows: number) {
   if (!windows) return TASK_MAX_W;
   const room = screenW - START_W - TASK_GAP - windows * TASK_GAP;
-  return Math.max(SMALL_ICON + 10, Math.min(TASK_MAX_W, Math.floor(room / windows)));
+  return Math.max(TASK_ICON + 10, Math.min(TASK_MAX_W, Math.floor(room / windows)));
 }
 
 /** Where the app list sits for the hovered category (update_menu_heights): beside it, kept on screen. */

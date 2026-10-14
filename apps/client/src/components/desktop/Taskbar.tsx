@@ -4,7 +4,7 @@
 import { useState } from "react";
 import clsx from "clsx";
 import type { MenuApp, MenuCategory } from "@core/layers";
-import { MENU_APP_W, MENU_CAT_W, MENU_ROW_H, PANEL_H, SMALL_ICON, START_W, TASK_GAP, appListOffset, taskButtonWidth } from "./geometry";
+import { MENU_APP_W, MENU_CAT_W, MENU_ROW_H, PANEL_H, SMALL_ICON, START_ICON, START_W, TASK_GAP, TASK_ICON, appListOffset, taskButtonWidth } from "./geometry";
 import { LOGO } from "./look";
 import type { Win } from "./useWindows";
 import { iconSrc, noIcon } from "@/lib/webIcon";
@@ -34,7 +34,7 @@ export function Taskbar({ screenW, wins, activeId, menu, menuOpen, onToggleMenu,
           className="absolute left-1 top-1 grid place-items-center rounded bg-[rgb(64,64,64)]"
           style={{ width: START_W - 8, height: PANEL_H - 8 }}
         >
-          <img src={LOGO} alt="" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
+          <img src={LOGO} alt="" style={{ width: START_ICON, height: START_ICON }} draggable={false} />
         </button>
         {wins.map((w, i) => (
           <button
@@ -43,12 +43,12 @@ export function Taskbar({ screenW, wins, activeId, menu, menuOpen, onToggleMenu,
             onClick={() => onWindowClick(w.id)}
             title={w.title}
             className={clsx(
-              "absolute top-[3px] flex items-center gap-[5px] overflow-hidden whitespace-nowrap rounded border border-[rgb(102,102,102)] pl-[5px] text-left text-[12px] text-[rgb(230,230,230)]",
+              "absolute top-[3px] flex items-center gap-[7px] overflow-hidden whitespace-nowrap rounded border border-[rgb(102,102,102)] pl-[6px] text-left text-[13px] text-[rgb(230,230,230)]",
               w.id === activeId ? "bg-[rgb(77,77,77)]" : w.minimized ? "bg-[rgb(13,13,13)]" : "bg-[rgb(38,38,38)]",
             )}
             style={{ left: START_W + TASK_GAP + i * (btnW + TASK_GAP), width: btnW, height: PANEL_H - 6 }}
           >
-            <img src={iconSrc(w.iconUrl)} onError={noIcon} alt="" className="shrink-0 object-contain" style={{ width: SMALL_ICON, height: SMALL_ICON }} draggable={false} />
+            <img src={iconSrc(w.iconUrl)} onError={noIcon} alt="" className="shrink-0 object-contain" style={{ width: TASK_ICON, height: TASK_ICON }} draggable={false} />
             <span className="overflow-hidden pr-[5px]">{w.title}</span>
           </button>
         ))}

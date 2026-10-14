@@ -5,7 +5,7 @@ import type { DesktopItem } from "@core/layers";
 import type { Wallpaper } from "@/lib/types";
 import { DesktopIcon } from "./DesktopIcon";
 import { PANEL_H, START_W, cellAt } from "./geometry";
-import { LOGO, LOGO_SIZE, useScreen } from "./look";
+import { useScreen } from "./look";
 import { wallpaperStyle } from "./wallpapers";
 
 /** Non-interactive, scaled-down render of a desktop for cards: the image's desktop, nothing open. VS Code with extensions gets a +. */
@@ -30,7 +30,6 @@ export function DesktopThumb({ items, wallpaper, className, zoom = 1 }: { items:
     <div ref={box} className={className} style={{ position: "relative", overflow: "hidden", background: "#0b0b14" }}>
       {scale > 0 && (
         <div className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ width: screen.w, height: screen.h, transform: `scale(${scale})`, ...wallpaperStyle(wallpaper) }}>
-          {<img src={LOGO} alt="" className="absolute" style={{ width: LOGO_SIZE, height: LOGO_SIZE, left: (screen.w - LOGO_SIZE) / 2, top: (screen.h - LOGO_SIZE) / 2 }} />}
           {items.map((item, n) => {
             const p = cellAt(n, screen.h);
             return <DesktopIcon key={item.id} label={item.label} iconUrl={item.iconUrl} x={p.x} y={p.y} added={item.added} />;

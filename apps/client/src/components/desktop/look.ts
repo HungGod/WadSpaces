@@ -12,8 +12,6 @@ export interface Screen {
 
 /** The picture the base image's icon.png is (images/base/root/usr/share/selkies/www). */
 export const LOGO = "/brand/wadspaces-icon-dark-transparent.svg";
-/** How big icon.png is: selkies-desktop draws it unscaled in the middle. */
-export const LOGO_SIZE = 128;
 
 /** The launch machine's screen, in logical pixels: the wadspace gets all of it (the HUD floats over it). */
 export const useScreen = (): Screen => {

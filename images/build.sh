@@ -85,7 +85,9 @@ build_wadbrowser() {
         localhost/wadspaces-builder:trixie \
         sh -c 'cargo build --locked --profile wadbrowser -p wadbrowser -p wad-icons --features wad-icons/cli -p wad-clip &&
                cp /target/wadbrowser/wadbrowser /target/wadbrowser/wadspaces-icon /target/wadbrowser/wadspaces-clipboard \
-                  /src/.build/wadbrowser/bin/'
+                  /src/.build/wadbrowser/bin/ &&
+               rm -rf /tmp/sd && cp -r /src/apps/selkies-desktop /tmp/sd && make -s -C /tmp/sd &&
+               cp /tmp/sd/selkies-desktop /src/.build/wadbrowser/bin/'
     cp -r "${ROOT}/apps/wadbrowser/icons/hicolor/." "${STAGE}/icons/"
 }
 

@@ -13,7 +13,7 @@ import type { DesktopItem, MenuApp, MenuCategory } from "@core/layers";
 import type { Wallpaper } from "@/lib/types";
 import { DesktopIcon } from "./DesktopIcon";
 import { cellAt } from "./geometry";
-import { LOGO, LOGO_SIZE, useScreen } from "./look";
+import { useScreen } from "./look";
 import { Taskbar } from "./Taskbar";
 import { activeWin, useWindows } from "./useWindows";
 import { wallpaperStyle } from "./wallpapers";
@@ -102,7 +102,6 @@ export function Desktop({ items, menu, wallpaper, autostart, className, style }:
           }}
         >
           {/* selkies-desktop draws icon.png at its own size in the middle of the desktop. */}
-          {<img src={LOGO} alt="" draggable={false} className="pointer-events-none absolute" style={{ width: LOGO_SIZE, height: LOGO_SIZE, left: (screen.w - LOGO_SIZE) / 2, top: (screen.h - LOGO_SIZE) / 2 }} />}
 
           {items.map((item, n) => {
             const p = cellAt(n, screen.h);
