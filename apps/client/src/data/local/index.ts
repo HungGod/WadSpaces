@@ -164,6 +164,9 @@ export class LocalBackend implements Backend {
   makeCopy(paths: string[]) {
     return this.machine.makeCopy(paths);
   }
+  storage(fresh?: boolean) {
+    return wadd.storage(fresh);
+  }
   deleteCopy(id: string) {
     return this.machine.deleteCopy(id);
   }

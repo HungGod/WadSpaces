@@ -51,6 +51,20 @@
   color-scheme: light;
 }
 
+/* The Builder's layers, wherever they're drawn (the board keeps its own under .wb):
+   templates ice, Extensions acid, Customization pink; deep enough for white in light. */
+:root,
+[data-theme="dark"] {
+  --layer-template: #7fd3ff;
+  --layer-extensions: #c6ff1f;
+  --layer-customization: #ff3d81;
+}
+[data-theme="light"] {
+  --layer-template: #1679b8;
+  --layer-extensions: #4d7a00;
+  --layer-customization: #d81b60;
+}
+
 /* Bundled with the app (@fontsource, imported in main.tsx) so it looks the same offline. */
 :root {
   --font-inter: "Inter Variable";

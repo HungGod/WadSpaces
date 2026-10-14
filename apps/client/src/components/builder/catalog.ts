@@ -2,7 +2,7 @@
 // through core/catalog), and what it works out from it: customization
 // layers, keys and their WadBrowser groups, misconfiguration and its fixes,
 // what a desktop shows.
-import { APPS as CATALOG_APPS, EXTENSIONS as CATALOG_EXTENSIONS, TOOLS as CATALOG_TOOLS, SECRET_KINDS } from "@core/catalog/catalog";
+import { APPS as CATALOG_APPS, EXTENSIONS as CATALOG_EXTENSIONS, TOOLS as CATALOG_TOOLS, SECRET_KINDS, extensionIcon } from "@core/catalog/catalog";
 import { WALLPAPER_PRESETS } from "@/components/desktop/wallpapers";
 import type { AppSubKey, KeyGroup, Layer, SecretKind, SecretRef, SecretsSub, Stack, WebApp } from "./model";
 import { appsOf, subOf } from "./model";
@@ -48,12 +48,10 @@ export interface Extension {
   secret?: SecretKind;
 }
 
-const EXTENSION_ICONS: Record<string, string> = { "anthropic.claude-code": "/icons/claude.png", "openai.chatgpt": "/icons/codex.png" };
-
 export const EXTENSIONS: Extension[] = CATALOG_EXTENSIONS.map((e) => ({
   id: e.id,
   name: e.name,
-  ...(EXTENSION_ICONS[e.id] && { icon: EXTENSION_ICONS[e.id] }),
+  ...(extensionIcon(e.id) && { icon: extensionIcon(e.id) }),
   ...(e.secret && { secret: e.secret.kind }),
 }));
 

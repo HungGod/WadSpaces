@@ -14,6 +14,7 @@ import { forgetWritesForTests, useBoard } from "./components/builder/store";
 import { useUi } from "./lib/ui";
 import type { FakeBackend } from "./test/fakeBackend";
 import { GOOGLE, legacyBackend, sampleBackend } from "./test/sample";
+import type { Wadspace } from "@core/layers";
 
 beforeAll(() => {
   // jsdom has neither; the Builder measures its preview and scrolls panels into view.
@@ -316,5 +317,34 @@ describe("Secrets", () => {
     expect(fake.signIns.find((s) => s.id === "s-github")?.name).toBe("GitHub (me)");
     const keys = (await fake.listWadspaces()).flatMap((w) => (w.version === 3 ? (w.customization?.secrets.groups ?? []).flatMap((g) => (g.key ? [g.key] : [])) : []));
     expect(keys.filter((k) => k.id === "s-github").map((k) => k.name)).toEqual(["GitHub (me)"]);
+  });
+});
+
+describe("Machines", () => {
+  it("lists this machine's wadspaces, built or not, and what they take on its disk", async () => {
+    fake.thisMachine = true;
+    fake.installed.set("cosmic-bodybuilding", fake.wadspaces.get("cosmic-bodybuilding") as Wadspace);
+    fake.running.add("cosmic-bodybuilding");
+    fake.sizes = { ...fake.sizes, layers: { "template:writing": 1.6e9 }, homes: { "cosmic-bodybuilding": 9e8 } };
+    await open("/machines");
+    // The storage tree: the base, the templates, the wadspaces.
+    expect(await screen.findByText(/WadSpaces uses/)).toBeTruthy();
+    expect(screen.getByText("WadSpaces base")).toBeTruthy();
+    expect(screen.getAllByText("Cosmic Bodybuilding").length).toBeGreaterThan(0);
+    // VanuaAcademy isn't built here: listed, to build.
+    expect(screen.getByText(/1 running · 1 installed · 1 not built here/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Build here/ })).toBeTruthy();
+  });
+});
+
+describe("Secrets", () => {
+  it("shows each key with the apps it signs in and the wadspaces it's in", async () => {
+    await open("/secrets");
+    const card = (await screen.findByText("team@example.com-WadBrowser-Google")).closest("div.rounded-2xl") as HTMLElement;
+    // Signing in three apps: a folder of their icons.
+    expect(card.querySelectorAll("span.grid-cols-2 img").length).toBe(3);
+    // Used in: VanuaAcademy, and the VanuaAcademy Mail setup (one row each).
+    const used = [...card.querySelectorAll("[title]")].map((e) => e.getAttribute("title")).filter((t) => t?.includes(": "));
+    expect(used).toEqual(["VanuaAcademy: Gmail, Google Drive, Google Workspace", "VanuaAcademy Mail: Gmail, Google Drive"]);
   });
 });

@@ -1,14 +1,16 @@
 // Machines: your WadSpaces machines (this one offline; your account's online),
-// each with what's installed and running there, its run history and
-// diagnostics, the tailnet, and linking this machine to an account. The
-// library itself is Step 1 of the Builder.
-import { useSearchParams } from "react-router";
+// each with its wadspaces (what's installed and running there, and on this
+// machine the ones not built here yet), what they take on its disk (the
+// storage tree), its run history and diagnostics, the tailnet, and linking
+// this machine to an account.
+import { useNavigate, useSearchParams } from "react-router";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
   Activity,
   Check,
   Cpu,
+  Hammer,
   History,
   Keyboard,
   Laptop,
@@ -27,6 +29,7 @@ import clsx from "clsx";
 import { backend } from "@/data";
 import { wadspaceName } from "@/data/layers";
 import { MachineDiagnostics } from "@/components/MachineDiagnostics";
+import { MachineStorage } from "@/components/MachineStorage";
 import { ContainerControls, ContainerStatus } from "@/components/manager/ContainerControls";
 import { WadspaceActions } from "@/components/manager/WadspaceActions";
 import { Page } from "@/components/Page";
@@ -35,7 +38,7 @@ import { TailnetBadge, TailnetCard } from "@/components/Tailnet";
 import { Thumb } from "@/components/Thumb";
 import { Badge, Button, EmptyState, Input, Meter, PageHeader, Segmented } from "@/components/ui";
 import { timeAgo } from "@/lib/format";
-import { THIS_MACHINE, useApp } from "@/lib/store";
+import { THIS_MACHINE, alive, useApp } from "@/lib/store";
 import type { Machine } from "@/lib/types";
 import { useUi } from "@/lib/ui";
 import { hasAccount, isThisMachine } from "@/lib/machine";
@@ -218,7 +221,8 @@ function MachineDetail({ m }: { m: Machine }) {
         </>
       ) : (
         <>
-          <Containers m={m} />
+          {here && backend.storage && up && <MachineStorage m={m} />}
+          <Containers m={m} here={here} />
           {backend.caps.history && (
             <div className="overflow-hidden rounded-3xl border border-line bg-surface">
               <div className="border-b border-line px-5 py-4">
@@ -239,9 +243,13 @@ function MachineDetail({ m }: { m: Machine }) {
   );
 }
 
-function Containers({ m }: { m: Machine }) {
+function Containers({ m, here }: { m: Machine; here: boolean }) {
   const wadspaces = useApp((s) => s.wadspaces);
+  const buildStack = useApp((s) => s.buildStack);
+  const navigate = useNavigate();
   const up = m.status === "online";
+  // Your wadspaces this machine doesn't have yet (they're installed when they're built or launched here).
+  const notHere = here ? alive(wadspaces).filter((w) => w.template && w.customization && !m.containers.some((c) => c.wadspaceId === w.id)) : [];
 
   return (
     <div className="overflow-hidden rounded-3xl border border-line bg-surface">
@@ -249,10 +257,12 @@ function Containers({ m }: { m: Machine }) {
         <h3 className="font-display text-lg font-semibold">On this machine</h3>
         <span className="text-xs text-muted">
           {m.containers.filter((c) => c.status === "running").length} running · {m.containers.length} installed
+          {notHere.length ? ` · ${notHere.length} not built here` : ""}
         </span>
       </div>
-      {m.containers.length ? (
-        m.containers.map((c) => {
+      {m.containers.length || notHere.length ? (
+        <>
+        {m.containers.map((c) => {
           const ws = wadspaces.find((w) => w.id === c.wadspaceId && !w.deletedAt);
           return (
             <div key={c.id} className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-3 last:border-0">
@@ -278,10 +288,31 @@ function Containers({ m }: { m: Machine }) {
               </div>
             </div>
           );
-        })
+        })}
+        {notHere.map((w) => (
+          <div key={w.id} className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-3 last:border-0">
+            <Thumb w={w} className="!w-28 rounded-xl opacity-70" />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{wadspaceName(w)}</span>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
+                <Badge>Not built here</Badge>
+                <span>Saved in your library; installed here when you build or launch it.</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" variant="secondary" disabled={!up} onClick={() => void buildStack(w.id)}>
+                <Hammer className="size-3.5" /> Build here
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => navigate(`/builder?stack=${encodeURIComponent(w.id)}`)}>
+                Open in Builder
+              </Button>
+            </div>
+          </div>
+        ))}
+        </>
       ) : (
         <div className="p-6">
-          <EmptyState icon={<Power className="size-6" />} title="Nothing installed" body={up ? "Make a wadspace in the Builder and launch it: it's installed here." : `${m.label} is offline.`} />
+          <EmptyState icon={<Power className="size-6" />} title="No wadspaces yet" body={up ? "Make a wadspace in the Builder: build or launch it and it's installed here." : `${m.label} is offline.`} />
         </div>
       )}
     </div>

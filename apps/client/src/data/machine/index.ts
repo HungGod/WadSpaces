@@ -111,6 +111,9 @@ export class MachineBackend implements Backend {
   makeCopy(paths: string[]) {
     return this.local.makeCopy(paths);
   }
+  storage(fresh?: boolean) {
+    return this.local.storage(fresh);
+  }
   deleteCopy(id: string) {
     return this.local.deleteCopy(id);
   }

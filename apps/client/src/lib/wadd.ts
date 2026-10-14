@@ -362,6 +362,8 @@ export const wadd = {
   makeCopy: (paths: string[]) => call<{ id: string; files: number; bytes: number }>("POST", "/api/copies", { paths }),
   /** Refused (409) while a wadspace here has it. */
   deleteCopy: (id: string) => call("DELETE", `/api/copies/${encodeURIComponent(id)}`),
+  /** What WadSpaces takes on this machine's disk (wadd measures at most once a minute; `fresh` now). */
+  storage: (fresh = false) => call<Storage>("GET", `/v1/storage${fresh ? "?fresh=true" : ""}`),
   // Tailscale on this machine (wadd/tailnet.py)
   tailnet: () => call<TailnetStatus>("GET", "/api/tailnet"),
   tailnetLogin: () => call<{ url: string | null; online?: boolean }>("POST", "/api/tailnet/login"),
@@ -452,6 +454,20 @@ export function waddEvents(on: (event: string, data: unknown) => void, onDrop: (
 }
 
 // ------------------------------------------------------------ formatting
+/** GET /v1/storage (wad-proto's Storage). */
+export interface Storage {
+  disk: { path: string; freeBytes: number; totalBytes: number };
+  /** The base every template builds on; null if it isn't here. */
+  base: { ref: string; id: string; bytes: number } | null;
+  /** Each layer image: all of it, and its own share (what it adds to the image it's built on). */
+  layers: { layer: string; id: string; from: string; bytes: number; ownBytes: number }[];
+  /** Each wadspace's home (its /config). */
+  homes: { workspaceId: string; volume: string; bytes: number }[];
+  /** Files copied in for wadspaces. */
+  copies: { id: string; bytes: number }[];
+  measuredAt: number;
+}
+
 export function formatBytes(n: number): string {
   if (n < 1000) return `${Math.round(n)} B`;
   if (n < 1e6) return `${Math.round(n / 1e3)} KB`;

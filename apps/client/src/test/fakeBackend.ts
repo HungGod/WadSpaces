@@ -128,6 +128,25 @@ export class FakeBackend implements Backend {
     this.copies.set(id, paths);
     return { id, files: paths.length, bytes: 100 * paths.length };
   }
+  /** What WadSpaces takes on the disk: the base, each built layer's own share, each home (bytes set in `sizes`). */
+  sizes: { base: number; layers: Record<string, number>; homes: Record<string, number>; copies: Record<string, number>; disk: { total: number; free: number } } = {
+    base: 3.1e9,
+    layers: {},
+    homes: {},
+    copies: {},
+    disk: { total: 120e9, free: 48e9 },
+  };
+  async storage() {
+    const z = this.sizes;
+    return {
+      disk: { path: "/var/lib/containers", totalBytes: z.disk.total, freeBytes: z.disk.free },
+      base: { ref: "localhost/wadspaces-base:trixie", id: "base", bytes: z.base },
+      layers: [...this.images.values()].map((r) => ({ layer: r.layer, id: r.id, from: r.from, bytes: 0, ownBytes: z.layers[r.layer] ?? r.sizeMb * 1e6 })),
+      homes: [...this.installed.keys()].map((id) => ({ workspaceId: id, volume: `wad-${id}-config`, bytes: z.homes[id] ?? 0 })),
+      copies: Object.entries(z.copies).map(([id, bytes]) => ({ id, bytes })),
+      measuredAt: Date.now() / 1000,
+    };
+  }
   async deleteCopy(id: string) {
     this.copies.delete(id);
   }
@@ -237,8 +256,20 @@ export class FakeBackend implements Backend {
   async users() {
     return [await this.me()];
   }
+  /** "This machine", with the stacks installed (and `running`); off unless asked for (dev:fake). */
+  thisMachine = false;
+  running = new Set<string>();
   async listMachines(): Promise<Machine[]> {
-    return [];
+    if (!this.thisMachine) return [];
+    const containers = [...this.installed.keys()].map((id) => ({
+      id,
+      wadspaceId: id,
+      status: this.running.has(id) ? ("running" as const) : ("stopped" as const),
+      mode: "local" as const,
+      startedAt: new Date(0).toISOString(),
+      native: true,
+    }));
+    return [{ id: "this-machine", name: "surface", label: "This machine", os: "WadSpaces · wadd 0.1.0", status: "online", linked: true, cpu: 14, ram: 38, gpu: "Intel HD 620", ip: "127.0.0.1", containers }];
   }
   container = nope("container");
   async getFocus(): Promise<{ focus: FocusLock | null; now: number }> {

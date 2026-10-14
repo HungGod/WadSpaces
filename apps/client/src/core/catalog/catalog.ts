@@ -69,6 +69,10 @@ export const STARTERS = startersData as StarterDef[];
 
 export const appById = (id: string): AppDef | undefined => APPS.find((a) => a.id === id);
 
+/** An extension's icon, for the ones that bring their own (else VS Code's stands in). */
+const EXTENSION_ICONS: Record<string, string> = { "anthropic.claude-code": "/icons/claude.png", "openai.chatgpt": "/icons/codex.png" };
+export const extensionIcon = (id: string): string | undefined => EXTENSION_ICONS[id];
+
 /** An extension: the catalog's, or one added by its marketplace id. */
 export const extensionById = (id: string): ExtensionDef =>
   EXTENSIONS.find((e) => e.id === id) ?? { id, name: id, description: "From the marketplace", secret: null };

@@ -28,7 +28,8 @@ import {
   type WebApp,
 } from "@core/layers";
 
-import { appById, extensionById } from "@core/catalog/catalog";
+import { appById, extensionById, extensionIcon } from "@core/catalog/catalog";
+import { siteIcon } from "@/lib/webIcon";
 import { renderWallpaper } from "@/lib/wallpaperRender";
 
 /** A layer's image on a machine. */
@@ -216,29 +217,46 @@ export interface KeyUser {
   id: string;
   name: string;
   what: string;
+  /** The apps it signs in there, with their icons (a web app's is its site's). */
+  items: { name: string; icon: string }[];
 }
 
 /** Who uses each saved sign-in, by its id (deleted ones left out). */
 export function keyUse(lib: Library & { wadspaces: Wadspace[]; browsers: BrowserSetup[] }): Record<string, KeyUser[]> {
   const out: Record<string, KeyUser[]> = {};
   const add = (id: string, u: KeyUser) => (out[id] ??= []).push(u);
-  const slotName = (slot: string) => {
+  const VSCODE = appById("vscode")?.icon ?? "/apps/vscode/icon.png";
+  const slotItem = (slot: string) => {
     const [kind, id] = slot.split(/:(.*)/s);
-    return kind === "ext" ? extensionById(id).name : (appById(id)?.name ?? id);
+    if (kind === "ext") return { name: extensionById(id).name, icon: extensionIcon(id) ?? VSCODE };
+    const a = appById(id);
+    return { name: a?.name ?? id, icon: a?.icon ?? "/favicon.svg" };
   };
+  const browserItem = { name: "WadBrowser", icon: appById("wadbrowser")?.icon ?? "/brand/wadbrowser-icon-dark.svg" };
+  const webItem = (webapps: { id: string; name: string; url: string }[], member: string) => {
+    const w = webapps.find((x) => `web:${x.id}` === member);
+    return w ? { name: w.name, icon: siteIcon(w.url) } : { name: member.replace(/^web:/, ""), icon: "/favicon.svg" };
+  };
+  const what = (items: { name: string }[]) => items.map((i) => i.name).join(", ");
   for (const w of lib.wadspaces.filter((x) => !x.deletedAt && x.customization)) {
     const keys = w.customization!.secrets;
     const name = wadspaceName(w);
-    for (const [slot, r] of Object.entries(keys.bySlot)) add(r.id, { kind: "wadspace", id: w.id, name, what: slotName(slot) });
+    for (const [slot, r] of Object.entries(keys.bySlot)) {
+      const items = [slotItem(slot)];
+      add(r.id, { kind: "wadspace", id: w.id, name, what: what(items), items });
+    }
     const webapps = resolveStack(lib, w)?.setup.webapps ?? [];
     for (const g of keys.groups ?? []) {
       if (!g.key || !g.members.length) continue;
-      const what = g.members.map((m) => (m === "browser" ? "WadBrowser" : (webapps.find((x) => `web:${x.id}` === m)?.name ?? m.replace(/^web:/, "")))).join(", ");
-      add(g.key.id, { kind: "wadspace", id: w.id, name, what });
+      const items = g.members.map((m) => (m === "browser" ? browserItem : webItem(webapps, m)));
+      add(g.key.id, { kind: "wadspace", id: w.id, name, what: what(items), items });
     }
   }
   for (const b of lib.browsers.filter((x) => !x.deletedAt)) {
-    for (const [slot, r] of Object.entries(b.secrets)) add(r.id, { kind: "browser", id: b.id, name: b.name, what: b.webapps.find((x) => `web:${x.id}` === slot)?.name ?? slot });
+    for (const [slot, r] of Object.entries(b.secrets)) {
+      const items = [webItem(b.webapps, slot)];
+      add(r.id, { kind: "browser", id: b.id, name: b.name, what: what(items), items });
+    }
   }
   return out;
 }

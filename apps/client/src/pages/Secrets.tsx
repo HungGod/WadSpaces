@@ -8,7 +8,10 @@ import { ConfirmSignIn, NewSignIn, SignInAppIcon, signInAppName } from "@/compon
 import { openMachinePanel } from "@/components/machine/panels";
 import { Badge, Button, EmptyState, IconButton, Input, PageHeader } from "@/components/ui";
 import { backend } from "@/data";
-import { keyUse, wadspaceName } from "@/data/layers";
+import { keyUse, wadspaceName, type KeyUser } from "@/data/layers";
+import { Thumb } from "@/components/Thumb";
+import { noIcon } from "@/lib/webIcon";
+import clsx from "clsx";
 import { timeAgo } from "@/lib/format";
 import { hasLocal } from "@/lib/machine";
 import { useApp } from "@/lib/store";
@@ -96,15 +99,20 @@ export default function SecretsPage() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
               {signIns.map((s) => {
-                const users = use[s.id] ?? [];
+                // One row per wadspace (or WadBrowser setup), with every app the key signs in there.
+                const users = Object.values(
+                  (use[s.id] ?? []).reduce<Record<string, KeyUser>>((by, u) => {
+                    const k = `${u.kind}/${u.id}`;
+                    by[k] = by[k] ? { ...by[k], what: `${by[k].what}, ${u.what}`, items: [...by[k].items, ...u.items] } : u;
+                    return by;
+                  }, {}),
+                );
                 // Installed here but not (or no longer) in a wadspace you have.
                 const others = s.usedBy.filter((id) => !users.some((u) => u.id === id || `browser-${u.id}` === id));
                 return (
                   <div key={s.id} className="flex flex-col rounded-2xl border border-line bg-surface/70 p-4 transition-colors hover:border-line-strong">
                     <div className="flex items-start gap-3">
-                      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
-                        <SignInAppIcon app={s.app} />
-                      </span>
+                      <KeyIcon items={users.flatMap((u) => u.items)} app={s.app} />
                       <div className="min-w-0 flex-1">
                         {renaming === s.id ? (
                           <form
@@ -153,22 +161,15 @@ export default function SecretsPage() {
                         </div>
                       )}
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {s.inUse.map((id) => (
-                        <Badge key={id} tone="accent">
-                          In use in {name(id)}
-                        </Badge>
-                      ))}
-                      {users.map((u) => (
-                        <Badge key={`${u.kind}/${u.id}/${u.what}`} tone="accent-2">
-                          {u.name} · {u.what}
-                        </Badge>
-                      ))}
-                      {others.map((id) => (
-                        <Badge key={id}>{name(id)}</Badge>
-                      ))}
-                      {!users.length && !others.length && <Badge>Not used by a wadspace</Badge>}
-                    </div>
+                    <UsedIn users={users} running={s.inUse} />
+                    {(others.length > 0 || !users.length) && (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {others.map((id) => (
+                          <Badge key={id}>{name(id)}</Badge>
+                        ))}
+                        {!users.length && !others.length && <Badge>Not used by a wadspace</Badge>}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -201,5 +202,67 @@ export default function SecretsPage() {
       <NewSignIn open={making} onClose={() => setMaking(false)} />
       <ConfirmSignIn signIn={confirm?.signIn ?? null} action={confirm?.action ?? "signout"} onClose={() => setConfirm(null)} />
     </Page>
+  );
+}
+
+/** What a key signs in: that app's icon, or (signing in several) a folder of theirs, as on a phone. */
+function KeyIcon({ items, app }: { items: KeyUser["items"]; app: string }) {
+  const icons = [...new Map(items.map((i) => [i.icon, i])).values()];
+  if (!icons.length)
+    return (
+      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
+        <SignInAppIcon app={app} />
+      </span>
+    );
+  if (icons.length === 1)
+    return (
+      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-surface-2 ring-1 ring-line" title={icons[0].name}>
+        <img src={icons[0].icon} onError={noIcon} alt="" className="size-7 object-contain" />
+      </span>
+    );
+  // A folder: up to four of them, and how many more.
+  return (
+    <span className="grid size-11 shrink-0 grid-cols-2 gap-0.5 rounded-xl bg-surface-3 p-1.5 ring-1 ring-line" title={icons.map((i) => i.name).join(", ")}>
+      {icons.slice(0, icons.length > 4 ? 3 : 4).map((i) => (
+        <img key={i.icon} src={i.icon} onError={noIcon} alt="" className="size-full object-contain" />
+      ))}
+      {icons.length > 4 && <span className="grid place-items-center rounded bg-surface-2 text-[8px] font-bold text-muted">+{icons.length - 3}</span>}
+    </span>
+  );
+}
+
+/** The wadspaces (and WadBrowser setups) a key is attached to, each wired to the apps it signs in there. */
+function UsedIn({ users, running }: { users: KeyUser[]; running: string[] }) {
+  const wadspaces = useApp((s) => s.wadspaces);
+  if (!users.length) return null;
+  return (
+    <div className="mt-3 space-y-1.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-faint">Used in</div>
+      {users.map((u) => {
+        const w = u.kind === "wadspace" ? wadspaces.find((x) => x.id === u.id) : undefined;
+        const live = running.includes(u.id) || running.includes(`browser-${u.id}`);
+        return (
+          <div key={`${u.kind}/${u.id}/${u.what}`} className="flex items-center gap-2" title={`${u.name}: ${u.what}${live ? " (in use now)" : ""}`}>
+            {w ? (
+              <Thumb w={w} zoom={6} className="!w-12 shrink-0 rounded-md ring-1 ring-line" />
+            ) : (
+              <span className="grid aspect-video w-12 shrink-0 place-items-center rounded-md bg-surface-2 ring-1 ring-line">
+                <img src="/brand/wadbrowser-icon-dark.svg" alt="" className="size-4" />
+              </span>
+            )}
+            <span className="min-w-0 max-w-[40%] truncate text-xs font-medium">{u.name}</span>
+            {live && <span className="size-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" aria-label="In use now" />}
+            {/* The wire, from the wadspace to what the key signs in there. */}
+            <span className={clsx("h-0.5 min-w-4 flex-1 rounded-full", live ? "bg-accent/70" : "bg-[var(--layer-customization)]/40")} />
+            <span className="flex shrink-0 items-center gap-1 rounded-lg bg-surface-2 px-1.5 py-1 ring-1 ring-line">
+              {u.items.slice(0, 5).map((i) => (
+                <img key={i.name} src={i.icon} onError={noIcon} alt={i.name} title={i.name} className="size-4 object-contain" />
+              ))}
+              {u.items.length > 5 && <span className="text-[10px] text-muted">+{u.items.length - 5}</span>}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
