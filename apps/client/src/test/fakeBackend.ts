@@ -180,6 +180,31 @@ export class FakeBackend implements Backend {
     this.emit("machines");
     return { removed: pick.layers, kept: [], uninstalled: pick.wadspaces, bytes };
   }
+  /** Files on "the machine": path ("root/dir/name") → text (a folder: null). */
+  fileTree: Record<string, string | null> = {};
+  readonly files = {
+    roots: async () => [{ id: "home", label: "Your files", detail: "On the machine itself." }],
+    list: async (root: string, path: string) => {
+      const at = [root, path].filter(Boolean).join("/");
+      const names = new Map<string, boolean>();
+      for (const [p, v] of Object.entries(this.fileTree)) {
+        if (!p.startsWith(`${at}/`)) continue;
+        const rest = p.slice(at.length + 1).split("/");
+        names.set(rest[0], rest.length > 1 || v === null || names.get(rest[0]) === true);
+      }
+      return {
+        root,
+        path,
+        entries: [...names].map(([name, dir]) => ({ name, dir, bytes: dir ? 0 : (this.fileTree[`${at}/${name}`] ?? "").length, modified: 0, text: !dir })).sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name)),
+      };
+    },
+    readText: async (root: string, path: string) => this.fileTree[`${root}/${path}`] ?? "",
+    writeText: async (root: string, path: string, text: string) => void (this.fileTree[`${root}/${path}`] = text),
+    delete: async (root: string, path: string) => {
+      const at = `${root}/${path}`;
+      for (const p of Object.keys(this.fileTree)) if (p === at || p.startsWith(`${at}/`)) delete this.fileTree[p];
+    },
+  };
   async pruneOld() {
     const removed = this.sizes.leftovers.map((l) => l.id);
     const bytes = this.sizes.leftovers.reduce((n, l) => n + l.ownBytes, 0);

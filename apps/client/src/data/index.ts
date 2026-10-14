@@ -36,6 +36,11 @@ export async function initBackend(): Promise<Backend> {
     // ?update: a newer base than the templates were built on.
     if (new URLSearchParams(location.search).has("update"))
       fake.images.set("base" as never, { layer: "base" as never, ref: "localhost/wadspaces-base:trixie", id: "base-2", dockerfileSha: "", builtAt: 0, sizeMb: 3100, from: "" });
+    fake.fileTree = {
+      "home/Downloads/vanua-invoice.pdf": "%PDF",
+      "home/Downloads/notes.md": "# Notes\n\nThings to do.\n",
+      "home/Documents/plan.txt": "Plan for the week.\n",
+    };
     backend = fake;
   } else {
     const { LocalBackend } = await import("./local");

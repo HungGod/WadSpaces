@@ -12,7 +12,7 @@
 // backend translates to whatever it stores.
 import type { GithubRepo, Project, ProjectDraft, ProjectStatus } from "@core/projects";
 import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser, TailnetStatus } from "@/lib/types";
-import type { DiskPick, Freed, Storage, WaddSecret, WaddSignIn } from "@/lib/wadd";
+import type { DiskPick, FileList, FileRoot, Freed, Storage, WaddSecret, WaddSignIn } from "@/lib/wadd";
 import type { BrowserSetup, Extensions, LayerKey, Library, Template, Wadspace } from "@core/layers";
 import type { ImageRow, RunItem } from "./layers";
 import type { StoredWadspace } from "./migrate";
@@ -293,6 +293,14 @@ export interface Backend {
   deleteFromDisk?(pick: DiskPick): Promise<Freed>;
   /** On a machine: older builds nothing needs, removed. */
   pruneOld?(): Promise<Freed>;
+  /** On a machine: what's saved on its disk outside the images (secrets left out). */
+  files?: {
+    roots(): Promise<FileRoot[]>;
+    list(root: string, path: string): Promise<FileList>;
+    readText(root: string, path: string): Promise<string>;
+    writeText(root: string, path: string, text: string): Promise<void>;
+    delete(root: string, path: string): Promise<void>;
+  };
 
   /** Offline: Tailscale on this machine (caps.tailnet). */
   tailnetStatus?(): Promise<TailnetStatus>;

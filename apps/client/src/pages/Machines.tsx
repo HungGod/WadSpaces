@@ -10,6 +10,7 @@ import {
   Activity,
   Check,
   Cpu,
+  FolderOpen,
   Hammer,
   History,
   Keyboard,
@@ -29,6 +30,7 @@ import clsx from "clsx";
 import { backend } from "@/data";
 import { wadspaceName } from "@/data/layers";
 import { MachineDiagnostics } from "@/components/MachineDiagnostics";
+import { MachineFiles } from "@/components/MachineFiles";
 import { MachineStorage } from "@/components/MachineStorage";
 import { ContainerControls, ContainerStatus } from "@/components/manager/ContainerControls";
 import { WadspaceActions } from "@/components/manager/WadspaceActions";
@@ -43,7 +45,7 @@ import type { Machine } from "@/lib/types";
 import { useUi } from "@/lib/ui";
 import { hasAccount, isThisMachine } from "@/lib/machine";
 
-type Tab = "wadspaces" | "diagnostics";
+type Tab = "wadspaces" | "files" | "diagnostics";
 
 /** Machines: the list, and the picked one's detail (the launch machine to start with). */
 export default function MachinesPage() {
@@ -129,13 +131,14 @@ function ListItem({ on, onClick, icon, live, title, sub }: { on: boolean; onClic
   );
 }
 
-function Tabs({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
+function Tabs({ tab, setTab, files }: { tab: Tab; setTab: (t: Tab) => void; files: boolean }) {
   return (
     <Segmented
       value={tab}
       onChange={setTab}
       options={[
         { value: "wadspaces" as Tab, label: <><Activity className="size-3.5" /> Wadspaces</> },
+        ...(files ? [{ value: "files" as Tab, label: <><FolderOpen className="size-3.5" /> Files</> }] : []),
         { value: "diagnostics" as Tab, label: <><Stethoscope className="size-3.5" /> Diagnostics</> },
       ]}
     />
@@ -210,9 +213,11 @@ function MachineDetail({ m }: { m: Machine }) {
         {here && backend.caps.tailnet && <TailnetCard m={m} />}
       </div>
 
-      <Tabs tab={tab} setTab={setTab} />
+      <Tabs tab={tab} setTab={setTab} files={here && !!backend.files && up} />
 
-      {tab === "diagnostics" ? (
+      {tab === "files" && here ? (
+        <MachineFiles />
+      ) : tab === "diagnostics" ? (
         <>
           <div className="rounded-3xl border border-line bg-surface p-6">
             <Resources m={m} />

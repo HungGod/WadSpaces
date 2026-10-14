@@ -121,6 +121,9 @@ export class MachineBackend implements Backend {
   pruneOld() {
     return this.local.pruneOld();
   }
+  get files() {
+    return this.local.files;
+  }
   deleteCopy(id: string) {
     return this.local.deleteCopy(id);
   }

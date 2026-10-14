@@ -174,6 +174,13 @@ export class LocalBackend implements Backend {
     this.emit("machines");
     return freed;
   }
+  readonly files = {
+    roots: () => wadd.fileRoots(),
+    list: (root: string, path: string) => wadd.listFiles(root, path),
+    readText: (root: string, path: string) => wadd.readText(root, path),
+    writeText: async (root: string, path: string, text: string) => void (await wadd.writeText(root, path, text)),
+    delete: async (root: string, path: string) => void (await wadd.deleteFile(root, path)),
+  };
   async pruneOld() {
     const freed = await wadd.pruneOld();
     this.emit("images");

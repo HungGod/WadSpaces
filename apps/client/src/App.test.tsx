@@ -96,6 +96,29 @@ describe("the Builder's board", () => {
   });
 });
 
+describe("Files on the machine", () => {
+  it("looks through what's saved, edits a text file and deletes a folder", async () => {
+    fake.thisMachine = true;
+    fake.fileTree = { "home/Downloads/notes.md": "# Notes\n", "home/Downloads/old.zip": "zip", "home/Documents/plan.txt": "Plan\n" };
+    await open("/machines");
+    fireEvent.click(await screen.findByRole("button", { name: /Files/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    expect(await screen.findByRole("button", { name: "notes.md" })).toBeTruthy();
+    // Edited and saved.
+    fireEvent.click(screen.getByRole("button", { name: "Edit notes.md" }));
+    const text = (await screen.findByLabelText("The file's text")) as HTMLTextAreaElement;
+    expect(text.value).toBe("# Notes\n");
+    fireEvent.change(text, { target: { value: "# Notes\n\nDone.\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fake.fileTree["home/Downloads/notes.md"]).toBe("# Notes\n\nDone.\n"));
+    // Back to the top: Documents deleted, for good.
+    fireEvent.click(screen.getAllByRole("button", { name: "Your files" }).at(-1)!);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete Documents" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+    await waitFor(() => expect(Object.keys(fake.fileTree).some((p) => p.startsWith("home/Documents"))).toBe(false));
+  });
+});
+
 describe("Recently deleted", () => {
   it("deletes a stack for good, with the template only it used", async () => {
     await open("/builder");

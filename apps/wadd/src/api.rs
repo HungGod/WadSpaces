@@ -61,6 +61,8 @@ pub struct AppState {
     pub store: wad_store::State,
     /// What WadSpaces takes on the disk (GET /v1/storage).
     pub storage: crate::storage::Storage,
+    /// What's saved on the disk outside the images (/v1/files).
+    pub files: crate::files::Files,
 }
 
 /// An ApiError as an HTTP response.
@@ -138,6 +140,9 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/storage", get(storage))
         .route("/v1/storage/prune", post(storage_prune))
         .route("/v1/storage/delete", post(storage_delete))
+        .route("/v1/files/roots", get(file_roots))
+        .route("/v1/files", get(file_list).delete(file_delete))
+        .route("/v1/files/text", get(file_text).put(file_text_put))
         .route("/v1/images/build", post(image_build))
         .route("/v1/images/{layer}", delete(image_delete))
         .route("/v1/workspaces/{id}/start", post(start))
@@ -601,6 +606,51 @@ async fn image_build(
 
 async fn image_delete(State(app): State<Arc<AppState>>, Path(layer): Path<String>) -> Result<StatusCode, Failure> {
     crate::images::delete(&app.registry, &app.builds, app.registry_backend.as_ref(), &layer).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct FileQuery {
+    root: String,
+    #[serde(default)]
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct FileText {
+    root: String,
+    path: String,
+    text: String,
+}
+
+/// The places Files looks through: your files, each wadspace's home, copies.
+async fn file_roots(State(app): State<Arc<AppState>>) -> Json<Vec<crate::files::FileRoot>> {
+    Json(app.files.roots(&app.registry).await)
+}
+
+async fn file_list(
+    State(app): State<Arc<AppState>>,
+    Query(q): Query<FileQuery>,
+) -> Result<Json<crate::files::FileList>, Failure> {
+    Ok(Json(app.files.list(&q.root, &q.path, &app.registry, app.registry_backend.as_ref()).await?))
+}
+
+async fn file_text(
+    State(app): State<Arc<AppState>>,
+    Query(q): Query<FileQuery>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    let text = app.files.read_text(&q.root, &q.path, &app.registry, app.registry_backend.as_ref()).await?;
+    Ok(Json(serde_json::json!({ "text": text })))
+}
+
+async fn file_text_put(State(app): State<Arc<AppState>>, Json(t): Json<FileText>) -> Result<StatusCode, Failure> {
+    app.files.write_text(&t.root, &t.path, &t.text, &app.registry, app.registry_backend.as_ref()).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn file_delete(State(app): State<Arc<AppState>>, Query(q): Query<FileQuery>) -> Result<StatusCode, Failure> {
+    app.files.delete(&q.root, &q.path, &app.registry, app.registry_backend.as_ref()).await?;
+    app.storage.forget().await;
     Ok(StatusCode::NO_CONTENT)
 }
 

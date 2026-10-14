@@ -757,3 +757,46 @@ async fn a_stack_installs_on_its_extensions_with_its_keys() {
     let bare = Install { wadspace: bare, template: dev(), extensions: Some(plus()), tz: None };
     assert!(images::install(&e.reg, &e.fake, "academy", &bare).await.unwrap_err().message.contains("customization"));
 }
+
+#[tokio::test]
+async fn files_show_whats_saved_and_keep_secrets_out() {
+    let e = env().await;
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path().join("home");
+    for (p, body) in [
+        ("Downloads/report.md", "# Report\n"),
+        ("Downloads/photo.bin", "\0\0\0binary"),
+        (".ssh/id_ed25519", "KEY"),
+        (".local/share/wadbrowser/profiles/github/Cookies", "SESSION"),
+        (".local/share/notes.txt", "kept"),
+    ] {
+        std::fs::create_dir_all(home.join(p).parent().unwrap()).unwrap();
+        std::fs::write(home.join(p), body).unwrap();
+    }
+    let files = wadd::files::Files::with_home(&e.state, &d.path().join("signins"), Some(home.clone()));
+    let b = e.fake.clone();
+    let top: Vec<String> =
+        files.list("home", "", &e.reg, &b).await.unwrap().entries.into_iter().map(|x| x.name).collect();
+    assert!(top.contains(&"Downloads".to_string()) && !top.contains(&".ssh".to_string()), "{top:?}");
+    let downloads = files.list("home", "Downloads", &e.reg, &b).await.unwrap().entries;
+    let shown: Vec<(&str, bool)> = downloads.iter().map(|x| (x.name.as_str(), x.text)).collect();
+    assert_eq!(shown, [("photo.bin", false), ("report.md", true)]);
+    // WadBrowser's profiles (signed-in sessions) stay out; the rest of .local is there.
+    let names = |list: wadd::files::FileList| list.entries.into_iter().map(|x| x.name).collect::<Vec<_>>();
+    assert_eq!(names(files.list("home", ".local/share", &e.reg, &b).await.unwrap()), ["wadbrowser", "notes.txt"]);
+    assert!(names(files.list("home", ".local/share/wadbrowser", &e.reg, &b).await.unwrap()).is_empty());
+    assert_eq!(
+        files.list("home", ".local/share/wadbrowser/profiles", &e.reg, &b).await.unwrap_err().code,
+        ErrorCode::Forbidden
+    );
+    assert_eq!(files.read_text("home", ".ssh/id_ed25519", &e.reg, &b).await.unwrap_err().code, ErrorCode::Forbidden);
+    assert_eq!(files.list("home", "../", &e.reg, &b).await.unwrap_err().code, ErrorCode::BadRequest);
+    // Read, edit, delete.
+    assert_eq!(files.read_text("home", "Downloads/report.md", &e.reg, &b).await.unwrap(), "# Report\n");
+    files.write_text("home", "Downloads/report.md", "# Report v2\n", &e.reg, &b).await.unwrap();
+    assert_eq!(std::fs::read_to_string(home.join("Downloads/report.md")).unwrap(), "# Report v2\n");
+    files.delete("home", "Downloads", &e.reg, &b).await.unwrap();
+    assert!(!home.join("Downloads").exists());
+    assert_eq!(files.delete("home", "", &e.reg, &b).await.unwrap_err().code, ErrorCode::BadRequest);
+    assert!(files.roots(&e.reg).await.iter().any(|r| r.id == "home"));
+}

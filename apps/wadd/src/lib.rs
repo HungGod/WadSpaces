@@ -13,6 +13,7 @@ pub mod diagnostics;
 pub mod display;
 pub mod drives;
 pub mod events;
+pub mod files;
 pub mod github;
 pub mod icons;
 pub mod images;
@@ -341,6 +342,7 @@ impl Server {
             policy,
             store: wad_store::State::new(&config.daemon.state_dir),
             storage: storage::Storage::with(&config.daemon.state_dir, profile == Profile::System),
+            files: files::Files::new(&config.daemon.state_dir, &config.daemon.signins_dir, profile == Profile::System),
         });
         Ok(Self {
             listener,

@@ -368,6 +368,12 @@ export const wadd = {
   deleteFromDisk: (pick: DiskPick) => call<Freed>("POST", "/v1/storage/delete", pick),
   /** Older builds of layers that nothing needs, removed. */
   pruneOld: () => call<Freed>("POST", "/v1/storage/prune", {}),
+  // Files: what's saved on the disk outside the images (wadd's files.rs).
+  fileRoots: () => call<FileRoot[]>("GET", "/v1/files/roots"),
+  listFiles: (root: string, path: string) => call<FileList>("GET", `/v1/files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`),
+  readText: (root: string, path: string) => call<{ text: string }>("GET", `/v1/files/text?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`).then((r) => r.text),
+  writeText: (root: string, path: string, text: string) => call("PUT", "/v1/files/text", { root, path, text }),
+  deleteFile: (root: string, path: string) => call("DELETE", `/v1/files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`),
   // Tailscale on this machine (wadd/tailnet.py)
   tailnet: () => call<TailnetStatus>("GET", "/api/tailnet"),
   tailnetLogin: () => call<{ url: string | null; online?: boolean }>("POST", "/api/tailnet/login"),
@@ -458,6 +464,30 @@ export function waddEvents(on: (event: string, data: unknown) => void, onDrop: (
 }
 
 // ------------------------------------------------------------ formatting
+/** A place Files looks through: "home", "ws:<id>", "copy:<id>". */
+export interface FileRoot {
+  id: string;
+  label: string;
+  detail: string;
+}
+
+export interface FileEntry {
+  name: string;
+  dir: boolean;
+  /** A file's size (a folder's isn't counted). */
+  bytes: number;
+  /** Unix seconds. */
+  modified: number;
+  /** Opens to read and edit (text, 1 MB at most). */
+  text: boolean;
+}
+
+export interface FileList {
+  root: string;
+  path: string;
+  entries: FileEntry[];
+}
+
 /** What a delete took off the disk (wad-proto's Freed). */
 export interface Freed {
   /** Images removed: a layer's, or an old build's id. */
