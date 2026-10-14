@@ -1,6 +1,5 @@
-//! The HUD in the site's colours (apps/client/src/styles/globals.css; the
-//! dark theme as the brand's acid green on deep pink), dark or light as
-//! WadSpaces Client is: the app writes its choice to
+//! The HUD in the site's colours (apps/client/src/styles/globals.css),
+//! dark or light as WadSpaces Client is: the app writes its choice to
 //! ~/.config/wadspaces/theme (src-tauri/src/theme.rs), and the HUD follows
 //! that file.
 
@@ -38,18 +37,16 @@ pub fn current() -> Theme {
 /// The site's tokens, as GTK named colours.
 fn palette(t: Theme) -> &'static str {
     match t {
-        // Dark: the brand's primary on its secondary, acid green on deep pink
-        // (pink edges), rather than white on near-black.
         Theme::Dark => {
-            "@define-color bg #1a0612;
-@define-color surface #2c0a1d;
-@define-color surface2 #3a0f26;
-@define-color surface3 #4a1431;
-@define-color line rgba(255, 61, 129, 0.3);
-@define-color line_strong rgba(255, 61, 129, 0.75);
-@define-color fg #c6ff1f;
-@define-color muted rgba(198, 255, 31, 0.75);
-@define-color faint rgba(198, 255, 31, 0.5);
+            "@define-color bg #0a0614;
+@define-color surface #140d22;
+@define-color surface2 #1b132d;
+@define-color surface3 #241a39;
+@define-color line rgba(240, 234, 250, 0.09);
+@define-color line_strong rgba(240, 234, 250, 0.18);
+@define-color fg #f5f2fa;
+@define-color muted rgba(245, 242, 250, 0.62);
+@define-color faint rgba(245, 242, 250, 0.4);
 @define-color accent #c6ff1f;
 @define-color accent_fg #0a0614;
 @define-color accent_soft rgba(198, 255, 31, 0.2);
@@ -87,20 +84,20 @@ const RULES: &str = r#"
 window { background: transparent; }
 .pill {
   background: alpha(@surface, 0.94); color: @fg; border: 1px solid @line_strong;
-  border-radius: 999px; padding: 4px 12px; min-height: 0;
-  font-size: 13px; font-weight: 500; box-shadow: none;
+  border-radius: 999px; padding: 3px 10px; min-height: 0;
+  font-size: 12px; font-weight: 500; box-shadow: none;
 }
 .pill:hover { background: @surface2; }
 .pill.offline { color: @warn; }
 .pill.done { color: @accent; border-color: @accent; }
 .pill.focus { color: @accent; border-color: alpha(@accent, 0.45); }
-.pill.logo-button { padding: 3px 9px; }
-.pill.icon-pill { padding: 5px 11px; }
+.pill.logo-button { padding: 2px 8px; }
+.pill.icon-pill { padding: 4px 9px; }
 .pill image { color: @fg; }
-.pill.battery { padding: 4px 11px 4px 9px; color: @muted; font-feature-settings: "tnum"; }
+.pill.battery { padding: 3px 10px 3px 8px; color: @muted; font-feature-settings: "tnum"; }
 .pill.battery.low, .pill.battery.low image { color: @warn; border-color: alpha(@warn, 0.5); }
 .pill.clock { font-feature-settings: "tnum"; color: @muted; }
-.pill.arrow { padding: 4px 10px; font-size: 15px; font-weight: 600; color: @muted; }
+.pill.arrow { padding: 3px 9px; font-size: 14px; font-weight: 600; color: @muted; }
 .pill.arrow:hover { color: @fg; }
 .pill.arrow.attention { color: @accent; border-color: @accent; }
 

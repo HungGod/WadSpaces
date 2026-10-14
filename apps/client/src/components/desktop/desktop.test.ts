@@ -5,7 +5,7 @@ import { appListOffset, cellAt, rowsFor, taskButtonWidth } from "./geometry";
 
 describe("icon placement (selkies-desktop get_desktop_cell)", () => {
   it("fills a column above the panel, then the next", () => {
-    // 1080 tall: (1080 - 44) / 104 = 9 rows.
+    // 1080 tall: (1080 - 56) / 104 = 9 rows.
     expect(rowsFor(1080)).toBe(9);
     expect(cellAt(0, 1080)).toEqual({ x: 10, y: 10 });
     expect(cellAt(8, 1080)).toEqual({ x: 10, y: 842 });
@@ -18,9 +18,9 @@ describe("icon placement (selkies-desktop get_desktop_cell)", () => {
   it("sizes taskbar buttons like the panel does", () => {
     expect(taskButtonWidth(1920, 0)).toBe(150);
     expect(taskButtonWidth(1920, 3)).toBe(150);
-    // (1000 - 52 - 5 - 20 * 5) / 20, and never under the icon and its margin (22 + 10).
-    expect(taskButtonWidth(1000, 20)).toBe(42);
-    expect(taskButtonWidth(400, 100)).toBe(32);
+    // (1000 - 60 - 5 - 20 * 5) / 20, and never under the icon and its margin (24 + 10).
+    expect(taskButtonWidth(1000, 20)).toBe(41);
+    expect(taskButtonWidth(400, 100)).toBe(34);
   });
 
   it("puts the app list beside the hovered category, kept on screen", () => {

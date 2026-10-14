@@ -5,13 +5,14 @@
 #include <stdint.h>
 #include <cairo/cairo.h>
 
-/* WadSpaces: a taller panel, a narrower Start button with a bigger logo. */
-#define PANEL_HEIGHT 44
+/* WadSpaces: a taller panel (the HUD's bar sits in the middle of it), a
+   narrower Start button with a bigger logo. */
+#define PANEL_HEIGHT 56
 /* The largest output scale either backend draws at. */
 #define MAX_SCALE 4
-#define START_BTN_WIDTH 52
-#define START_ICON_SIZE 34
-#define TASKBAR_ICON_SIZE 22
+#define START_BTN_WIDTH 60
+#define START_ICON_SIZE 42
+#define TASKBAR_ICON_SIZE 24
 #define ICON_SIZE 16
 #define MAX_MENU_HEIGHT 600
 #define MAX_APPS 2048

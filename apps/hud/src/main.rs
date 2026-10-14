@@ -128,6 +128,12 @@ fn screenshot() -> Option<Vec<u8>> {
         .and_then(|b| thumb::cover(&b, PREVIEW_W as u32 * 2, PREVIEW_H as u32 * 2))
 }
 
+/// The bar sits in the middle of a wadspace's tray (selkies-desktop's
+/// panel, 56 px: apps/selkies-desktop/desktop.h): 28 px of pills, 14 px up.
+const BAR_BOTTOM: i32 = 14;
+/// The bar's icons.
+const BAR_ICON: i32 = 14;
+
 /// wadd never sets the backlight lower (apps/wadd/src/screen.rs).
 const BRIGHTNESS_FLOOR: f64 = 5.0;
 
@@ -487,6 +493,12 @@ impl Hud {
         // The bar.
         let bar = gtk::Window::builder().application(app).title("wadspaces-hud").build();
         layer(&bar, "wadspaces-hud", &[Edge::Bottom, Edge::Right], false, KeyboardMode::None);
+        bar.set_margin(Edge::Bottom, BAR_BOTTOM);
+        // Measured from the screen's edge, over any panel's reserved space
+        // (a wadspace's tray is inside its window; this keeps it so anywhere).
+        if gtk4_layer_shell::is_supported() {
+            bar.set_exclusive_zone(-1);
+        }
         let outer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let done = label("Time's up", "pill");
@@ -494,19 +506,19 @@ impl Hud {
         let timer = button("⏱", &["pill", "focus"]);
         // Home (WadSpaces Client) and WadNotes: plain icons, the theme's colours.
         let home = gtk::Button::new();
-        home.set_child(Some(&icon("go-home-symbolic", 16)));
+        home.set_child(Some(&icon("go-home-symbolic", BAR_ICON)));
         home.add_css_class("pill");
         home.add_css_class("icon-pill");
         home.set_tooltip_text(Some("Back to WadSpaces (Super+0)"));
         let net = button("Wi-Fi", &["pill"]);
         net.set_tooltip_text(Some("Networks"));
-        let bright_button = icon_pill(&icon(BRIGHTNESS_ICON, 16), "Brightness");
-        let sound_icon = icon(audio::icon(None), 16);
+        let bright_button = icon_pill(&icon(BRIGHTNESS_ICON, BAR_ICON), "Brightness");
+        let sound_icon = icon(audio::icon(None), BAR_ICON);
         let sound_button = icon_pill(&sound_icon, "Volume");
-        let power_button = icon_pill(&icon("system-shutdown-symbolic", 16), "Power");
+        let power_button = icon_pill(&icon("system-shutdown-symbolic", BAR_ICON), "Power");
         // WadNotes: away or back; its menu does the rest.
         let notes_button = gtk::Button::new();
-        notes_button.set_child(Some(&icon("document-edit-symbolic", 16)));
+        notes_button.set_child(Some(&icon("document-edit-symbolic", BAR_ICON)));
         notes_button.add_css_class("pill");
         notes_button.add_css_class("icon-pill");
         let clock = label("", "pill");
@@ -515,7 +527,7 @@ impl Hud {
         let battery = gtk::Box::new(gtk::Orientation::Horizontal, 5);
         battery.add_css_class("pill");
         battery.add_css_class("battery");
-        let battery_icon = icon("battery-missing-symbolic", 16);
+        let battery_icon = icon("battery-missing-symbolic", BAR_ICON);
         let battery_text = label("", "");
         battery.append(&battery_icon);
         battery.append(&battery_text);
@@ -1141,7 +1153,7 @@ impl Hud {
             // The bar sits 12 px from the right and bottom edges (layer()).
             let right = 12.0 + self.bar.width() as f32 - centre - natural as f32 / 2.0;
             self.tip.win.set_margin(Edge::Right, right.max(6.0) as i32);
-            self.tip.win.set_margin(Edge::Bottom, 12 + self.bar.height() + 6);
+            self.tip.win.set_margin(Edge::Bottom, BAR_BOTTOM + self.bar.height() + 6);
         }
         self.tip.win.set_default_size(1, 1);
         self.tip.win.present();
@@ -1297,7 +1309,7 @@ impl Hud {
             let right_edge = at.map(|p| p.x() + b.width() as f32).unwrap_or(self.bar.width() as f32);
             // The bar sits 12 px from the right and bottom edges (layer()).
             win.set_margin(Edge::Right, (12.0 + self.bar.width() as f32 - right_edge).max(6.0) as i32);
-            win.set_margin(Edge::Bottom, 12 + self.bar.height() + 6);
+            win.set_margin(Edge::Bottom, BAR_BOTTOM + self.bar.height() + 6);
         }
         win.set_default_size(1, 1);
         win.present();

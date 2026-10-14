@@ -8,13 +8,13 @@ export interface Size {
 }
 
 /** The bottom panel. It reserves its height, so maximized windows stop above it. */
-export const PANEL_H = 44;
+export const PANEL_H = 56;
 /** The Start button's slot at the left of the panel (the button itself is 8px narrower). */
-export const START_W = 52;
+export const START_W = 60;
 /** The WadSpaces logo on the Start button. */
-export const START_ICON = 34;
+export const START_ICON = 42;
 /** Windows' icons in the panel. */
-export const TASK_ICON = 22;
+export const TASK_ICON = 24;
 /** Icons in the Start menu. */
 export const SMALL_ICON = 16;
 /** A desktop icon's picture. */
