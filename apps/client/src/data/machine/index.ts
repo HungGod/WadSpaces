@@ -28,6 +28,7 @@ import type { ProjectDraft } from "@core/projects";
 import type { BrowserSetup, Extensions, LayerKey, Template, Wadspace } from "@core/layers";
 import type { LayerLibrary, LayerPatch } from "../backend";
 import type { RunItem } from "../layers";
+import type { DiskPick } from "@/lib/wadd";
 
 export class MachineBackend implements Backend {
   readonly target = "machine" as const;
@@ -114,7 +115,7 @@ export class MachineBackend implements Backend {
   storage(fresh?: boolean) {
     return this.local.storage(fresh);
   }
-  deleteFromDisk(pick: { layers: string[]; wadspaces: string[] }) {
+  deleteFromDisk(pick: DiskPick) {
     return this.local.deleteFromDisk(pick);
   }
   pruneOld() {

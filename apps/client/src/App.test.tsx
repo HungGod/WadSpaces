@@ -350,7 +350,7 @@ describe("Machines' storage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pick it too" }));
     fireEvent.click(screen.getByRole("button", { name: /Delete…/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Delete, freeing/ }));
-    await waitFor(() => expect(fake.deleted).toEqual([{ layers: ["template:writing"], wadspaces: ["cosmic-bodybuilding"] }]));
+    await waitFor(() => expect(fake.deleted).toEqual([{ layers: ["template:writing"], wadspaces: ["cosmic-bodybuilding"], images: [], volumes: [], updateCopy: false }]));
     // Dev and its Extensions stay.
     expect(fake.images.has("template:dev")).toBe(true);
   });

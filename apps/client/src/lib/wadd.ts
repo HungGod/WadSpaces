@@ -365,7 +365,7 @@ export const wadd = {
   /** What WadSpaces takes on this machine's disk (wadd measures at most once a minute; `fresh` now). */
   storage: (fresh = false) => call<Storage>("GET", `/v1/storage${fresh ? "?fresh=true" : ""}`),
   /** Picked layers' images and wadspaces (with their files here) off this machine's disk. */
-  deleteFromDisk: (pick: { layers: string[]; wadspaces: string[] }) => call<Freed>("POST", "/v1/storage/delete", pick),
+  deleteFromDisk: (pick: DiskPick) => call<Freed>("POST", "/v1/storage/delete", pick),
   /** Older builds of layers that nothing needs, removed. */
   pruneOld: () => call<Freed>("POST", "/v1/storage/prune", {}),
   // Tailscale on this machine (wadd/tailnet.py)
@@ -466,6 +466,8 @@ export interface Freed {
   kept: string[];
   /** Wadspaces taken off the machine, with their files. */
   uninstalled: string[];
+  /** What couldn't go, and why. */
+  failed?: string[];
   bytes: number;
 }
 
@@ -482,7 +484,30 @@ export interface Storage {
   homes: { workspaceId: string; volume: string; bytes: number }[];
   /** Files copied in for wadspaces. */
   copies: { id: string; bytes: number }[];
+  /** Everything else on the disk, part by part. */
+  other: OtherPart[];
   measuredAt: number;
+}
+
+/** A part of the disk that isn't the wadspaces' layers, homes or copies (wad-proto's OtherPart). */
+export interface OtherPart {
+  key: "system" | "update-copy" | "images" | "shared" | "containers" | "volumes" | "logs" | "wadd" | "people" | "unaccounted";
+  label: string;
+  detail: string;
+  bytes: number;
+  /** Its pieces: each image (by id), each volume (by name). */
+  items: { id: string; label: string; detail: string; bytes: number; deletable: boolean }[];
+  /** The whole part can go (the update copy). */
+  deletable: boolean;
+}
+
+/** What to take off the disk (wad-proto's StorageDelete). */
+export interface DiskPick {
+  layers: string[];
+  wadspaces: string[];
+  images?: string[];
+  volumes?: string[];
+  updateCopy?: boolean;
 }
 
 export function formatBytes(n: number): string {

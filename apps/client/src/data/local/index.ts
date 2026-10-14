@@ -16,6 +16,7 @@ import {
   WaddError,
   wadd,
   type BuildUpdate,
+  type DiskPick,
   type LaunchUpdate,
   type MachineWorkspace,
   type Metrics,
@@ -167,7 +168,7 @@ export class LocalBackend implements Backend {
   storage(fresh?: boolean) {
     return wadd.storage(fresh);
   }
-  async deleteFromDisk(pick: { layers: string[]; wadspaces: string[] }) {
+  async deleteFromDisk(pick: DiskPick) {
     const freed = await wadd.deleteFromDisk(pick);
     this.emit("images");
     this.emit("machines");

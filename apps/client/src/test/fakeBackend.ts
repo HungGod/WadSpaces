@@ -6,7 +6,7 @@ import type { BrowserSetup, Extensions, LayerKey, Template, Wadspace } from "@co
 import { chainOf, extensionsLayer, templateLayer } from "@core/layers";
 import type { StoredWadspace } from "@/data/migrate";
 import type { GithubRepo, Project, ProjectDraft } from "@core/projects";
-import type { WaddSecret, WaddSignIn } from "@/lib/wadd";
+import type { DiskPick, OtherPart, WaddSecret, WaddSignIn } from "@/lib/wadd";
 import type { ContainerRun, FocusLock, LastSession, Machine, PublicUser } from "@/lib/types";
 import type { Backend, BuildProgress, Caps, LayerLibrary, LayerPatch, Topic } from "@/data/backend";
 import type { ImageRow, RunItem } from "@/data/layers";
@@ -133,12 +133,14 @@ export class FakeBackend implements Backend {
     base: number;
     layers: Record<string, number>;
     leftovers: { layer: string; id: string; from: string; bytes: number; ownBytes: number }[];
+    other: OtherPart[];
     homes: Record<string, number>;
     copies: Record<string, number>;
     disk: { total: number; free: number };
   } = {
     base: 3.1e9,
     leftovers: [],
+    other: [],
     layers: {},
     homes: {},
     copies: {},
@@ -151,20 +153,29 @@ export class FakeBackend implements Backend {
       base: { ref: "localhost/wadspaces-base:trixie", id: "base", bytes: z.base },
       layers: [...this.images.values()].filter((r) => r.layer !== ("base" as string)).map((r) => ({ layer: r.layer, id: r.id, from: r.from, bytes: 0, ownBytes: z.layers[r.layer] ?? r.sizeMb * 1e6 })),
       leftovers: z.leftovers,
+      other: z.other,
       homes: [...this.installed.keys()].map((id) => ({ workspaceId: id, volume: `wad-${id}-config`, bytes: z.homes[id] ?? 0 })),
       copies: Object.entries(z.copies).map(([id, bytes]) => ({ id, bytes })),
       measuredAt: Date.now() / 1000,
     };
   }
   /** Picked off "the machine's" disk: as wadd does, refusing a running wadspace. */
-  deleted: { layers: string[]; wadspaces: string[] }[] = [];
-  async deleteFromDisk(pick: { layers: string[]; wadspaces: string[] }) {
+  deleted: DiskPick[] = [];
+  async deleteFromDisk(pick: DiskPick) {
     const running = pick.wadspaces.find((id) => this.running.has(id));
     if (running) throw new Error(`${running} is running: stop it first`);
     this.deleted.push(pick);
     let bytes = 0;
     for (const id of pick.wadspaces) (this.installed.delete(id), (bytes += this.sizes.homes[id] ?? 0));
     for (const l of pick.layers) (this.images.delete(l as LayerKey), (bytes += this.sizes.layers[l] ?? 0));
+    // Other images, homes left behind, the update copy: out of the report.
+    const gone = new Set([...(pick.images ?? []), ...(pick.volumes ?? [])]);
+    this.sizes = {
+      ...this.sizes,
+      other: this.sizes.other
+        .filter((p) => !(p.key === "update-copy" && pick.updateCopy))
+        .map((p) => ({ ...p, items: p.items.filter((i) => !gone.has(i.id) || ((bytes += i.bytes), false)) })),
+    };
     this.emit("images");
     this.emit("machines");
     return { removed: pick.layers, kept: [], uninstalled: pick.wadspaces, bytes };
@@ -364,3 +375,38 @@ export class FakeBackend implements Backend {
   createGithubRepo = nope("createGithubRepo");
   cancelLaunch = nope("cancelLaunch");
 }
+
+/** "Everything else" as a machine after a few stick updates has it (dev:fake). */
+export const SAMPLE_OTHER: OtherPart[] = [
+  { key: "system", label: "The WadSpaces system", detail: "The system itself: 2 versions kept, this one and the one before it (to go back to). It stays.", bytes: 7.8e9, items: [], deletable: false },
+  { key: "update-copy", label: "The last stick update's copy", detail: "What the last stick update copied in, already applied: nothing needs it.", bytes: 4.8e9, items: [], deletable: true },
+  {
+    key: "images",
+    label: "Other images",
+    detail: "Images the wadspaces' layers don't count: older bases, images from before layers, steps builds left.",
+    bytes: 9.4e9,
+    items: [
+      { id: "aa11", label: "vanua-academy", detail: "From before the Builder's layers: nothing uses it.", bytes: 4.1e9, deletable: true },
+      { id: "bb22", label: "kale-b", detail: "From before the Builder's layers: nothing uses it.", bytes: 3.2e9, deletable: true },
+      { id: "cc33", label: "An older base", detail: "Templates built before the last base update still stand on it: update them, and it can go.", bytes: 1.6e9, deletable: true },
+      { id: "dd44", label: "A build step", detail: "Left by a build; nothing names it.", bytes: 0.5e9, deletable: true },
+    ],
+    deletable: false,
+  },
+  { key: "shared", label: "Shared by older images", detail: "Image layers older images still hold in common, such as an older base that templates built before the last base update still stand on. Update those templates and it goes.", bytes: 3.1e9, items: [], deletable: false },
+  {
+    key: "volumes",
+    label: "Homes left behind",
+    detail: "Files of wadspaces no longer on this machine (built again, a wadspace with the same id gets its home back).",
+    bytes: 2.3e9,
+    items: [
+      { id: "wad-iq-dev-config", label: "iq-dev's home", detail: "A home whose wadspace isn't on this machine any more.", bytes: 1.9e9, deletable: true },
+      { id: "wad-kale-p-config", label: "kale-p's home", detail: "A home whose wadspace isn't on this machine any more.", bytes: 0.4e9, deletable: true },
+    ],
+    deletable: false,
+  },
+  { key: "logs", label: "Logs", detail: "The system's logs (/var/log), kept and trimmed by the system.", bytes: 0.36e9, items: [], deletable: false },
+  { key: "wadd", label: "WadSpaces' own files", detail: "wadd's records: build and launch logs, web apps' icons, saved sign-ins.", bytes: 0.002e9, items: [], deletable: false },
+  { key: "people", label: "Your files", detail: "Your files on the machine (/var/home): WadBrowser's downloads and profiles, the WadSpaces app's data.", bytes: 0.03e9, items: [], deletable: false },
+  { key: "unaccounted", label: "Not listed above", detail: "The disk's own bookkeeping, and files outside the folders above.", bytes: 1.2e9, items: [], deletable: false },
+];

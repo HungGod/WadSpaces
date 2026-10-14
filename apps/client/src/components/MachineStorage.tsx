@@ -94,8 +94,8 @@ export function MachineStorage({ m }: { m: Machine }) {
     const what = [f.removed.length && `${f.removed.length} image${f.removed.length === 1 ? "" : "s"}`, f.uninstalled.length && `${f.uninstalled.join(", ")} and ${f.uninstalled.length === 1 ? "its" : "their"} files`].filter(Boolean).join(" and ");
     useApp.getState().toast({
       title: `Freed about ${formatBytes(f.bytes)}`,
-      body: `${what ? `Deleted ${what}.` : "Nothing needed deleting."}${f.kept.length ? ` ${f.kept.join(", ")} kept ${f.kept.length === 1 ? "its" : "their"} files: an image here is built on ${f.kept.length === 1 ? "it" : "them"}.` : ""}`,
-      tone: "success",
+      body: `${what ? `Deleted ${what}.` : "Nothing needed deleting."}${f.kept.length ? ` ${f.kept.join(", ")} kept ${f.kept.length === 1 ? "its" : "their"} files: an image here is built on ${f.kept.length === 1 ? "it" : "them"}.` : ""}${f.failed?.length ? ` Not deleted: ${f.failed.join("; ")}.` : ""}`,
+      tone: f.failed?.length ? "error" : "success",
     });
     void load(true);
     void useApp.getState().loadImages();
@@ -124,8 +124,9 @@ export function MachineStorage({ m }: { m: Machine }) {
       ) : (
         <div className="space-y-6 p-5">
           <DiskBar s={s} onFreed={done} />
+          <OtherBreakdown s={s} picked={picked} onToggle={toggle} />
           <LayerTree nodes={nodes} picked={picked} onToggle={toggle} />
-          {picked.size > 0 && <PickedBar nodes={nodes} picked={picked} setPicked={setPicked} onFreed={done} />}
+          {picked.size > 0 && <PickedBar s={s} nodes={nodes} picked={picked} setPicked={setPicked} onFreed={done} />}
         </div>
       )}
     </div>
@@ -434,20 +435,23 @@ function layout(nodes: Node[]): {
 }
 
 /** What's picked: what it frees, what stops it, and the delete (after a look at what goes). */
-function PickedBar({ nodes, picked, setPicked, onFreed }: { nodes: Node[]; picked: Set<string>; setPicked: (p: Set<string>) => void; onFreed: (f: Freed) => void }) {
+function PickedBar({ s, nodes, picked, setPicked, onFreed }: { s: Storage; nodes: Node[]; picked: Set<string>; setPicked: (p: Set<string>) => void; onFreed: (f: Freed) => void }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const kids = (key: string) => nodes.filter((n) => n.parent === key);
   const descendants = (key: string): Node[] => kids(key).flatMap((k) => [k, ...descendants(k.key)]);
-  const sel = nodes.filter((n) => picked.has(n.key) && pickable(n));
-  const layers = sel.filter((n) => n.kind === "template" || n.kind === "extensions");
-  const wadspaces = sel.filter((n) => n.kind === "wadspace");
+  const tree = nodes.filter((n) => picked.has(n.key) && pickable(n));
+  // From "Everything else": other images, homes left behind, the update copy.
+  const extras = otherPicks(s).filter((x) => picked.has(x.key));
+  const sel = [...tree, ...extras];
+  const layers = tree.filter((n) => n.kind === "template" || n.kind === "extensions");
+  const wadspaces = tree.filter((n) => n.kind === "wadspace");
   // What stops it: a picked wadspace running; one on a picked layer's image, not picked.
   const running = wadspaces.filter((n) => n.running);
   const onIt = layers.flatMap((l) => kids(l.key).filter((k) => k.kind === "wadspace" && k.installed && !picked.has(k.key)));
   // A layer something unpicked is built on: its name goes, its files stay.
   const keptBy = (l: Node) => kids(l.key).filter((k) => k.kind !== "wadspace" && k.bytes !== null && !picked.has(k.key));
-  const frees = [...wadspaces, ...layers.filter((l) => !keptBy(l).length)].reduce((n, x) => n + (x.bytes ?? 0), 0);
+  const frees = [...wadspaces, ...layers.filter((l) => !keptBy(l).length)].reduce((n, x) => n + (x.bytes ?? 0), 0) + extras.reduce((n, x) => n + x.bytes, 0);
   const more = [...new Set(layers.flatMap((l) => descendants(l.key)))].filter((n) => pickable(n) && !picked.has(n.key));
   const blocked = running.length > 0 || onIt.length > 0;
   const add = (list: Node[]) => setPicked(new Set([...picked, ...list.map((n) => n.key)]));
@@ -455,7 +459,15 @@ function PickedBar({ nodes, picked, setPicked, onFreed }: { nodes: Node[]; picke
   const go = async () => {
     setBusy(true);
     try {
-      onFreed(await backend.deleteFromDisk!({ layers: layers.map((n) => n.key), wadspaces: wadspaces.map((n) => n.wadspaceId!) }));
+      onFreed(
+        await backend.deleteFromDisk!({
+          layers: layers.map((n) => n.key),
+          wadspaces: wadspaces.map((n) => n.wadspaceId!),
+          images: extras.filter((x) => x.kind === "image").map((x) => x.id),
+          volumes: extras.filter((x) => x.kind === "volume").map((x) => x.id),
+          updateCopy: extras.some((x) => x.kind === "update-copy"),
+        }),
+      );
       setAsking(false);
     } catch (e) {
       useApp.getState().toast({ title: "Couldn't delete them", body: (e as Error).message, tone: "error" });
@@ -527,6 +539,12 @@ function PickedBar({ nodes, picked, setPicked, onFreed }: { nodes: Node[]; picke
               </div>
             </li>
           ))}
+          {extras.map((x) => (
+            <li key={x.key} className="rounded-xl bg-surface-2 px-3 py-2 ring-1 ring-line">
+              <span className="font-medium">{x.label}</span> <span className="text-muted">({formatBytes(x.bytes)})</span>
+              <div className="text-xs text-muted">{x.detail}</div>
+            </li>
+          ))}
         </ul>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="ghost" disabled={busy} onClick={() => setAsking(false)}>
@@ -537,6 +555,65 @@ function PickedBar({ nodes, picked, setPicked, onFreed }: { nodes: Node[]; picke
           </Button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/** What "Everything else" lets go: each deletable image and volume, and the update copy. */
+function otherPicks(s: Storage): { key: string; kind: "image" | "volume" | "update-copy"; id: string; label: string; detail: string; bytes: number }[] {
+  return (s.other ?? []).flatMap((p) => [
+    ...(p.key === "update-copy" && p.deletable ? [{ key: "update-copy", kind: "update-copy" as const, id: "", label: p.label, detail: p.detail, bytes: p.bytes }] : []),
+    ...p.items
+      .filter((i) => i.deletable && (p.key === "images" || p.key === "volumes"))
+      .map((i) => ({ key: `${p.key === "images" ? "img" : "vol"}:${i.id}`, kind: p.key === "images" ? ("image" as const) : ("volume" as const), id: i.id, label: i.label, detail: i.detail, bytes: i.bytes })),
+  ]);
+}
+
+/** "Everything else", part by part: what each is, how big, and (where it can go) a box to pick it. */
+function OtherBreakdown({ s, picked, onToggle }: { s: Storage; picked: Set<string>; onToggle: (key: string) => void }) {
+  const parts = [...(s.other ?? [])].sort((a, b) => b.bytes - a.bytes);
+  if (!parts.length) return null;
+  const total = parts.reduce((n, p) => n + p.bytes, 0);
+  const Pick = ({ k, label }: { k: string; label: string }) => (
+    <input type="checkbox" className="size-4 shrink-0 accent-[var(--danger)]" checked={picked.has(k)} onChange={() => onToggle(k)} aria-label={`Pick ${label} to delete`} />
+  );
+  return (
+    <div className="overflow-hidden rounded-2xl ring-1 ring-line">
+      <div className="flex items-baseline justify-between bg-surface-2 px-4 py-2.5">
+        <span className="text-sm font-semibold">Everything else, part by part</span>
+        <span className="font-mono text-xs text-muted">{formatBytes(total)}</span>
+      </div>
+      <ul className="divide-y divide-line">
+        {parts.map((p) => (
+          <li key={p.key} className="px-4 py-3">
+            <div className="flex items-start gap-3">
+              {p.key === "update-copy" && p.deletable ? <Pick k="update-copy" label={p.label} /> : <span className="grid size-4 shrink-0 place-items-center pt-1"><span className="size-2.5 rounded-sm bg-[var(--faint)]" /></span>}
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">{p.label}</div>
+                <div className="text-xs text-muted">{p.detail}</div>
+              </div>
+              <span className="shrink-0 font-mono text-sm">{formatBytes(p.bytes)}</span>
+            </div>
+            {p.items.length > 0 && (
+              <ul className="mt-2 ml-6 divide-y divide-line rounded-xl bg-surface-2 ring-1 ring-line">
+                {p.items.map((i) => {
+                  const k = `${p.key === "images" ? "img" : "vol"}:${i.id}`;
+                  return (
+                    <li key={i.id} className="flex items-center gap-3 px-3 py-2 text-xs">
+                      {i.deletable ? <Pick k={k} label={i.label} /> : <span className="size-4 shrink-0" title="Something still needs it" />}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium text-fg">{i.label}</span>
+                        <span className="block truncate text-muted">{i.detail}</span>
+                      </span>
+                      <span className="shrink-0 font-mono">{formatBytes(i.bytes)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
