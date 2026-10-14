@@ -1106,12 +1106,44 @@ pub struct Storage {
     /// Each layer's image: all of it, and its own share (what it adds to the
     /// image it's built on).
     pub layers: Vec<LayerBytes>,
+    /// Older builds of layers, kept by nothing that still needs them
+    /// (`layer` is the layer they were; `id` the image).
+    pub leftovers: Vec<LayerBytes>,
     /// Each wadspace's home (its /config volume).
     pub homes: Vec<HomeBytes>,
     /// Files copied in for wadspaces (POST /v1/copies).
     pub copies: Vec<CopyBytes>,
     /// Unix seconds.
     pub measured_at: f64,
+}
+
+/// POST /v1/storage/delete: what to take off this machine's disk.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageDelete {
+    /// Layers ("template:<id>", "custom:<id>"): each one's image and its
+    /// older builds. What's built on it stays (and keeps its files).
+    #[serde(default)]
+    pub layers: Vec<String>,
+    /// Wadspaces: off this machine, with their files here (home and the
+    /// copies only they had). Their designs stay in the library.
+    #[serde(default)]
+    pub wadspaces: Vec<String>,
+}
+
+/// POST /v1/storage/delete and /v1/storage/prune: what went.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Freed {
+    /// The images removed: a layer's ("template:<id>"), or an old build's id.
+    pub removed: Vec<String>,
+    /// Layers whose name went but whose files stay: an image here is built
+    /// on them (they go with it).
+    pub kept: Vec<String>,
+    /// The wadspaces taken off this machine, their files with them.
+    pub uninstalled: Vec<String>,
+    /// About how much of the disk came back.
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]

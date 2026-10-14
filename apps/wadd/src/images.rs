@@ -20,10 +20,10 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use wad_proto::v1::{ImageRow, WallpaperUpload, Workspace, WorkspaceSaved};
+use wad_proto::v1::{Freed, ImageRow, StorageDelete, WallpaperUpload, Workspace, WorkspaceSaved};
 use wad_proto::{ApiError, ErrorCode};
 
-use crate::backend::Backend;
+use crate::backend::{Backend, ImageInfo};
 use crate::builds::{Builds, FROM_LABEL, LAYER_LABEL, SHA_LABEL};
 use crate::registry::Registry;
 
@@ -98,6 +98,175 @@ pub async fn delete(registry: &Registry, builds: &Builds, backend: &dyn Backend,
     }
     tracing::info!("removed the image {image}");
     Ok(())
+}
+
+/// Every layer image here, old builds too, with its layer (from its label).
+async fn layer_images(backend: &dyn Backend) -> Result<Vec<(String, ImageInfo)>, ApiError> {
+    Ok(backend
+        .images_labelled(SHA_LABEL)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .filter_map(|i| {
+            Some((i.labels.get(LAYER_LABEL).and_then(Value::as_str).filter(|l| layer_ok(l))?.to_string(), i))
+        })
+        .collect())
+}
+
+fn from_of(i: &ImageInfo) -> &str {
+    i.labels.get(FROM_LABEL).and_then(Value::as_str).unwrap_or_default()
+}
+
+/// Whether it's the build its layer's name points at (else an older one).
+fn current(layer: &str, i: &ImageInfo) -> bool {
+    let image_ref = wad_core::layers::image_ref(layer);
+    i.tags.contains(&image_ref)
+}
+
+/// Older builds of layers that nothing still needs: no image here is built
+/// on them. (A container still running on one keeps it: removing it fails,
+/// and it's left for next time.)
+pub async fn leftovers(backend: &dyn Backend) -> Result<Vec<(String, ImageInfo)>, ApiError> {
+    let all = layer_images(backend).await?;
+    let under: std::collections::HashSet<String> = all.iter().map(|(_, i)| from_of(i).to_string()).collect();
+    Ok(all.into_iter().filter(|(l, i)| !current(l, i) && !under.contains(&i.id)).collect())
+}
+
+/// What an image adds to the one it was built on, in bytes.
+async fn own_bytes(backend: &dyn Backend, i: &ImageInfo) -> u64 {
+    let under = match backend.image_info(from_of(i)).await {
+        Ok(Some(u)) => u.size,
+        _ => 0,
+    };
+    i.size.saturating_sub(under)
+}
+
+/// What's picked, off this machine's disk (POST /v1/storage/delete):
+/// wadspaces first (each taken off this machine with its files: its home
+/// and the copies only it had), then each layer's image and its older
+/// builds, the ones built on others first. A layer that something else
+/// here is built on loses its name only: its files stay until that goes
+/// too (`kept`). Not while a picked wadspace runs, a picked layer builds,
+/// or a wadspace that isn't picked runs on a picked layer's image. The base
+/// isn't a layer: it stays.
+pub async fn delete_selected(
+    registry: &Registry,
+    builds: &Builds,
+    copies: &crate::copies::Copies,
+    backend: &dyn Backend,
+    pick: &StorageDelete,
+) -> Result<Freed, ApiError> {
+    if let Some(l) = pick.layers.iter().find(|l| !layer_ok(l)) {
+        return Err(bad(format!("{l:?} isn't a layer")));
+    }
+    let installed = registry.workspaces();
+    let picked: Vec<&Workspace> = pick
+        .wadspaces
+        .iter()
+        .map(|id| {
+            installed
+                .iter()
+                .find(|w| &w.id == id)
+                .ok_or_else(|| ApiError::new(ErrorCode::NotFound, format!("{id:?} isn't on this machine")))
+        })
+        .collect::<Result<_, _>>()?;
+    let runs = |w: &Workspace| registry.state(&w.id).is_some_and(|s| s.container == "running");
+    if let Some(w) = picked.iter().find(|w| runs(w)) {
+        return Err(ApiError::new(ErrorCode::Conflict, format!("{} is running: stop it first", w.name)));
+    }
+    if let Some(l) = pick.layers.iter().find(|l| builds.building(l)) {
+        return Err(ApiError::new(ErrorCode::Conflict, format!("{l} is building")));
+    }
+    for l in &pick.layers {
+        let image = wad_core::layers::image_ref(l);
+        let on: Vec<&str> = installed
+            .iter()
+            .filter(|w| w.image == image && !pick.wadspaces.contains(&w.id))
+            .map(|w| w.name.as_str())
+            .collect();
+        if !on.is_empty() {
+            return Err(ApiError::new(
+                ErrorCode::Conflict,
+                format!(
+                    "{} {} on {l}: pick {} too",
+                    on.join(", "),
+                    if on.len() == 1 { "runs" } else { "run" },
+                    if on.len() == 1 { "it" } else { "them" }
+                ),
+            ));
+        }
+    }
+    let mut freed = Freed::default();
+    // Wadspaces: off the machine, their home and the copies no one else has.
+    let homes = backend.volume_sizes().await.unwrap_or_default();
+    for w in &picked {
+        registry.remove_workspace(&w.id).await?;
+        let volume = format!("wad-{}-config", w.id);
+        freed.bytes += homes.iter().find(|(n, _)| *n == volume).map(|(_, b)| *b).unwrap_or(0);
+        if let Err(e) = backend.remove_volume(&volume).await {
+            tracing::warn!("{volume} stays: {e}");
+        }
+        for p in &w.projects {
+            if copies.delete(&p.id).is_ok() {
+                tracing::info!("removed the copy {} ({} had it)", p.id, w.name);
+            }
+        }
+        freed.uninstalled.push(w.name.clone());
+    }
+    // Layers: each one's builds, those built on others first.
+    let all = layer_images(backend).await?;
+    let depth = |l: &str| {
+        let mut n = 0;
+        let mut at = all.iter().find(|(x, i)| x == l && current(x, i)).map(|(_, i)| from_of(i).to_string());
+        while let Some(id) = at {
+            n += 1;
+            at = all.iter().find(|(_, i)| i.id == id).map(|(_, i)| from_of(i).to_string());
+        }
+        n
+    };
+    let mut layers: Vec<&String> = pick.layers.iter().collect();
+    layers.sort_by_key(|l| std::cmp::Reverse(depth(l)));
+    for l in layers {
+        let mut builds_of: Vec<&ImageInfo> = all.iter().filter(|(x, _)| x == l).map(|(_, i)| i).collect();
+        // The older builds first, then the one its name points at.
+        builds_of.sort_by_key(|i| current(l, i));
+        for i in builds_of {
+            let bytes = own_bytes(backend, i).await;
+            match backend.remove_image_id(&i.id).await {
+                Ok(true) => {
+                    freed.bytes += bytes;
+                    freed.removed.push(if current(l, i) { l.clone() } else { i.id.clone() });
+                }
+                Ok(false) => {}
+                // Something here is built on it: the name goes, the files stay with that.
+                Err(_) if current(l, i) => {
+                    backend.remove_image(&wad_core::layers::image_ref(l)).await.map_err(internal)?;
+                    freed.kept.push(l.clone());
+                }
+                Err(e) => tracing::info!("an old build of {l} stays ({}): {e}", i.id),
+            }
+        }
+    }
+    tracing::info!(?freed, "removed from the disk");
+    Ok(freed)
+}
+
+/// Older builds nothing needs, removed (POST /v1/storage/prune). One a
+/// container still runs on stays (for next time).
+pub async fn prune(backend: &dyn Backend) -> Result<Freed, ApiError> {
+    let mut freed = Freed::default();
+    for (_, i) in leftovers(backend).await? {
+        let bytes = own_bytes(backend, &i).await;
+        match backend.remove_image_id(&i.id).await {
+            Ok(true) => {
+                freed.bytes += bytes;
+                freed.removed.push(i.id);
+            }
+            Ok(false) => {}
+            Err(e) => tracing::info!("an old build stays for now ({}): {e}", i.id),
+        }
+    }
+    Ok(freed)
 }
 
 /// PUT /v1/wadspaces/{id}: a wadspace and the layers it's on.

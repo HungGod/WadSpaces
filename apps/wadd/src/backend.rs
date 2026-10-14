@@ -107,6 +107,15 @@ pub trait Backend: Send + Sync + 'static {
     async fn remove_image(&self, _image: &str) -> Result<bool, String> {
         Err("no podman".into())
     }
+    /// Removes an image by id, every name it has; an error while anything
+    /// uses it. False if there was none.
+    async fn remove_image_id(&self, _id: &str) -> Result<bool, String> {
+        Err("no podman".into())
+    }
+    /// Removes a named volume and its files. False if there was none.
+    async fn remove_volume(&self, _name: &str) -> Result<bool, String> {
+        Err("no podman".into())
+    }
 }
 
 /// The machine as wadd's config describes it: podman's socket, systemd (the
@@ -373,6 +382,14 @@ impl Backend for Real {
 
     async fn remove_image(&self, image: &str) -> Result<bool, String> {
         self.podman.remove_image(image).await.map_err(|e| e.to_string())
+    }
+
+    async fn remove_image_id(&self, id: &str) -> Result<bool, String> {
+        self.podman.remove_image_id(id).await.map_err(|e| e.to_string())
+    }
+
+    async fn remove_volume(&self, name: &str) -> Result<bool, String> {
+        self.podman.remove_volume(name).await.map_err(|e| e.to_string())
     }
 
     async fn github_token(&self) -> Option<String> {

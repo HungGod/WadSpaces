@@ -287,6 +287,17 @@ impl Podman {
         }
     }
 
+    /// Removes an image by id, all its names with it; an error while
+    /// anything uses it (a container, an image built on it). False if there was none.
+    pub async fn remove_image_id(&self, id: &str) -> Result<bool, Error> {
+        let res = self.send(Method::DELETE, &format!("/images/{}", segment(id)), None).await?;
+        match res.status() {
+            StatusCode::NOT_FOUND => Ok(false),
+            s if s.is_success() => Ok(true),
+            _ => Err(Self::status_error(&format!("remove image {id}"), res).await),
+        }
+    }
+
     pub async fn inspect_container(&self, name: &str) -> Result<Option<Value>, Error> {
         self.get_json(&format!("inspect {name}"), &format!("/containers/{}/json", segment(name))).await
     }
@@ -313,6 +324,16 @@ impl Podman {
                 Some((v.get("VolumeName")?.as_str()?.to_string(), v.get("Size").and_then(Value::as_u64).unwrap_or(0)))
             })
             .collect())
+    }
+
+    /// Removes a named volume and its files. False if there was none.
+    pub async fn remove_volume(&self, name: &str) -> Result<bool, Error> {
+        let res = self.send(Method::DELETE, &format!("/volumes/{}", segment(name)), None).await?;
+        match res.status() {
+            StatusCode::NOT_FOUND => Ok(false),
+            s if s.is_success() => Ok(true),
+            _ => Err(Self::status_error(&format!("remove volume {name}"), res).await),
+        }
     }
 
     /// Where a named volume's files are on the host; None if there's no such volume.

@@ -40,6 +40,11 @@ impl Storage {
         r
     }
 
+    /// What changed on the disk (images removed): measured again next time.
+    pub async fn forget(&self) {
+        *self.last.lock().await = None;
+    }
+
     async fn measure(&self, backend: &Arc<dyn Backend>, registry: &Registry) -> Report {
         let base_ref = wad_core::spec::DEFAULT_BASE_IMAGE;
         let base = match backend.image_info(base_ref).await {
@@ -64,6 +69,21 @@ impl Storage {
                 own_bytes: me.size.saturating_sub(under),
             });
         }
+        let mut leftovers = Vec::new();
+        for (layer, i) in crate::images::leftovers(backend.as_ref()).await.unwrap_or_default() {
+            let from = i.labels.get(crate::builds::FROM_LABEL).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let under = match backend.image_info(&from).await {
+                Ok(Some(u)) => u.size,
+                _ => 0,
+            };
+            leftovers.push(LayerBytes {
+                layer,
+                id: i.id,
+                from,
+                bytes: i.size,
+                own_bytes: i.size.saturating_sub(under),
+            });
+        }
         let sizes = backend.volume_sizes().await.unwrap_or_default();
         let homes = registry
             .workspaces()
@@ -81,7 +101,7 @@ impl Storage {
             .filter_map(|e| Some(CopyBytes { id: e.file_name().into_string().ok()?, bytes: dir_bytes(&e.path()) }))
             .collect();
         let disk = disk_of(backend).await;
-        Report { disk, base, layers, homes, copies, measured_at: now() }
+        Report { disk, base, layers, leftovers, homes, copies, measured_at: now() }
     }
 }
 

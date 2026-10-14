@@ -237,7 +237,45 @@ impl Backend for Fake {
     }
     async fn remove_image(&self, image: &str) -> Result<bool, String> {
         self.with(|m| m.calls.push(format!("rmi {image}")));
-        Ok(self.0.lock().unwrap().images.remove(image))
+        let mut m = self.0.lock().unwrap();
+        // An image built on it keeps it: only the name goes (as podman untags).
+        let id = m.image_ids.get(image).cloned().unwrap_or_else(|| format!("{:x<64}", image.len()));
+        let needed = m.image_labels.iter().any(|(n, l)| {
+            n != image && m.images.contains(n) && l.get("io.wadspaces.from").and_then(|v| v.as_str()) == Some(&id)
+        });
+        if needed && m.images.remove(image) {
+            let left = format!("<none>@{id}");
+            if let Some(v) = m.image_ids.remove(image) {
+                m.image_ids.insert(left.clone(), v);
+            }
+            if let Some(v) = m.image_labels.remove(image) {
+                m.image_labels.insert(left.clone(), v);
+            }
+            if let Some(v) = m.image_sizes.remove(image) {
+                m.image_sizes.insert(left.clone(), v);
+            }
+            m.images.insert(left);
+            return Ok(true);
+        }
+        Ok(m.images.remove(image))
+    }
+    async fn remove_image_id(&self, id: &str) -> Result<bool, String> {
+        self.with(|m| m.calls.push(format!("rmi --id {id}")));
+        let mut m = self.0.lock().unwrap();
+        let id_of =
+            |m: &Machine, name: &str| m.image_ids.get(name).cloned().unwrap_or_else(|| format!("{:x<64}", name.len()));
+        let Some(name) = m.images.iter().find(|n| id_of(&m, n) == id).cloned() else { return Ok(false) };
+        if m.image_labels.iter().any(|(n, l)| {
+            *n != name && m.images.contains(n) && l.get("io.wadspaces.from").and_then(|v| v.as_str()) == Some(id)
+        }) {
+            return Err(format!("image {id} has dependent child images"));
+        }
+        m.images.remove(&name);
+        Ok(true)
+    }
+    async fn remove_volume(&self, name: &str) -> Result<bool, String> {
+        self.with(|m| m.calls.push(format!("volume rm {name}")));
+        Ok(self.0.lock().unwrap().volume_bytes.remove(name).is_some())
     }
     async fn workspace_of(&self, container: &str) -> Option<String> {
         self.0.lock().unwrap().labels.get(container).cloned()

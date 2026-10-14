@@ -500,6 +500,65 @@ async fn the_disk_report_counts_each_layers_own_share_and_each_home() {
     assert!(rows.iter().any(|r| r.layer == "base" && r.image_ref == BASE), "{rows:?}");
 }
 
+#[tokio::test]
+async fn whats_picked_comes_off_the_disk_and_nothing_else() {
+    use wad_proto::v1::StorageDelete;
+    let e = env().await;
+    let l = wait(&e, &e.builds.create_layer(&custom(dev(), plus())).unwrap().id).await;
+    assert_eq!(l.build.status, BuildStatus::Done, "{l:?}");
+    let req = Install { wadspace: wadspace("academy"), template: dev(), extensions: Some(plus()), tz: None };
+    images::install(&e.reg, &e.fake, "academy", &req).await.unwrap();
+    e.fake.with(|m| {
+        m.volume_bytes.insert("wad-academy-config".into(), 700);
+        m.image_sizes.insert(T_REF.into(), 5_000);
+        m.image_sizes.insert(C_REF.into(), 5_600);
+        m.image_sizes.insert(BASE.into(), 3_000);
+    });
+    let copies = wadd::copies::Copies::new(
+        &e.state,
+        vec![],
+        1000,
+        Arc::new(|| ("local".into(), "Surface".into())),
+        Arc::new(wadd::drives::Drives::new(1000, Arc::new(wadd::drives::System), false)),
+        e.reg.clone(),
+    );
+    let pick = |layers: &[&str], wadspaces: &[&str]| StorageDelete {
+        layers: layers.iter().map(|x| x.to_string()).collect(),
+        wadspaces: wadspaces.iter().map(|x| x.to_string()).collect(),
+    };
+    let images_here = || e.fake.0.lock().unwrap().images.clone();
+
+    // The template alone: its name goes; its files stay, the Extensions are built on it.
+    let f = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &pick(&["template:dev"], &[])).await.unwrap();
+    assert_eq!((f.removed.len(), f.kept.clone(), f.bytes), (0, vec!["template:dev".to_string()], 0));
+    assert!(!images_here().contains(T_REF) && images_here().contains(C_REF));
+    assert!(e.reg.workspaces().iter().any(|w| w.id == "academy"));
+
+    // The Extensions, with a wadspace on them that isn't picked: refused.
+    let err = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &pick(&["custom:dev-plus"], &[]))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict);
+    assert!(err.message.contains("pick it too"), "{}", err.message);
+
+    // With it: the wadspace off the machine, its files gone; the image gone.
+    let f = images::delete_selected(&e.reg, &e.builds, &copies, &e.fake, &pick(&["custom:dev-plus"], &["academy"]))
+        .await
+        .unwrap();
+    assert_eq!(f.removed, vec!["custom:dev-plus".to_string()]);
+    assert_eq!(f.uninstalled.len(), 1);
+    assert_eq!(f.bytes, 700 + 600);
+    assert!(e.reg.workspaces().iter().all(|w| w.id != "academy"));
+    assert!(e.fake.0.lock().unwrap().calls.contains(&"volume rm wad-academy-config".to_string()));
+
+    // The template's old files are needed by nothing now: an old build, pruned.
+    let left = images::leftovers(&e.fake).await.unwrap();
+    assert_eq!(left.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(), ["template:dev"]);
+    let f = images::prune(&e.fake).await.unwrap();
+    assert_eq!((f.removed.len(), f.bytes), (1, 2_000));
+    assert!(images_here().iter().all(|i| i == BASE));
+}
+
 #[test]
 fn a_wadspace_cannot_take_an_apps_id() {
     let current = vec![common::app("terminal", "/usr/bin/foot"), ws("w", "i", Display::Host, None)];

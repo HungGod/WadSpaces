@@ -134,6 +134,8 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/wadspaces/{id}", axum::routing::put(wadspace_install))
         .route("/v1/images", get(images))
         .route("/v1/storage", get(storage))
+        .route("/v1/storage/prune", post(storage_prune))
+        .route("/v1/storage/delete", post(storage_delete))
         .route("/v1/images/build", post(image_build))
         .route("/v1/images/{layer}", delete(image_delete))
         .route("/v1/workspaces/{id}/start", post(start))
@@ -591,6 +593,24 @@ async fn image_build(
 async fn image_delete(State(app): State<Arc<AppState>>, Path(layer): Path<String>) -> Result<StatusCode, Failure> {
     crate::images::delete(&app.registry, &app.builds, app.registry_backend.as_ref(), &layer).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// What's picked (layers, wadspaces), off this machine's disk.
+async fn storage_delete(
+    State(app): State<Arc<AppState>>,
+    Json(pick): Json<wad_proto::v1::StorageDelete>,
+) -> Result<Json<wad_proto::v1::Freed>, Failure> {
+    let backend = app.registry_backend.as_ref();
+    let freed = crate::images::delete_selected(&app.registry, &app.builds, &app.copies, backend, &pick).await?;
+    app.storage.forget().await;
+    Ok(Json(freed))
+}
+
+/// Older builds of layers that nothing needs, removed.
+async fn storage_prune(State(app): State<Arc<AppState>>) -> Result<Json<wad_proto::v1::Freed>, Failure> {
+    let freed = crate::images::prune(app.registry_backend.as_ref()).await?;
+    app.storage.forget().await;
+    Ok(Json(freed))
 }
 
 /// Installs a wadspace as a workspace on its layer's image (or updates it).
