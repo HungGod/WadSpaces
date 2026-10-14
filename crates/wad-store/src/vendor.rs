@@ -16,7 +16,7 @@ use std::path::Path;
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use wad_proto::v1::Workspace;
+use wad_proto::v1::{Kind, Workspace};
 
 use crate::Error;
 use crate::workspaces;
@@ -98,12 +98,15 @@ pub struct Applied {
 }
 
 /// Applies the image's workspaces that are new or changed to `list`,
-/// recording them in `book`.
+/// recording them in `book`. The machine's own apps (WadBrowser, the
+/// terminal) are the system's: one missing from the list comes back, even
+/// unchanged.
 pub fn apply(list: &mut Vec<Workspace>, book: &mut Book, vendor: &[VendorWorkspace]) -> Applied {
     let mut out = Applied::default();
     for v in vendor {
         let id = &v.workspace.id;
-        if book.get(id) == Some(&v.digest) {
+        let lost_app = v.workspace.kind == Kind::App && !list.iter().any(|x| &x.id == id);
+        if book.get(id) == Some(&v.digest) && !lost_app {
             continue;
         }
         let mut next = list.clone();

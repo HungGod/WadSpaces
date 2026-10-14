@@ -330,6 +330,10 @@ async fn workspace_put(
 
 /// Removes a workspace, stopping it first if it runs.
 async fn workspace_delete(State(app): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, Failure> {
+    // The machine's own apps are the system's: they stay.
+    if let Some(w) = app.registry.workspaces().into_iter().find(|w| w.id == id && w.kind == wad_proto::v1::Kind::App) {
+        return Err(Failure(ApiError::new(ErrorCode::Conflict, format!("{} is one of this machine's own apps: it stays", w.name))));
+    }
     if app.registry.state(&id).is_some_and(|s| s.container == "running") {
         app.view.stop(&id).await?;
     }

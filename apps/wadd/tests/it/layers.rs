@@ -684,3 +684,4 @@ async fn a_stack_installs_on_its_extensions_with_its_keys() {
     let bare = Install { wadspace: bare, template: dev(), extensions: Some(plus()), tz: None };
     assert!(images::install(&e.reg, &e.fake, "academy", &bare).await.unwrap_err().message.contains("customization"));
 }
+

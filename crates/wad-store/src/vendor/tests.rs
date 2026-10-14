@@ -143,3 +143,22 @@ fn a_line_break_in_a_value_is_refused() {
     let ok = serde_json::json!({"id": "w", "name": "Wad Creator – dev", "image": "i", "display": "host"});
     assert!(crate::workspaces::check_workspaces(vec![ok]).is_ok());
 }
+
+#[test]
+fn the_machines_own_apps_come_back_when_lost_and_wadspaces_dont() {
+    let d = tempfile::tempdir().unwrap();
+    write(d.path(), "terminal.toml", "name = \"WadTerminal\"\nkind = \"app\"\nexec = [\"/usr/bin/foot\"]\n");
+    write(d.path(), "writing.toml", WRITING);
+    let v = read(d.path()).unwrap();
+    let (mut list, mut book) = (vec![], Book::default());
+    apply(&mut list, &mut book, &v);
+    assert_eq!(list.len(), 2);
+    // Both gone from the machine's list (however that happened).
+    list.clear();
+    let a = apply(&mut list, &mut book, &v);
+    // The terminal is the system's: back. A wadspace removed stays removed.
+    assert_eq!(a.changed, ["terminal"]);
+    assert_eq!(list.iter().map(|w| w.id.as_str()).collect::<Vec<_>>(), ["terminal"]);
+    // And then it's there: nothing to do.
+    assert!(apply(&mut list, &mut book, &v).changed.is_empty());
+}
