@@ -961,7 +961,41 @@ body.is-dragging * {
   gap: 10px;
 }
 .wb .deleted-item {
+  position: relative;
   cursor: grab;
+}
+/* Its bin, in the corner: deleted for good. */
+.wb .deleted-forever {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  background: var(--surface-2);
+}
+.wb .deleted-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wb .btn-ghost.danger-text.sure {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.wb .deleted-wadspace {
+  cursor: default;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.wb .deleted-wadspace .deleted-name {
+  display: block;
+  font-weight: 600;
+}
+.wb .deleted-row-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
 }
 .wb .deleted-item small {
   display: block;

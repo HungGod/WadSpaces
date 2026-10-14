@@ -110,6 +110,8 @@ interface State extends Snapshot {
   canStart(modules: Module[], base?: TemplateModule[]): { ok: boolean; why?: string };
   /** Deletes one module; a grab of several asks first, then deletes the whole stack. */
   deleteModules(modules: Module[], from: ModuleSource): void;
+  /** Recently deleted entries gone for good (by id), with the documents behind them that nothing else uses. */
+  deleteForever(ids: string[]): Promise<void>;
   /** Deletes these modules (by id): the confirmed path. */
   deleteIds(ids: string[]): void;
   toggleSelect(id: string): void;
@@ -257,6 +259,9 @@ export const unbuiltOf = (stack: Stack) => modulesOf(stack).filter((m) => buildS
 
 /** The modules in a stack built on an older base (or template): building again updates them. */
 export const updatesOf = (stack: Stack) => modulesOf(stack).filter((m) => buildStateOf(m) === "update");
+
+/** What building a stack does: its images not built, and those with an update. */
+export const toBuildOf = (stack: Stack) => modulesOf(stack).filter((m) => buildStateOf(m) !== "built");
 
 /** Whether a stack's image is building. */
 export const isBuilding = (stack: Stack) => modulesOf(stack).some((m) => {
@@ -569,6 +574,42 @@ export const useBoard = create<State>()(
           get().toast(`Moved ${title(modules[0])} to Recently deleted`, true);
         },
 
+        async deleteForever(ids) {
+          const s = get();
+          const going = s.deleted.filter((d) => ids.includes(d.id));
+          const staying = s.deleted.filter((d) => !ids.includes(d.id));
+          set({ deleted: staying });
+          // A document something still has (a stack on the board, an entry left here) stays.
+          const kept = (layer: "template" | "extensions", ref: string) =>
+            s.stacks.some((st) => (layer === "template" ? st.templates.some((t) => t.ref === ref) : st.extensions?.ref === ref)) ||
+            staying.some((d) => d.what === "module" && d.module.layer === layer && d.module.ref === ref);
+          const app = useApp.getState();
+          const purge: { kind: "wadspace" | "extensions" | "template"; id: string; depth: number }[] = [];
+          for (const d of going) {
+            if (d.what !== "module") continue;
+            const m = d.module;
+            if (m.layer === "customization") {
+              const stackId = m.id.split("@")[1];
+              const w = app.wadspaces.find((x) => x.id === stackId);
+              if (w?.deletedAt && !s.stacks.some((st) => st.id === stackId)) purge.push({ kind: "wadspace", id: stackId, depth: 0 });
+            } else if (m.ref && !kept(m.layer, m.ref)) {
+              // Templates top of the chain first: one under another goes after it.
+              let depth = 0;
+              for (let t = app.templates.find((x) => x.id === m.ref); t?.parent; t = app.templates.find((x) => x.id === t!.parent)) depth--;
+              purge.push({ kind: m.layer === "template" ? "template" : "extensions", id: m.ref, depth: m.layer === "template" ? 10 + depth : 1 });
+            }
+          }
+          purge.sort((a, b) => a.depth - b.depth);
+          const failed: string[] = [];
+          for (const p of [...new Map(purge.map((p) => [`${p.kind}:${p.id}`, p])).values()]) {
+            try {
+              await app.purge(p.kind, p.id);
+            } catch (e) {
+              failed.push((e as Error).message);
+            }
+          }
+          get().toast(failed.length ? `Deleted for good, except: ${failed.join(" ")}` : `Deleted ${going.length === 1 ? "it" : `${going.length}`} for good`);
+        },
         deleteIds(ids) {
           const s = get();
           let stacks = s.stacks;
@@ -769,8 +810,9 @@ export const useBoard = create<State>()(
         },
         buildAll() {
           const s = get();
-          const waiting = s.stacks.filter((st) => unbuiltOf(st).length && !isBuilding(st));
-          if (!waiting.length) return get().toast(s.stacks.some(isBuilding) ? "Everything else is built" : "Everything's built");
+          // Not built, or built on an older base: building brings them up to date.
+          const waiting = s.stacks.filter((st) => toBuildOf(st).length && !isBuilding(st));
+          if (!waiting.length) return get().toast(s.stacks.some(isBuilding) ? "Everything else is built and up to date" : "Everything's built and up to date");
           const noTemplate = waiting.filter((st) => !appsOf(st).length);
           const broken = waiting.filter((st) => appsOf(st).length && problemsOf(st).length);
           const unnamed = waiting.filter((st) => appsOf(st).length && !problemsOf(st).length && !lookOf(st)?.name.trim());
@@ -778,7 +820,10 @@ export const useBoard = create<State>()(
           for (const st of ready) get().buildStack(st.id);
           const list = (xs: Stack[], what: string) => (xs.length ? [`${xs.map(stackName).join(", ")} need${xs.length === 1 ? "s" : ""} ${what}`] : []);
           const skipped = [...list(broken, "fixing"), ...list(noTemplate, "a template"), ...list(unnamed, "a named Customization")];
-          get().toast(`Building ${ready.length} wadspace${ready.length === 1 ? "" : "s"}${skipped.length ? `; skipped: ${skipped.join("; ")}` : ""}`);
+          const updating = ready.filter((st) => !unbuiltOf(st).length).length;
+          get().toast(
+            `Building ${ready.length} wadspace${ready.length === 1 ? "" : "s"}${updating ? ` (${updating} an update)` : ""}${skipped.length ? `; skipped: ${skipped.join("; ")}` : ""}`,
+          );
         },
         renameKey(id, name) {
           name = name.trim();

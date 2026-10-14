@@ -96,6 +96,25 @@ describe("the Builder's board", () => {
   });
 });
 
+describe("Recently deleted", () => {
+  it("deletes a stack for good, with the template only it used", async () => {
+    await open("/builder");
+    await waitFor(() => expect(useBoard.getState().stacks).toHaveLength(2));
+    const cosmic = useBoard.getState().stacks.find((s) => s.id === "cosmic-bodybuilding")!;
+    act(() => useBoard.getState().deleteIds([cosmic.customization!.id, ...cosmic.templates.map((t) => t.id)]));
+    // Soft-deleted: in Recently deleted, its document marked.
+    await waitFor(() => expect((fake.wadspaces.get("cosmic-bodybuilding") as Wadspace).deletedAt).toBeTruthy());
+    const ids = useBoard.getState().deleted.map((d) => d.id);
+    expect(ids).toHaveLength(2);
+    await act(() => useBoard.getState().deleteForever(ids));
+    // For good: the wadspace, and Writing (no other stack has it); Dev stays.
+    await waitFor(() => expect(fake.wadspaces.has("cosmic-bodybuilding")).toBe(false));
+    expect(fake.templates.has("writing")).toBe(false);
+    expect(fake.templates.has("dev")).toBe(true);
+    expect(useBoard.getState().deleted).toEqual([]);
+  });
+});
+
 describe("unsaved work on the board", () => {
   const stackNames = () => [...document.querySelectorAll(".wb .stacks > .stack .stack-name")].map((e) => e.textContent);
   const drafts = () => [...fake.wadspaces.values()].filter((w) => w.version === 3 && w.draftTemplate);

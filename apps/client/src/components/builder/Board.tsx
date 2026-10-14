@@ -13,9 +13,12 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, ChevronLeft, ChevronRight, Eye, Hammer, Plus, RefreshCw, Trash2, Undo2, Wrench, X } from "lucide-react";
 import { app, problemsOf, subFits } from "./catalog";
 import { BLANK_WALLPAPER, LAYER_INFO, appsOf, lookOf, fitTemplates, moduleName, modulesOf, stackName, statusOf, uid, type AnySub, type AppSub, type AppSubKey, type CustomSub, type Layer, type Module, type Stack, type TemplateModule } from "./model";
-import { NEW, buildStateOf, grab, isBuilding, nameClash, unbuiltOf, updatesOf, useBoard, useImages, type ModuleSource } from "./store";
+import { NEW, buildStateOf, grab, isBuilding, nameClash, toBuildOf, unbuiltOf, updatesOf, useBoard, useImages, type ModuleSource } from "./store";
 import { useDraggable, useDropTarget, useDrag, type Payload } from "./drag";
 import { AppSubWindow, BlankCustomization, BlankExtensions, BlankWindow, ChipFace, PromptFace, type Prompt, LAYER_ICON, ModuleFace, Pile, TrayFace, subSummary } from "./faces";
+import { useApp } from "@/lib/store";
+import { wadspaceName } from "@/data/layers";
+import { timeAgo } from "@/lib/format";
 
 type Rect = { x: number; y: number; w: number; h: number };
 const rectOf = (el: Element | null): Rect => {
@@ -615,8 +618,8 @@ function BuildBucket() {
   const stacks = useBoard((s) => s.stacks);
   useImages();
   const building = stacks.filter(isBuilding).map((st) => st.id);
-  // What a click builds: stacks not built yet that can be (a template to build on, nothing to fix, a named customization).
-  const waiting = stacks.filter((st) => unbuiltOf(st).length && !building.includes(st.id));
+  // What a click builds: stacks not built yet, or with an update, that can be (a template to build on, nothing to fix, a named customization).
+  const waiting = stacks.filter((st) => toBuildOf(st).length && !building.includes(st.id));
   const buildable = waiting.filter((st) => appsOf(st).length && !problemsOf(st).length && lookOf(st)?.name.trim());
   const skipped = waiting.length - buildable.length;
   const count = selected ? buildable.filter((st) => modulesOf(st).some((m) => picked.includes(m.id))).length : buildable.length;
@@ -629,8 +632,8 @@ function BuildBucket() {
       const stack = b.stacks.find((st) => st.id === (p.from as { stackId: string }).stackId);
       if (!stack) return null;
       if (building.includes(stack.id)) return { ok: false, why: `${stackName(stack)} is building` };
-      const todo = unbuiltOf(stack).length;
-      if (!todo) return { ok: false, why: `${stackName(stack)} is already built` };
+      const todo = toBuildOf(stack).length;
+      if (!todo) return { ok: false, why: `${stackName(stack)} is built and up to date` };
       if (!appsOf(stack).length) return { ok: false, why: `${stackName(stack)} needs a template to build on` };
       if (problemsOf(stack).length) return { ok: false, why: `Fix ${stackName(stack)}'s configuration first` };
       if (!lookOf(stack)?.name.trim()) return { ok: false, why: `${stackName(stack)} needs a named Customization` };
@@ -647,7 +650,7 @@ function BuildBucket() {
       data-tour="build"
       className={`bucket bucket-build${selected ? " armed" : ""}${cls}`}
       onClick={() => (selected ? b.buildSelected() : b.buildAll())}
-      title={selected ? "Build the stacks of what's selected" : "Click to build everything not built, or drop a wadspace here to build just it"}
+      title={selected ? "Build the stacks of what's selected" : "Click to build everything not built or with an update, or drop a wadspace here to build just it"}
     >
       <Hammer size={18} />
       <span className="bucket-name">
@@ -663,7 +666,7 @@ function BuildBucket() {
               : "Or drop a wadspace to build just it"
             : skipped
               ? `${skipped} need${skipped === 1 ? "s" : ""} fixing or a template first`
-              : "Everything's built"}
+              : "Everything's built and up to date"}
       </small>
     </div>
   );
@@ -723,20 +726,67 @@ function DeleteBucket() {
 
 function RecentlyDeleted({ onClose }: { onClose(): void }) {
   const deleted = useBoard((s) => s.deleted);
+  const wadspaces = useApp((s) => s.wadspaces);
+  // Wadspaces deleted with no entry here (before, or elsewhere): restored or deleted from here too.
+  const listed = new Set(deleted.flatMap((d) => (d.what === "module" && d.module.layer === "customization" ? [d.module.id.split("@")[1]] : [])));
+  const orphans = wadspaces.filter((w) => w.deletedAt && !listed.has(w.id));
+  const [emptying, setEmptying] = useState(false);
+  const empty = () => {
+    if (!emptying) return setEmptying(true);
+    setEmptying(false);
+    void useBoard.getState().deleteForever(deleted.map((d) => d.id));
+    for (const w of orphans) void useApp.getState().purge("wadspace", w.id).catch(() => {});
+  };
   return (
     <div className="deleted-pop" onClick={(e) => e.stopPropagation()}>
       <div className="deleted-head">
         <span>Recently deleted</span>
-        <button className="icon-btn" onClick={onClose}>
-          <X size={14} />
-        </button>
+        <span className="deleted-actions">
+          {(deleted.length > 0 || orphans.length > 0) && (
+            <button className={`btn-ghost danger-text${emptying ? " sure" : ""}`} onClick={empty} onMouseLeave={() => setEmptying(false)} title="Delete everything here for good">
+              <Trash2 size={13} /> {emptying ? "Click again: for good" : "Empty"}
+            </button>
+          )}
+          <button className="icon-btn" onClick={onClose}>
+            <X size={14} />
+          </button>
+        </span>
       </div>
-      <p className="rail-note">Drag one back onto a stack, or between two stacks, to restore it.</p>
-      {deleted.length === 0 && <p className="empty-note">Nothing here.</p>}
+      <p className="rail-note">Drag one back onto a stack, or between two stacks, to restore it. The bin deletes it for good: its document, and its image when nothing else uses them.</p>
+      {deleted.length === 0 && orphans.length === 0 && <p className="empty-note">Nothing here.</p>}
       <div className="deleted-list" data-autoscroll>
         {deleted.map((d) => (d.what === "module" ? <DeletedModule key={d.id} id={d.id} module={d.module} from={d.from} /> : <DeletedSub key={d.id} id={d.id} sub={d.sub} from={d.from} />))}
+        {orphans.map((w) => (
+          <div key={w.id} className="deleted-item deleted-wadspace">
+            <span className="deleted-name">{wadspaceName(w)}</span>
+            <small>a wadspace, deleted {timeAgo(w.deletedAt!)}</small>
+            <span className="deleted-row-actions">
+              <button className="btn-ghost" onClick={() => void useApp.getState().restore("wadspace", w.id)}>
+                <Undo2 size={12} /> Restore
+              </button>
+              <button className="icon-btn danger-text" title="Delete for good" aria-label={`Delete ${wadspaceName(w)} for good`} onClick={() => void useApp.getState().purge("wadspace", w.id)}>
+                <Trash2 size={13} />
+              </button>
+            </span>
+          </div>
+        ))}
       </div>
     </div>
+  );
+}
+
+/** A Recently deleted entry's bin: gone for good (the click doesn't start a drag). */
+function ForeverButton({ id, what }: { id: string; what: string }) {
+  return (
+    <button
+      className="icon-btn danger-text deleted-forever"
+      title="Delete for good"
+      aria-label={`Delete ${what} for good`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={() => void useBoard.getState().deleteForever([id])}
+    >
+      <Trash2 size={13} />
+    </button>
   );
 }
 
@@ -748,6 +798,7 @@ function DeletedModule({ id, module, from }: { id: string; module: Module; from:
     <div className="deleted-item" onPointerDown={drag.onPointerDown}>
       {face}
       <small>from {from}</small>
+      <ForeverButton id={id} what={moduleName(module)} />
     </div>
   );
 }
@@ -758,6 +809,7 @@ function DeletedSub({ id, sub, from }: { id: string; sub: AnySub; from: string }
     <div className="deleted-item" onPointerDown={drag.onPointerDown}>
       <ChipFace sub={sub} />
       <small>from {from}</small>
+      <ForeverButton id={id} what={subSummary(sub).title} />
     </div>
   );
 }
