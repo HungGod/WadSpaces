@@ -140,7 +140,14 @@ export class CloudBackend implements Backend {
     this.emit("user");
     if (!uid) return;
 
-    let pending = 4;
+    // Loaded once each watched list has answered (or failed): counted from
+    // the list itself, so one dropped or added can't leave `loaded` waiting.
+    const watched: [Query<DocumentData>, Map<string, DocumentData>, Topic][] = [
+      [query(collection(db, "wadspaces"), where("owner", "==", uid)), this.owned, "wadspaces"],
+      [collection(db, "users", uid, "machines"), this.machines, "machines"],
+      [collection(db, "users", uid, "projects"), this.projects, "projects"],
+    ];
+    let pending = watched.length;
     let done!: () => void;
     this.loaded = new Promise((r) => (done = r));
     const first = () => --pending === 0 && done();
@@ -170,9 +177,7 @@ export class CloudBackend implements Backend {
         ),
       );
     };
-    watch(query(collection(db, "wadspaces"), where("owner", "==", uid)), this.owned, "wadspaces");
-    watch(collection(db, "users", uid, "machines"), this.machines, "machines");
-    watch(collection(db, "users", uid, "projects"), this.projects, "projects");
+    for (const [q, into, topic] of watched) watch(q, into, topic);
     this.unsubs.push(onSnapshot(doc(db, "profiles", uid), () => this.emit("session")));
     // The repo list your machines share; not part of `loaded` (only the Projects page needs it).
     let seen!: () => void;
