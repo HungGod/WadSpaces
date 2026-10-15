@@ -8,6 +8,7 @@
 !host/usr
 !.build/wadd
 !.build/client-app
+!.build/desktop
 !.build/hud
 !.build/wadbrowser
 !.build/assets
