@@ -5,6 +5,7 @@
 use gtk::{glib, prelude::*};
 use serde_json::Value;
 use wad_gtk::Icon;
+use wad_proto::v1::ImageRow;
 use wad_wadd_client::{Method, Wadd};
 
 use super::{badge, now, secs_of, section_head, time_ago, uptime};
@@ -174,6 +175,21 @@ pub fn page() -> gtk::Widget {
     sections.append(&yours);
     body.append(&sections);
 
+    // A build ending changes what's built: the images are read again.
+    let builds_seen: std::rc::Rc<std::cell::RefCell<String>> = std::rc::Rc::default();
+    let gw = grid.downgrade();
+    store().watch(&yours, Topic::ACTIVITY, move |s| {
+        // Only a build starting or ending (not its progress).
+        let key: String = s.builds.iter().map(|(b, _)| format!("{}:{:?};", b.id, b.status)).collect();
+        if *builds_seen.borrow() == key {
+            return;
+        }
+        let first = builds_seen.borrow().is_empty();
+        builds_seen.replace(key);
+        if let Some(g) = gw.upgrade().filter(|_| !first) {
+            glib::idle_add_local_once(move || refresh_images(&g));
+        }
+    });
     let watched = body.clone();
     store().watch(
         &watched,
@@ -432,6 +448,10 @@ fn your_wadspaces(grid: &gtk::Grid, s: &AppState) {
         grid.remove(&c);
     }
     let all: Vec<&Value> = s.wadspaces().into_iter().filter(|w| w["customization"].is_object()).collect();
+    if !all.is_empty() && !ASKED.with(|a| a.replace(true)) {
+        // Read once (the cards are drawn again with it).
+        refresh_images(grid);
+    }
     if all.is_empty() {
         let b = gtk::Button::new();
         b.add_css_class("first-wadspace");
@@ -459,54 +479,133 @@ fn your_wadspaces(grid: &gtk::Grid, s: &AppState) {
     }
 }
 
-/// One of their wadspaces: its picture (a click opens its stack in the
-/// Builder), its name, Launch and Edit.
+thread_local! {
+    /// The layer images here (what's built), read when Home first shows and
+    /// again when a build ends. None: not read yet.
+    static IMAGES: std::cell::RefCell<Option<std::collections::HashMap<String, ImageRow>>> =
+        const { std::cell::RefCell::new(None) };
+    /// They've been asked for.
+    static ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The images here, read again; then `grid`'s cards drawn again.
+fn refresh_images(grid: &gtk::Grid) {
+    let g = grid.downgrade();
+    glib::spawn_future_local(async move {
+        let rows = crate::pages::machines::get::<Vec<ImageRow>>("/v1/images".into()).await.unwrap_or_default();
+        IMAGES.with(|i| i.replace(Some(rows.into_iter().map(|r| (r.layer.clone(), r)).collect())));
+        if let Some(g) = g.upgrade() {
+            store().read_now(|s| your_wadspaces(&g, s));
+        }
+    });
+}
+
+/// What a card's left half does: launch it, or build it first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Go {
+    Launch,
+    Build,
+    Building,
+    Locked,
+}
+
+fn go_for(s: &AppState, w: &Value) -> Go {
+    let id = w["id"].as_str().unwrap_or_default();
+    if crate::pages::machines::locked(s, id) {
+        return Go::Locked;
+    }
+    let key = wad_core::layers::stack_image_key(w);
+    if !key.is_empty() && s.builds.iter().any(|(b, _)| !b.status.finished() && b.layer.as_deref() == Some(key.as_str()))
+    {
+        return Go::Building;
+    }
+    let lib = s.library.as_ref().map(|l| l.lib()).unwrap_or_default();
+    IMAGES.with(|i| match i.borrow().as_ref() {
+        // Not read yet: as it most likely is.
+        None => Go::Launch,
+        Some(_) if key.is_empty() => Go::Build,
+        Some(images) => match launch::image_state(&key, &lib, images) {
+            launch::ImageState::Built | launch::ImageState::Update => Go::Launch,
+            _ => Go::Build,
+        },
+    })
+}
+
+fn half(icon: &'static str, text: &str, class: &str) -> gtk::Button {
+    let b = gtk::Button::new();
+    b.add_css_class("card-half");
+    b.add_css_class(class);
+    let col = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    col.set_halign(gtk::Align::Center);
+    col.set_valign(gtk::Align::Center);
+    let i = if icon == "play" { Icon::filled(icon, 22) } else { Icon::new(icon, 22) };
+    i.set_halign(gtk::Align::Center);
+    col.append(&i);
+    col.append(&gtk::Label::new(Some(text)));
+    b.set_child(Some(&col));
+    b
+}
+
+/// One of their wadspaces: its picture, and over it while it's pointed at,
+/// Launch (Build, when its image isn't here) on one side and Edit on the
+/// other (a touch on either works without the pointer); its name under it.
 fn wadspace_card(s: &AppState, w: &Value) -> gtk::Widget {
     let id = w["id"].as_str().unwrap_or_default().to_string();
     let name = s.wadspace_name(w);
     let col = gtk::Box::new(gtk::Orientation::Vertical, 8);
     col.add_css_class("wadspace-card");
-    let pic = gtk::Button::new();
+    let pic = gtk::Overlay::new();
     pic.add_css_class("card-pic");
     let t = thumb(s, w);
     t.set_radius(16.0);
     t.add_css_class("card-thumb");
     pic.set_child(Some(&t));
-    pic.set_tooltip_text(Some(&format!("Edit {name} in the Builder")));
-    let i = id.clone();
-    pic.connect_clicked(move |_| crate::pages::builder::show_stack(&i, false));
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    actions.add_css_class("card-actions");
+    actions.set_homogeneous(true);
+    let go = go_for(s, w);
+    let left = match go {
+        Go::Launch => half("play", "Launch", "card-go"),
+        Go::Build => half("hammer", "Build", "card-go"),
+        Go::Building => half("hammer", "Building…", "card-go"),
+        Go::Locked => half("lock", "Locked", "card-go"),
+    };
+    left.set_tooltip_text(Some(&match go {
+        Go::Launch => format!("Launch {name}"),
+        Go::Build => format!("Build {name}: its image isn't on this machine yet"),
+        Go::Building => format!("{name} is building"),
+        Go::Locked => "Focus mode: locked until it ends".into(),
+    }));
+    left.set_sensitive(matches!(go, Go::Launch | Go::Build));
+    let (i, n) = (id.clone(), name.clone());
+    left.connect_clicked(move |b| {
+        b.set_sensitive(false);
+        let (b, i, n) = (b.clone(), i.clone(), n.clone());
+        glib::spawn_future_local(async move {
+            if go == Go::Build {
+                crate::tour::signal(crate::tour::Event::BuildStarted);
+                match launch::build_here(i).await {
+                    Ok(()) => crate::toast::show(&format!("Building {n}"), None, crate::toast::Tone::Info),
+                    Err(e) => crate::toast::error(&format!("Couldn't build {n}"), &e),
+                }
+            } else if let Err(e) = launch::launch(vec![RunItem::Wadspace(i)], None).await {
+                crate::toast::error("Couldn't launch", &e);
+            }
+            b.set_sensitive(true);
+        });
+    });
+    actions.append(&left);
+    let edit = half("pencil", "Edit", "card-edit");
+    edit.set_tooltip_text(Some(&format!("Edit {name} in the Builder")));
+    let i = id;
+    edit.connect_clicked(move |_| crate::pages::builder::show_stack(&i, false));
+    actions.append(&edit);
+    pic.add_overlay(&actions);
     col.append(&pic);
     let l = gtk::Label::new(Some(&name));
     l.add_css_class("row-title");
     l.set_xalign(0.0);
     l.set_ellipsize(gtk::pango::EllipsizeMode::End);
     col.append(&l);
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let locked = crate::pages::machines::locked(s, &id);
-    let go = ui::button("Launch", Some(if locked { "lock" } else { "play" }), Variant::Primary, Size::Sm);
-    go.set_valign(gtk::Align::Center);
-    if locked {
-        go.set_sensitive(false);
-        go.set_tooltip_text(Some("Focus mode: locked until it ends"));
-    }
-    let i = id.clone();
-    go.connect_clicked(move |b| {
-        b.set_sensitive(false);
-        let (b, i) = (b.clone(), i.clone());
-        glib::spawn_future_local(async move {
-            if let Err(e) = launch::launch(vec![RunItem::Wadspace(i)], None).await {
-                crate::toast::error("Couldn't launch", &e);
-            }
-            b.set_sensitive(true);
-        });
-    });
-    row.append(&go);
-    let edit = ui::button("Edit", Some("pencil"), Variant::Ghost, Size::Sm);
-    edit.set_tooltip_text(Some("Edit it in the Builder"));
-    edit.add_css_class("card-edit");
-    let i = id;
-    edit.connect_clicked(move |_| crate::pages::builder::show_stack(&i, false));
-    row.append(&edit);
-    col.append(&row);
     col.upcast()
 }

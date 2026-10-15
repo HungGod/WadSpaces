@@ -537,17 +537,28 @@ button.cta:hover { color: var(--fg); }
 }
 .thumb-blank { border-radius: 12px; background: var(--surface-2); }
 
-button.card-pic {
-  all: unset;
-  border-radius: 16px;
-}
 .wadspace-card wad-desktop.card-thumb {
   box-shadow: 0 20px 60px -20px var(--shadow), 0 0 0 1px var(--line-strong);
   border-radius: 16px;
-  transition: transform 150ms;
 }
-button.card-pic:hover wad-desktop.card-thumb { transform: translateY(-2px); }
-button.btn.card-edit { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.card-pic { transition: transform 150ms; }
+.card-pic:hover { transform: translateY(-2px); }
+/* Launch (or Build) and Edit, over the picture while it's pointed at. */
+.card-actions { opacity: 0; transition: opacity 150ms; }
+.card-pic:hover .card-actions, .card-actions:focus-within { opacity: 1; }
+button.card-half {
+  all: unset;
+  background: rgb(10 6 20 / 0.6);
+  color: #f5f2fa;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background-color 120ms, color 120ms;
+}
+button.card-half:hover { background: rgb(10 6 20 / 0.8); }
+button.card-half.card-go { border-radius: 16px 0 0 16px; box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.14); }
+button.card-half.card-go:hover { color: #c6ff1f; }
+button.card-half.card-edit { border-radius: 0 16px 16px 0; }
+button.card-half:disabled { color: rgb(245 242 250 / 0.6); }
 
 button.first-wadspace {
   all: unset;

@@ -602,16 +602,18 @@ fn tile(s: &AppState, stack: &Stack, m: &Module, compact: bool) -> gtk::Widget {
     face.name_slot.append(&name_field(stack, m));
     // A drag takes it and what's on top (Shift: just it).
     let (st, id) = (stack.clone(), m.id().to_string());
-    drag::draggable(&t, move |shift| {
+    drag::draggable_from(&t, move |shift| {
         let modules = wad_board::board::grab(&st, &id, shift);
-        if modules.is_empty() {
-            return None;
-        }
+        // The pile starts where its top module is (it's drawn top first).
+        let top = modules.last().and_then(|m| tile_widget(m.id()));
         let ghost = faces::ghost(&faces::pile(&st, &modules));
-        Some((
-            drag::Payload::Modules { modules, from: wad_board::board::From::Stack { stack_id: st.id.clone() } },
-            ghost,
-        ))
+        (!modules.is_empty()).then(|| {
+            (
+                drag::Payload::Modules { modules, from: wad_board::board::From::Stack { stack_id: st.id.clone() } },
+                ghost,
+                top,
+            )
+        })
     });
     drag::target(&t, drops::ModuleTarget { stack_id: stack.id.clone(), module: m.clone() });
     // Its submodules drag out of it.

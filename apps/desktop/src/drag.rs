@@ -165,6 +165,17 @@ fn target_of(w: &gtk::Widget) -> Option<Rc<dyn Target>> {
 /// Makes `w` draggable: `make` runs as the drag starts (with Shift held or
 /// not) and gives what's dragged and its ghost.
 pub fn draggable(w: &impl IsA<gtk::Widget>, make: impl Fn(bool) -> Option<(Payload, gtk::Widget)> + 'static) {
+    draggable_from(w, move |shift| make(shift).map(|(p, g)| (p, g, None)));
+}
+
+/// A drag's start: what's dragged, its ghost, and where the ghost starts
+/// (None: over the widget grabbed).
+pub type Grab = (Payload, gtk::Widget, Option<gtk::Widget>);
+
+/// Makes `w` draggable, its ghost starting over another widget when `make`
+/// names one: a module grabbed takes those on top of it too, and their pile
+/// starts where they are (the pointer keeps its place on what it grabbed).
+pub fn draggable_from(w: &impl IsA<gtk::Widget>, make: impl Fn(bool) -> Option<Grab> + 'static) {
     let g = gtk::GestureDrag::new();
     g.set_button(1);
     let started = Rc::new(Cell::new(false));
@@ -187,14 +198,21 @@ pub fn draggable(w: &impl IsA<gtk::Widget>, make: impl Fn(bool) -> Option<(Paylo
             if (dx * dx + dy * dy).sqrt() < 6.0 || active() {
                 return;
             }
-            let Some((payload, ghost)) = make(state.contains(gtk::gdk::ModifierType::SHIFT_MASK)) else { return };
+            let Some((payload, ghost, anchor)) = make(state.contains(gtk::gdk::ModifierType::SHIFT_MASK)) else {
+                return;
+            };
             st.set(true);
             g.set_state(gtk::EventSequenceState::Claimed);
-            let origin = w
-                .compute_point(&layer, &graphene::Point::new(0.0, 0.0))
-                .map(|p| (p.x() as f64, p.y() as f64))
-                .unwrap_or_default();
-            begin(payload, ghost, origin, (x0, y0), w.width());
+            let at = anchor.filter(|a| a.is_mapped()).unwrap_or_else(|| w.clone());
+            let corner = |x: f32, y: f32, of: &gtk::Widget| {
+                of.compute_point(&layer, &graphene::Point::new(x, y))
+                    .map(|p| (p.x() as f64, p.y() as f64))
+                    .unwrap_or_default()
+            };
+            let origin = corner(0.0, 0.0, &at);
+            // Where it was pressed, from the ghost's corner.
+            let press = corner(x0 as f32, y0 as f32, &w);
+            begin(payload, ghost, origin, (press.0 - origin.0, press.1 - origin.1), at.width());
         }
         let p = w.compute_point(&layer, &graphene::Point::new((x0 + dx) as f32, (y0 + dy) as f32));
         if let Some(p) = p {
