@@ -81,6 +81,13 @@ impl Account {
         Ok(lib)
     }
 
+    /// The machines' heartbeats alone (the Machines page reads them often).
+    pub async fn machines(&self) -> Result<Vec<Value>, Error> {
+        let uid = self.user().map(|u| u.uid).ok_or(Error::SignedOut)?;
+        let tok = self.id_token().await?;
+        Ok(self.firestore().list(&tok, &format!("users/{uid}/machines")).await?.iter().map(plain).collect())
+    }
+
     /// The library as last read on this machine (for a quick start, or offline).
     pub fn cached_library(&self) -> Option<Library> {
         serde_json::from_slice(&std::fs::read(self.library_file()?).ok()?).ok()

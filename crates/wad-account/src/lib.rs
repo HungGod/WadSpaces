@@ -393,6 +393,23 @@ impl Account {
         Ok(code)
     }
 
+    /// A command for one of their machines (its relay runs it within a few
+    /// seconds): start, stop, restart a wadspace there, and the like.
+    pub async fn send_command(&self, machine_id: &str, kind: &str, ws_id: Option<&str>) -> Result<String, Error> {
+        let uid = self.uid()?;
+        let id = doc_id_random();
+        let mut data = json!({ "type": kind, "status": "pending" });
+        if let Some(w) = ws_id {
+            data["wsId"] = w.into();
+        }
+        let path = format!("users/{uid}/machines/{machine_id}/commands/{id}");
+        let tok = self.id_token().await?;
+        self.fs
+            .commit(&tok, &[Write::set(path, data.as_object().cloned().unwrap_or_default()).now("createdAt")])
+            .await?;
+        Ok(id)
+    }
+
     /// Their GitHub token, for their other machines (users/{uid}/secrets).
     pub async fn save_github_token(&self, token: &str) -> Result<(), Error> {
         let (uid, tok) = (self.uid()?, self.id_token().await?);
@@ -408,6 +425,16 @@ impl Account {
     pub fn http(&self) -> &reqwest::Client {
         &self.http
     }
+}
+
+/// A new document's id, as Firestore makes them (20 letters and digits).
+fn doc_id_random() -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut bytes = [0u8; 20];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = std::io::Read::read_exact(&mut f, &mut bytes);
+    }
+    bytes.iter().map(|b| CHARS[*b as usize % CHARS.len()] as char).collect()
 }
 
 /// Eight characters with no 0/O or 1/I (the web app's newEnrollCode).

@@ -2,9 +2,31 @@
 //! the app's pages with something in them, for snapshots and trying the UI
 //! without a wadd or a sign-in.
 
+use std::cell::RefCell;
+
 use serde_json::Value;
 
 use crate::store::{ProfileState, Topic, store};
+
+thread_local! {
+    /// What the made-up machine's wadd answers, by path (its "wadd").
+    static WADD: RefCell<Option<Value>> = const { RefCell::new(None) };
+}
+
+/// The app runs on a made-up machine.
+pub fn on() -> bool {
+    WADD.with(|w| w.borrow().is_some())
+}
+
+/// The made-up wadd's answer to a GET: by the whole path, else without its
+/// query.
+pub fn answer(path: &str) -> Option<Value> {
+    WADD.with(|w| {
+        let w = w.borrow();
+        let w = w.as_ref()?;
+        w.get(path).or_else(|| w.get(path.split('?').next().unwrap_or(path))).cloned()
+    })
+}
 
 pub fn load(path: &std::path::Path) {
     let text = match std::fs::read_to_string(path) {
@@ -15,6 +37,7 @@ pub fn load(path: &std::path::Path) {
         }
     };
     let v: Value = serde_json::from_str(&text).unwrap_or_default();
+    WADD.with(|w| w.replace(Some(v.get("wadd").cloned().unwrap_or_else(|| serde_json::json!({})))));
     fn take<T: serde::de::DeserializeOwned>(v: &Value, k: &str) -> Result<T, serde_json::Error> {
         serde_json::from_value(v[k].clone())
     }
@@ -26,6 +49,7 @@ pub fn load(path: &std::path::Path) {
         s.states = states.into_iter().map(|st| (st.id.clone(), st)).collect();
         s.library = take(&v, "library").ok();
         s.session = take(&v, "session").ok().flatten();
+        s.cloud = take(&v, "cloud").ok();
         #[derive(serde::Deserialize)]
         struct B {
             build: wad_proto::v1::Build,
@@ -60,5 +84,6 @@ pub fn load(path: &std::path::Path) {
             | Topic::WADD
             | Topic::SESSION
             | Topic::ACTIVITY
+            | Topic::CLOUD
     });
 }

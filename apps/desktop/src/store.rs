@@ -29,6 +29,8 @@ impl Topic {
     pub const LIBRARY: Topic = Topic(1 << 9);
     /// Builds and launches under way (the sidebar's tray).
     pub const ACTIVITY: Topic = Topic(1 << 10);
+    /// wadd counted the disk again (GET /v1/storage has a new report).
+    pub const STORAGE: Topic = Topic(1 << 11);
     pub const NONE: Topic = Topic(0);
 
     pub fn any(self, other: Topic) -> bool {
@@ -139,7 +141,8 @@ impl AppState {
     }
 }
 
-type Watcher = (Topic, glib::WeakRef<gtk::Widget>, Box<dyn Fn(&AppState)>);
+type Draw = Rc<dyn Fn(&AppState)>;
+type Watcher = (Topic, glib::WeakRef<gtk::Widget>, Draw);
 
 #[derive(Default)]
 pub struct Store {
@@ -178,9 +181,17 @@ impl Store {
         let dirty = self.dirty.replace(Topic::NONE);
         // Watchers whose widget is gone go too.
         self.watchers.borrow_mut().retain(|(_, w, _)| w.upgrade().is_some());
+        // Taken out first: a watcher may make widgets that watch too.
+        let due: Vec<(glib::WeakRef<gtk::Widget>, Draw)> = self
+            .watchers
+            .borrow()
+            .iter()
+            .filter(|(t, _, _)| t.any(dirty))
+            .map(|(_, w, f)| (w.clone(), f.clone()))
+            .collect();
         let st = self.state.borrow();
-        for (t, w, f) in self.watchers.borrow().iter() {
-            if t.any(dirty) && w.upgrade().is_some() {
+        for (w, f) in due {
+            if w.upgrade().is_some() {
                 f(&st);
             }
         }
@@ -194,7 +205,7 @@ impl Store {
     /// Runs `f` now and whenever `topics` change, while `widget` lives.
     pub fn watch(&self, widget: &impl IsA<gtk::Widget>, topics: Topic, f: impl Fn(&AppState) + 'static) {
         f(&self.state.borrow());
-        self.watchers.borrow_mut().push((topics, widget.upcast_ref::<gtk::Widget>().downgrade(), Box::new(f)));
+        self.watchers.borrow_mut().push((topics, widget.upcast_ref::<gtk::Widget>().downgrade(), Rc::new(f)));
     }
 
     /// One of wadd's events.
@@ -265,6 +276,7 @@ impl Store {
                         }
                         Topic::ACTIVITY
                     }
+                    Event::Storage { .. } => Topic::STORAGE,
                     _ => Topic::NONE,
                 }
             }

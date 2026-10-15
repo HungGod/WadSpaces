@@ -112,6 +112,31 @@ pub async fn refresh_library() {
     }
 }
 
+/// The machines' heartbeats, read again (the Machines page, every 30 s while
+/// it's on screen).
+pub async fn refresh_machines() {
+    let Some(a) = account().filter(|a| a.user().is_some()) else { return };
+    match rt::run(async move { a.machines().await }).await {
+        Ok(m) => store().update(|s| match s.library.as_mut() {
+            Some(l) if l.machines != m => {
+                l.machines = m;
+                Topic::LIBRARY
+            }
+            _ => Topic::NONE,
+        }),
+        Err(e) => tracing::warn!("machines: {e}"),
+    }
+}
+
+/// Has one of their other machines start, stop or restart a wadspace (its
+/// relay runs it within a few seconds).
+pub async fn command(machine: String, kind: &'static str, wadspace: String) -> Result<(), String> {
+    let a = account().ok_or("This machine has no account settings.")?;
+    rt::run(async move { a.send_command(&machine, kind, Some(&wadspace)).await.map(drop) })
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Keeps the library current: read again every minute while the app is on
 /// screen (changes made elsewhere: the web app, another machine).
 pub fn follow_library() {

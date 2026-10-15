@@ -1,9 +1,10 @@
 {
-  "comment": "The native client's fake state (WADSPACES_FAKE=fixtures/desktop/sample.json): the web app's test sample (apps/client/src/test/sample.ts), signed in, with Cosmic running here.",
+  "comment": "The native client's fake state (WADSPACES_FAKE=fixtures/desktop/sample.json): the web app's test sample (apps/client/src/test/sample.ts), signed in, with Cosmic running here, linked as m-surface beside an offline Desk; \"wadd\" is the made-up wadd's answers by path (Machines' storage, files, history, diagnostics).",
   "user": { "uid": "me", "githubId": "4242", "login": "me", "displayName": "Me", "photoUrl": null },
   "profile": { "username": "me", "displayName": "Me", "color": "#c6ff1f" },
   "lastSession": { "kind": "wadspace", "wadspaceIds": ["vanua-academy"], "machineId": "local", "at": "2026-10-15T01:00:00.000Z" },
   "machine": { "name": "surface", "version": "0.1.0", "profile": "system", "startedAt": 1792020000, "screen": { "width": 1368, "height": 912, "scale": 2.0 } },
+  "cloud": { "linked": true, "machineId": "m-surface", "ownerUid": "me", "projectId": "wadspaces-test", "linkedAt": "2026-09-20T00:00:00.000Z", "lastHeartbeat": 1792020000, "lastError": null },
   "library": {
     "templates": [
       { "id": "writing", "owner": "me", "name": "Writing", "description": "Obsidian, for notes and long-form writing.", "apps": ["obsidian"], "starter": true, "createdAt": "2026-09-01T00:00:00.000Z", "updatedAt": "2026-09-01T00:00:00.000Z" },
@@ -31,12 +32,84 @@
           "projects": [{ "id": "vanua-academy", "kind": "github", "repo": "HungGod/VanuaAcademy", "as": "VanuaAcademy", "setup": "npm ci" }], "secrets": { "bySlot": {} } },
         "createdAt": "2026-09-26T00:00:00.000Z", "updatedAt": "2026-09-26T00:00:00.000Z" }
     ],
-    "machines": []
+    "machines": [
+      { "id": "m-surface", "hostname": "surface", "name": "Surface", "daemonVersion": "0.1.0", "lastSeen": "2026-10-15T01:00:00.000Z", "workspaces": [] },
+      { "id": "m-desk", "hostname": "desk", "name": "Desk", "daemonVersion": "0.1.0", "lastSeen": "2026-10-14T18:30:00.000Z", "view": "home",
+        "metrics": { "cpu": 3.0, "mem": 22.0, "gpu": "AMD Radeon 780M" },
+        "workspaces": [{ "id": "vanua-academy", "container": "exited", "phase": "idle", "error": null, "hotkey": null, "port": null }] }
+    ]
   },
   "workspaces": [
-    { "id": "cosmic-bodybuilding", "name": "Cosmic Bodybuilding", "image": "localhost/wadspaces-template-writing:latest", "display": "host", "port": null, "hotkey": null, "icon": null, "enabled": true, "autostart": false, "containerName": "wad-cosmic-bodybuilding", "containerPort": 3000, "env": [], "secrets": [], "volumes": [], "devices": [], "shmSize": "1g", "projects": [] }
+    { "id": "cosmic-bodybuilding", "name": "Cosmic Bodybuilding", "image": "localhost/wadspaces-template-writing:latest", "display": "host", "port": null, "hotkey": 1, "icon": null, "enabled": true, "autostart": false, "containerName": "wad-cosmic-bodybuilding", "containerPort": 3000, "env": [], "secrets": [], "volumes": [], "devices": [], "shmSize": "1g", "projects": [] }
   ],
   "states": [
     { "id": "cosmic-bodybuilding", "container": "running", "phase": "ready", "message": null, "error": null, "imagePresent": true, "since": 1792020000 }
-  ]
+  ],
+  "wadd": {
+    "/v1/metrics": { "cpu": 14.0, "mem": 38.0, "memUsed": 3100000000, "memTotal": 8000000000, "diskFree": 48000000000, "diskTotal": 120000000000, "load": 0.4, "gpu": "Intel HD 620" },
+    "/v1/projects": [
+      { "id": "writing", "name": "Writing", "mountName": "Writing", "source": null, "setup": "", "deleted": false, "createdAt": 0, "updatedAt": 0, "synced": true, "legacy": false }
+    ],
+    "/v1/runs": [
+      { "id": "r3", "wadspaceId": "cosmic-bodybuilding", "wadspaceName": "Cosmic Bodybuilding", "mode": "local", "user": "me", "projects": ["writing"], "startedAt": 1792020000, "endedAt": null },
+      { "id": "r2", "wadspaceId": "vanua-academy", "wadspaceName": "VanuaAcademy", "mode": "local", "user": "me", "projects": ["vanua-academy"], "startedAt": 1792008000, "endedAt": 1792015200 },
+      { "id": "r1", "wadspaceId": "cosmic-bodybuilding", "wadspaceName": "Cosmic Bodybuilding", "mode": "stream", "user": "me", "projects": [], "startedAt": 1791900000, "endedAt": 1791902700 }
+    ],
+    "/v1/storage": {
+      "disk": { "path": "/var/lib/containers", "freeBytes": 48000000000, "totalBytes": 120000000000 },
+      "base": { "ref": "localhost/wadspaces-base:trixie", "id": "base", "bytes": 3100000000 },
+      "layers": [
+        { "layer": "template:writing", "id": "i-writing", "from": "base", "bytes": 5200000000, "ownBytes": 2100000000 },
+        { "layer": "template:dev", "id": "i-dev", "from": "base", "bytes": 4700000000, "ownBytes": 1600000000 },
+        { "layer": "custom:vanua-academy-dev", "id": "i-vanua", "from": "i-dev", "bytes": 5300000000, "ownBytes": 600000000 }
+      ],
+      "leftovers": [{ "layer": "template:writing", "id": "i-writing-old", "from": "base", "bytes": 5100000000, "ownBytes": 2300000000 }],
+      "homes": [{ "workspaceId": "cosmic-bodybuilding", "volume": "wad-cosmic-bodybuilding-config", "bytes": 900000000 }],
+      "copies": [],
+      "other": [
+        { "key": "system", "label": "The WadSpaces system", "detail": "The system itself: 2 versions kept, this one and the one before it (to go back to). It stays.", "bytes": 7800000000, "items": [], "deletable": false },
+        { "key": "update-copy", "label": "The last stick update's copy", "detail": "What the last stick update copied in, already applied: nothing needs it.", "bytes": 4800000000, "items": [], "deletable": true },
+        { "key": "images", "label": "Other images", "detail": "Images the wadspaces' layers don't count: older bases, images from before layers, steps builds left.", "bytes": 4600000000, "items": [
+          { "id": "aa11", "label": "vanua-academy", "detail": "From before the Builder's layers: nothing uses it.", "bytes": 4100000000, "deletable": true },
+          { "id": "dd44", "label": "A build step", "detail": "Left by a build; nothing names it.", "bytes": 500000000, "deletable": true }
+        ], "deletable": false },
+        { "key": "volumes", "label": "Homes left behind", "detail": "Files of wadspaces no longer on this machine (built again, a wadspace with the same id gets its home back).", "bytes": 1900000000, "items": [
+          { "id": "wad-iq-dev-config", "label": "iq-dev's home", "detail": "A home whose wadspace isn't on this machine any more.", "bytes": 1900000000, "deletable": true }
+        ], "deletable": false },
+        { "key": "logs", "label": "Logs", "detail": "The system's logs (/var/log), kept and trimmed by the system.", "bytes": 360000000, "items": [], "deletable": false },
+        { "key": "unaccounted", "label": "Not listed above", "detail": "The disk's own bookkeeping, and files outside the folders above.", "bytes": 1200000000, "items": [], "deletable": false }
+      ],
+      "measuredAt": 1792020000, "measuring": false
+    },
+    "/v1/files/roots": [
+      { "id": "home", "label": "Your files", "detail": "On the machine itself." },
+      { "id": "ws:cosmic-bodybuilding", "label": "Cosmic Bodybuilding's home", "detail": "The wadspace's own files." }
+    ],
+    "/v1/files?root=home&path=": { "root": "home", "path": "", "entries": [
+      { "name": "Documents", "dir": true, "bytes": 0, "modified": 1792000000, "text": false },
+      { "name": "Downloads", "dir": true, "bytes": 0, "modified": 1792010000, "text": false },
+      { "name": "notes.txt", "dir": false, "bytes": 2048, "modified": 1792015000, "text": true }
+    ] },
+    "/v1/files/text?root=home&path=notes.txt": { "text": "Things to try on the Surface:\n- Super+Tab\n- a stick update\n" },
+    "/v1/diagnostics": {
+      "wadd": { "version": "0.1.0", "uptimeS": 7300, "pid": 812, "profile": "system" },
+      "podman": { "connected": true, "version": "5.6.1", "graphRoot": "/var/lib/containers/storage", "storageDriver": "overlay", "images": 6, "error": null },
+      "disk": { "path": "/var/lib/containers", "freeBytes": 48000000000, "totalBytes": 120000000000 },
+      "network": { "available": true, "state": "connected", "connectivity": "full", "wifiEnabled": true, "wifiDevice": "wlp1s0", "ssid": "Home", "signal": 72 },
+      "view": { "view": { "kind": "workspace", "id": "cosmic-bodybuilding" }, "pending": null, "nativeDisplay": true },
+      "keys": { "enabled": true, "grabbing": true, "keyboards": ["Surface Keyboard"], "note": null },
+      "secrets": [],
+      "logUnits": ["wadd.service", "client-session.service"],
+      "workspaces": [
+        { "id": "cosmic-bodybuilding", "container": "running", "phase": "ready", "message": null, "error": null, "imagePresent": true, "since": 1792020000 }
+      ],
+      "recentProblems": [
+        { "time": 1792019000000, "level": "warn", "target": "wadd::network", "message": "Wi-Fi dropped for 4 s" }
+      ]
+    },
+    "/v1/logs": [
+      { "time": 1792020000000, "level": "info", "target": "wadd::view", "message": "showing cosmic-bodybuilding" },
+      { "time": 1792020005000, "level": "info", "target": "wadd::storage", "message": "measured in 1.8 s" }
+    ]
+  }
 }

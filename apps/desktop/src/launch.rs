@@ -169,6 +169,56 @@ pub fn wallpaper_upload(wall: &Value) -> Result<Value, String> {
     Ok(json!({ "ext": "png", "data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png) }))
 }
 
+/// A wadspace installed here as it is now, with its wallpaper drawn.
+async fn install(w: &Wadd, ws: &Value, lib: &Value, tz: &str) -> Result<(), String> {
+    let id = s(ws, "id");
+    if let Some(why) = not_ready(ws, lib) {
+        return Err(format!("{}: {why}", s(&ws["customization"], "name")));
+    }
+    let r = core::resolve_stack(lib, ws);
+    let install = json!({ "wadspace": ws, "template": r["template"], "extensions": r.get("extensions").cloned().unwrap_or(Value::Null), "tz": tz });
+    w.act(Method::PUT, &format!("/v1/wadspaces/{id}"), Some(&install)).await.map_err(|e| e.to_string())?;
+    let wall = wallpaper_upload(&ws["customization"]["wallpaper"])?;
+    w.act(Method::PUT, &format!("/v1/workspaces/{id}/wallpaper"), Some(&wall)).await.map_err(|e| e.to_string())
+}
+
+/// Builds a wadspace here without starting it (the web app's buildStack):
+/// installed as it is now, its layer built unless that's up to date or
+/// already building.
+pub async fn build_here(id: String) -> Result<(), String> {
+    let (lib, ws, building) = store().read_now(|st| {
+        let ws = st.library.as_ref().and_then(|l| l.wadspaces.iter().find(|x| s(x, "id") == id).cloned());
+        let building: Vec<String> =
+            st.builds.iter().filter(|(b, _)| !b.status.finished()).filter_map(|(b, _)| b.layer.clone()).collect();
+        (st.library.as_ref().map(|l| l.lib()), ws, building)
+    });
+    let lib = lib.ok_or("Your library isn't here yet.")?;
+    let ws = ws.ok_or("That wadspace is gone.")?;
+    let tz = time_zone();
+    rt::run(async move {
+        let w = Wadd::here();
+        install(&w, &ws, &lib, &tz).await?;
+        let key = core::stack_image_key(&ws);
+        if key.is_empty() || building.contains(&key) {
+            return Ok(());
+        }
+        let images: HashMap<String, ImageRow> = w
+            .get::<Vec<ImageRow>>("/v1/images")
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| (r.layer.clone(), r))
+            .collect();
+        if image_state(&key, &lib, &images) != ImageState::Built {
+            w.act(Method::POST, "/v1/images/build", Some(&layer_request(&key, &lib)?))
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })
+    .await
+}
+
 /// Launches `items` (the first on screen), as a focus session of
 /// `focus_minutes` if given. The ids wadd started.
 pub async fn launch(items: Vec<RunItem>, focus_minutes: Option<u32>) -> Result<Vec<String>, String> {
@@ -195,24 +245,26 @@ pub async fn launch(items: Vec<RunItem>, focus_minutes: Option<u32>) -> Result<V
         .collect();
     let started = rt::run(async move {
         let w = Wadd::here();
-        let images: HashMap<String, ImageRow> =
-            w.get::<Vec<ImageRow>>("/v1/images").await.unwrap_or_default().into_iter().map(|r| (r.layer.clone(), r)).collect();
+        let images: HashMap<String, ImageRow> = w
+            .get::<Vec<ImageRow>>("/v1/images")
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| (r.layer.clone(), r))
+            .collect();
         for id in &ids {
             let Some(ws) = wadspaces.iter().find(|x| s(x, "id") == id) else { continue };
-            if let Some(why) = not_ready(ws, &lib) {
-                return Err(format!("{}: {why}", s(&ws["customization"], "name")));
-            }
-            let r = core::resolve_stack(&lib, ws);
-            let install = json!({ "wadspace": ws, "template": r["template"], "extensions": r.get("extensions").cloned().unwrap_or(Value::Null), "tz": tz });
-            w.act(Method::PUT, &format!("/v1/wadspaces/{id}"), Some(&install)).await.map_err(|e| e.to_string())?;
-            let wall = wallpaper_upload(&ws["customization"]["wallpaper"])?;
-            w.act(Method::PUT, &format!("/v1/workspaces/{id}/wallpaper"), Some(&wall)).await.map_err(|e| e.to_string())?;
+            install(&w, ws, &lib, &tz).await?;
             let key = core::stack_image_key(ws);
             if !key.is_empty() && matches!(image_state(&key, &lib, &images), ImageState::Never | ImageState::Changed) {
-                w.act(Method::POST, "/v1/images/build", Some(&layer_request(&key, &lib)?)).await.map_err(|e| e.to_string())?;
+                w.act(Method::POST, "/v1/images/build", Some(&layer_request(&key, &lib)?))
+                    .await
+                    .map_err(|e| e.to_string())?;
             }
         }
-        w.post::<Vec<String>>("/v1/launches/batch", &json!({ "items": body_items, "focusMinutes": focus_minutes })).await.map_err(|e| e.to_string())
+        w.post::<Vec<String>>("/v1/launches/batch", &json!({ "items": body_items, "focusMinutes": focus_minutes }))
+            .await
+            .map_err(|e| e.to_string())
     })
     .await?;
     // Jump back in: what ran, kept here.

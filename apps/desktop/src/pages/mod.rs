@@ -1,6 +1,7 @@
 //! The app's pages (the web app's src/pages).
 
 pub mod home;
+pub mod machines;
 
 use gtk::prelude::*;
 

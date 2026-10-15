@@ -127,13 +127,36 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
             settle(900).await;
             shot(&w, &dir.join(format!("launcher-{}.png", t.name())));
         }
+        crate::modal::escape();
+        crate::shell::go(crate::shell::Page::Machines);
+        for tab in ["wadspaces", "history", "storage", "files", "diagnostics"] {
+            crate::pages::machines::show_tab(tab);
+            let name = if tab == "wadspaces" { "machines".to_string() } else { format!("machines-{tab}") };
+            for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+                wad_gtk::theme::set(&display, t);
+                settle(800).await;
+                shot(&w, &dir.join(format!("{name}-{}.png", t.name())));
+            }
+        }
+        // The long tabs whole, and another machine's.
+        wad_gtk::theme::set(&display, wad_gtk::Theme::Dark);
+        for tab in ["storage", "diagnostics"] {
+            crate::pages::machines::show_tab(tab);
+            settle(800).await;
+            if let Some(tab) = crate::pages::machines::tab_widget() {
+                shot(&tab, &dir.join(format!("machines-{}-whole-dark.png", crate::pages::machines::tab_name())));
+            }
+        }
+        crate::pages::machines::pick("m-desk");
+        settle(800).await;
+        shot(&w, &dir.join("machines-other-dark.png"));
         if let Some(app) = w.application() {
             app.quit();
         }
     });
 }
 
-fn shot(w: &gtk::ApplicationWindow, path: &std::path::Path) {
+fn shot(w: &impl IsA<gtk::Widget>, path: &std::path::Path) {
     match save_png(w, path) {
         Ok(()) => tracing::info!("wrote {}", path.display()),
         Err(e) => tracing::warn!("{}: {e}", path.display()),
