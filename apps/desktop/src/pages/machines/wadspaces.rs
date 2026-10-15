@@ -218,6 +218,10 @@ fn actions_for(row: &gtk::Box, s: &AppState, w: &Value) {
         "ellipsis",
         "More",
         vec![
+            ("Customize for a run", "sliders-horizontal", false, {
+                let id = format!("w:{}", w["id"].as_str().unwrap_or_default());
+                Box::new(move || crate::launcher::customize(&id))
+            }),
             ("Edit in Builder", "pencil", false, Box::new(|| crate::shell::go(Page::Builder))),
             ("New from it", "copy", false, Box::new(|| crate::shell::go(Page::Builder))),
         ],

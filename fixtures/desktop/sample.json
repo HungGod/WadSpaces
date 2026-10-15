@@ -29,7 +29,9 @@
         "createdAt": "2026-09-22T00:00:00.000Z", "updatedAt": "2026-09-22T00:00:00.000Z" },
       { "version": 3, "id": "vanua-academy", "owner": "me", "order": 2, "template": "dev", "extensions": "vanua-academy-dev",
         "customization": { "name": "VanuaAcademy", "description": "Building Vanua Academy.", "wallpaper": { "type": "image", "value": "/wallpapers/vanua-academy.png" },
-          "projects": [{ "id": "vanua-academy", "kind": "github", "repo": "HungGod/VanuaAcademy", "as": "VanuaAcademy", "setup": "npm ci" }], "secrets": { "bySlot": {} } },
+          "projects": [{ "id": "vanua-academy", "kind": "github", "repo": "HungGod/VanuaAcademy", "as": "VanuaAcademy", "setup": "npm ci" }],
+          "secrets": { "bySlot": { "ext:anthropic.claude-code": { "id": "vanua-claude", "name": "VanuaAcademy-claude", "kind": "vscode-claude-code" } },
+            "groups": [{ "members": ["browser", "web:github", "web:claude", "web:google-firebase", "web:gmail"], "key": { "id": "work-web", "name": "Work", "kind": "web" } }] } },
         "createdAt": "2026-09-26T00:00:00.000Z", "updatedAt": "2026-09-26T00:00:00.000Z" }
     ],
     "machines": [
@@ -107,6 +109,12 @@
         { "time": 1792019000000, "level": "warn", "target": "wadd::network", "message": "Wi-Fi dropped for 4 s" }
       ]
     },
+    "/v1/signins": [
+      { "id": "work-web", "name": "Work", "app": "web", "paths": [], "createdAt": 1791000000000, "size": 2400000, "changedAt": 1792015000000, "usedBy": ["vanua-academy"], "inUse": [] },
+      { "id": "vanua-claude", "name": "VanuaAcademy-claude", "app": "vscode-claude-code", "paths": [".claude/", ".claude.json"], "createdAt": 1791000000000, "size": 48213, "changedAt": 1791990000000, "usedBy": ["vanua-academy"], "inUse": [] },
+      { "id": "old-steam", "name": "Steam", "app": "steam", "paths": [".steam/", ".local/share/Steam/config/", ".local/share/Steam/userdata/"], "createdAt": 1790000000000, "size": 0, "changedAt": null, "usedBy": [], "inUse": [] }
+    ],
+    "/v1/secrets": [{ "name": "github_token", "origin": "local" }],
     "/v1/logs": [
       { "time": 1792020000000, "level": "info", "target": "wadd::view", "message": "showing cosmic-bodybuilding" },
       { "time": 1792020005000, "level": "info", "target": "wadd::storage", "message": "measured in 1.8 s" }

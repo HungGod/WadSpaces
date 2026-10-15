@@ -203,6 +203,7 @@ pub fn shell() -> gtk::Widget {
         let page = match p {
             Page::Home => crate::pages::home::page(),
             Page::Machines => crate::pages::machines::page(),
+            Page::Secrets => crate::pages::secrets::page(),
             other => placeholder(other),
         };
         stack.add_named(&page, Some(p.id()));

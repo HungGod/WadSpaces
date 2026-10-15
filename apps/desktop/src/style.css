@@ -613,18 +613,23 @@ window.theme-light label.avatar { filter: grayscale(1); }
   background: var(--surface-2);
   box-shadow: inset 0 0 0 1px var(--line);
 }
-button.pick {
-  all: unset;
-  padding: 8px 10px 8px 8px;
+.pick {
+  padding: 8px 6px 8px 8px;
   border-radius: 16px;
   background: var(--surface-2);
   box-shadow: inset 0 0 0 1px var(--line);
   transition: box-shadow 150ms, background-color 150ms;
 }
-button.pick:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
-button.pick.on {
+.pick:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.pick.on {
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 2px var(--accent);
+}
+button.pick-main { all: unset; }
+.badge.pink {
+  background: var(--accent-2-soft);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-2) 45%, transparent);
 }
 .pick-label { font-size: 13px; font-weight: 500; }
 .pick-detail { font-size: 11px; color: var(--muted); }
@@ -1197,3 +1202,129 @@ button.text-link { all: unset; font-size: 12px; font-weight: 500; text-decoratio
   background: var(--surface-2);
   box-shadow: inset 0 0 0 1px var(--line);
 }
+
+/* ------------------------------------------------------------- secrets */
+.subhead {
+  margin-bottom: 12px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+}
+.key-card {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  transition: border-color 150ms;
+}
+.key-card:hover { border-color: var(--line-strong); }
+.key-icon { border-radius: 12px; }
+.key-icon.plain { background: var(--accent-soft); color: var(--accent); }
+.key-icon.one { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.key-icon.folder { background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line); }
+.folder-more {
+  min-width: 14px;
+  min-height: 14px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-2);
+}
+.key-name {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+}
+.tiny-head { font-size: 10px; font-weight: 600; letter-spacing: 1px; color: var(--faint); }
+.wire {
+  min-height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--layer-customization) 40%, transparent);
+}
+.wire.live { background: color-mix(in srgb, var(--accent) 70%, transparent); }
+.icon-chip {
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+wad-desktop.mini-thumb { box-shadow: 0 0 0 1px var(--line); }
+.mini-browser { border-radius: 6px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.token-list {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.token-row { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.token-row:last-child { border-bottom: none; }
+entry.input.small { min-height: 32px; font-size: 13px; }
+flowbox.badges > flowboxchild { padding: 0; }
+
+/* ---------------------------------------------------- customizing runs */
+button.swatch-button {
+  all: unset;
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px var(--line);
+  transition: box-shadow 150ms;
+}
+button.swatch-button:hover { box-shadow: 0 0 0 1px var(--line-strong); }
+button.swatch-button.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.swatch-name {
+  padding: 12px 6px 4px 6px;
+  border-radius: 0 0 12px 12px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #ffffff;
+  background: linear-gradient(to top, rgb(0 0 0 / 0.7), transparent);
+}
+button.swatch-choose {
+  all: unset;
+  min-height: 60px;
+  border-radius: 12px;
+  border: 1px dashed var(--line-strong);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+button.swatch-choose:hover { border-color: var(--accent); color: var(--fg); }
+button.choice {
+  all: unset;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: box-shadow 150ms, background-color 150ms;
+}
+button.choice:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+button.choice.on { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.webapp-row {
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.small-14 { font-size: 14px; }
+flowbox.chips > flowboxchild { padding: 0; }
+button.chip {
+  all: unset;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+button.chip:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.slot-row {
+  padding: 12px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-2) 50%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.segmented.small > button { padding: 4px 8px; font-size: 12px; }
+entry.input.mono { font-family: monospace; font-size: 12px; }
+dropdown.select.mono > button { font-family: monospace; font-size: 12px; min-height: 32px; }
+button.text-accent { all: unset; font-size: 12px; font-weight: 500; color: var(--accent); }
+button.text-accent:hover { text-decoration: underline; }
+button.text-accent:disabled { color: var(--faint); text-decoration: none; }
+.shared { font-size: 12px; color: var(--accent); }

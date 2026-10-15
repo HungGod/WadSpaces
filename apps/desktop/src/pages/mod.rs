@@ -2,6 +2,7 @@
 
 pub mod home;
 pub mod machines;
+pub mod secrets;
 
 use gtk::prelude::*;
 

@@ -18,12 +18,16 @@ mod launcher;
 mod modal;
 mod pages;
 mod rt;
+mod secret_slots;
 mod setup;
 mod shell;
+mod signins;
+mod slots;
 mod store;
 mod thumb;
 mod toast;
 mod ui;
+mod wallpaper_picker;
 
 #[derive(Debug, Default, Clone)]
 pub struct Args {

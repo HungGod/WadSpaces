@@ -128,6 +128,15 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
             shot(&w, &dir.join(format!("launcher-{}.png", t.name())));
         }
         crate::modal::escape();
+        for (entry, name) in [("w:vanua-academy", "launcher-customize"), ("b:wadbrowser", "launcher-browser")] {
+            crate::launcher::customize(entry);
+            for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+                wad_gtk::theme::set(&display, t);
+                settle(900).await;
+                shot(&w, &dir.join(format!("{name}-{}.png", t.name())));
+            }
+            crate::modal::escape();
+        }
         crate::shell::go(crate::shell::Page::Machines);
         for tab in ["wadspaces", "history", "storage", "files", "diagnostics"] {
             crate::pages::machines::show_tab(tab);
@@ -150,6 +159,12 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
         crate::pages::machines::pick("m-desk");
         settle(800).await;
         shot(&w, &dir.join("machines-other-dark.png"));
+        crate::shell::go(crate::shell::Page::Secrets);
+        for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+            wad_gtk::theme::set(&display, t);
+            settle(900).await;
+            shot(&w, &dir.join(format!("secrets-{}.png", t.name())));
+        }
         if let Some(app) = w.application() {
             app.quit();
         }

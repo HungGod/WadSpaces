@@ -18,11 +18,30 @@ use crate::store::store;
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunItem {
     Wadspace(String),
+    /// A wadspace run once with a background (`{type, value}`) and keys by
+    /// slot of its own (WadBrowser's key groups stay its own).
+    WadspaceRun {
+        id: String,
+        wallpaper: Value,
+        by_slot: Value,
+    },
     Terminal,
     /// One of the machine's own apps as it is (wadd's "browser", "browser-focus").
     App(String),
     /// A saved WadBrowser setup (its document).
     Browser(Value),
+    /// A WadBrowser set up for one run (`{name, mode, webapps, secrets}`).
+    BrowserRun(Value),
+}
+
+impl RunItem {
+    /// The wadspace it starts, if it starts one.
+    pub fn wadspace(&self) -> Option<&str> {
+        match self {
+            RunItem::Wadspace(id) | RunItem::WadspaceRun { id, .. } => Some(id),
+            _ => None,
+        }
+    }
 }
 
 /// A WadBrowser setup's sign-ins as wadd mounts them: each web app's, by slot.
@@ -169,6 +188,57 @@ pub fn wallpaper_upload(wall: &Value) -> Result<Value, String> {
     Ok(json!({ "ext": "png", "data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png) }))
 }
 
+/// What wadd's batch launch takes for each item (the first on screen).
+fn launch_items(items: &[RunItem], lib: &Value, wadspaces: &[Value]) -> Result<Vec<Value>, String> {
+    items
+        .iter()
+        .enumerate()
+        .map(|(n, i)| {
+            Ok(match i {
+                RunItem::Wadspace(id) | RunItem::App(id) => {
+                    json!({ "kind": "workspace", "workspace": id, "background": n > 0 })
+                }
+                RunItem::WadspaceRun { id, wallpaper, by_slot } => {
+                    json!({ "kind": "run", "from": id, "overrides": run_overrides(lib, wadspaces, id, wallpaper, by_slot)?, "background": n > 0 })
+                }
+                RunItem::Terminal => json!({ "kind": "terminal", "background": n > 0 }),
+                RunItem::Browser(b) => json!({
+                    "kind": "browser",
+                    "setup": { "name": b["name"], "mode": b["mode"], "webapps": b["webapps"], "signins": browser_signins(&b["secrets"]) },
+                    "savedId": b["id"],
+                    "background": n > 0,
+                }),
+                RunItem::BrowserRun(c) => json!({
+                    "kind": "browser",
+                    "setup": { "name": c["name"], "mode": c["mode"], "webapps": c["webapps"], "signins": browser_signins(&c["secrets"]) },
+                    "background": n > 0,
+                }),
+            })
+        })
+        .collect()
+}
+
+/// A run's own background (drawn) and sign-ins: its keys by slot in place
+/// of the wadspace's, its WadBrowser groups as they are.
+fn run_overrides(
+    lib: &Value,
+    wadspaces: &[Value],
+    id: &str,
+    wallpaper: &Value,
+    by_slot: &Value,
+) -> Result<Value, String> {
+    let w = wadspaces.iter().find(|x| s(x, "id") == id).ok_or("That wadspace is gone.")?;
+    let r = core::resolve_stack(lib, w);
+    let mut w = w.clone();
+    w["customization"]["secrets"]["bySlot"] = by_slot.clone();
+    let signins = if r.is_null() {
+        json!([])
+    } else {
+        core::workspace_for(&w, &r["template"], &r["setup"], &json!({}))["signins"].clone()
+    };
+    Ok(json!({ "wallpaper": wallpaper_upload(wallpaper)?, "signins": signins }))
+}
+
 /// A wadspace installed here as it is now, with its wallpaper drawn.
 async fn install(w: &Wadd, ws: &Value, lib: &Value, tz: &str) -> Result<(), String> {
     let id = s(ws, "id");
@@ -226,23 +296,13 @@ pub async fn launch(items: Vec<RunItem>, focus_minutes: Option<u32>) -> Result<V
         (s.library.as_ref().map(|l| l.lib()), s.library.as_ref().map(|l| l.wadspaces.clone()).unwrap_or_default())
     });
     let lib = lib.ok_or("Your library isn't here yet.")?;
-    let ids: Vec<String> =
-        items.iter().filter_map(|i| if let RunItem::Wadspace(id) = i { Some(id.clone()) } else { None }).collect();
+    let mut ids: Vec<String> = vec![];
+    for id in items.iter().filter_map(RunItem::wadspace) {
+        if !ids.iter().any(|x| x == id) {
+            ids.push(id.to_string());
+        }
+    }
     let tz = time_zone();
-    let body_items: Vec<Value> = items
-        .iter()
-        .enumerate()
-        .map(|(n, i)| match i {
-            RunItem::Wadspace(id) | RunItem::App(id) => json!({ "kind": "workspace", "workspace": id, "background": n > 0 }),
-            RunItem::Terminal => json!({ "kind": "terminal", "background": n > 0 }),
-            RunItem::Browser(b) => json!({
-                "kind": "browser",
-                "setup": { "name": b["name"], "mode": b["mode"], "webapps": b["webapps"], "signins": browser_signins(&b["secrets"]) },
-                "savedId": b["id"],
-                "background": n > 0,
-            }),
-        })
-        .collect();
     let started = rt::run(async move {
         let w = Wadd::here();
         let images: HashMap<String, ImageRow> = w
@@ -262,6 +322,8 @@ pub async fn launch(items: Vec<RunItem>, focus_minutes: Option<u32>) -> Result<V
                     .map_err(|e| e.to_string())?;
             }
         }
+        // Drawn off GTK's thread: a run's own background.
+        let body_items = launch_items(&items, &lib, &wadspaces)?;
         w.post::<Vec<String>>("/v1/launches/batch", &json!({ "items": body_items, "focusMinutes": focus_minutes }))
             .await
             .map_err(|e| e.to_string())
@@ -299,7 +361,7 @@ pub fn last_session() -> Option<Value> {
         .or_else(|| store().read_now(|s| s.profile().and_then(|p| p.last_session.clone())))
 }
 
-fn now_iso() -> String {
+pub fn now_iso() -> String {
     let secs =
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
     wad_firebase_time(secs)

@@ -88,6 +88,28 @@ impl Account {
         Ok(self.firestore().list(&tok, &format!("users/{uid}/machines")).await?.iter().map(plain).collect())
     }
 
+    /// A wadspace (one of the board's stacks) saved as it is: at the top
+    /// level, theirs, shared with no one (as the web app keeps them).
+    pub async fn save_wadspace(&self, w: &Value) -> Result<(), Error> {
+        let uid = self.user().map(|u| u.uid).ok_or(Error::SignedOut)?;
+        let mut data = w.as_object().cloned().unwrap_or_default();
+        let id = data.remove("id").and_then(|v| v.as_str().map(String::from)).ok_or(Error::Invalid("no id".into()))?;
+        data.insert("owner".into(), uid.into());
+        data.insert("sharedWith".into(), json!([]));
+        let tok = self.id_token().await?;
+        Ok(self.firestore().set(&tok, &format!("wadspaces/{id}"), &data).await?)
+    }
+
+    /// One of their documents (`templates`, `extensions`, `browsers`) saved
+    /// as it is.
+    pub async fn save_doc(&self, collection: &str, d: &Value) -> Result<(), Error> {
+        let uid = self.user().map(|u| u.uid).ok_or(Error::SignedOut)?;
+        let mut data = d.as_object().cloned().unwrap_or_default();
+        let id = data.remove("id").and_then(|v| v.as_str().map(String::from)).ok_or(Error::Invalid("no id".into()))?;
+        let tok = self.id_token().await?;
+        Ok(self.firestore().set(&tok, &format!("users/{uid}/{collection}/{id}"), &data).await?)
+    }
+
     /// The library as last read on this machine (for a quick start, or offline).
     pub fn cached_library(&self) -> Option<Library> {
         serde_json::from_slice(&std::fs::read(self.library_file()?).ok()?).ok()

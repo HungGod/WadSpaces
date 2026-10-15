@@ -62,7 +62,7 @@ pss() {
 case "${MODE}" in
     snapshot)
         mkdir -p "${OUT}"
-        timeout 40 "${BIN}" --kiosk --snapshot "${OUT}" > "${WORK}/app.log" 2>&1 || true
+        timeout 90 "${BIN}" --kiosk --snapshot "${OUT}" > "${WORK}/app.log" 2>&1 || true
         grep -h "wrote\|WARN\|Gtk-" "${WORK}/app.log" || true
         ;;
     measure)

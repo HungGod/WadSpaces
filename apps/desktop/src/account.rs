@@ -128,6 +128,44 @@ pub async fn refresh_machines() {
     }
 }
 
+/// A wadspace saved to the account as it is, and here.
+pub async fn save_wadspace(w: serde_json::Value) -> Result<(), String> {
+    let a = account().filter(|a| a.user().is_some()).ok_or("Sign in first.")?;
+    let doc = w.clone();
+    rt::run(async move { a.save_wadspace(&doc).await }).await.map_err(|e| e.to_string())?;
+    store().update(|s| match s.library.as_mut() {
+        Some(l) => {
+            put(&mut l.wadspaces, w);
+            Topic::LIBRARY
+        }
+        None => Topic::NONE,
+    });
+    Ok(())
+}
+
+/// A saved WadBrowser setup saved to the account as it is, and here.
+pub async fn save_browser(b: serde_json::Value) -> Result<(), String> {
+    let a = account().filter(|a| a.user().is_some()).ok_or("Sign in first.")?;
+    let doc = b.clone();
+    rt::run(async move { a.save_doc("browsers", &doc).await }).await.map_err(|e| e.to_string())?;
+    store().update(|s| match s.library.as_mut() {
+        Some(l) => {
+            put(&mut l.browsers, b);
+            Topic::LIBRARY
+        }
+        None => Topic::NONE,
+    });
+    Ok(())
+}
+
+/// `d` in place of the document with its id, else at the end.
+fn put(list: &mut Vec<serde_json::Value>, d: serde_json::Value) {
+    match list.iter_mut().find(|x| x["id"] == d["id"]) {
+        Some(x) => *x = d,
+        None => list.push(d),
+    }
+}
+
 /// Has one of their other machines start, stop or restart a wadspace (its
 /// relay runs it within a few seconds).
 pub async fn command(machine: String, kind: &'static str, wadspace: String) -> Result<(), String> {

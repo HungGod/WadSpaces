@@ -31,6 +31,8 @@ impl Topic {
     pub const ACTIVITY: Topic = Topic(1 << 10);
     /// wadd counted the disk again (GET /v1/storage has a new report).
     pub const STORAGE: Topic = Topic(1 << 11);
+    /// The machine's saved sign-ins and tokens (GET /v1/signins, /v1/secrets).
+    pub const SIGNINS: Topic = Topic(1 << 12);
     pub const NONE: Topic = Topic(0);
 
     pub fn any(self, other: Topic) -> bool {
@@ -61,6 +63,10 @@ pub struct AppState {
     /// Builds since the app started, with their logs (the tray's).
     pub builds: Vec<(wad_proto::v1::Build, Vec<String>)>,
     pub launches: Vec<(wad_proto::v1::Launch, Vec<String>)>,
+    /// The saved sign-ins here (None until read).
+    pub signins: Option<Vec<wad_proto::v1::SignIn>>,
+    /// The machine's tokens, by name (never their values).
+    pub secrets: Vec<wad_proto::v1::SecretInfo>,
 }
 
 /// A job's log, with lines from `from` on (an event repeats or skips none).

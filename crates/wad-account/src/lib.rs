@@ -48,6 +48,9 @@ pub enum Error {
     Taken,
     #[error("Usernames are 3-24 letters, digits, dots, dashes or underscores.")]
     BadUsername,
+    /// A document that can't be saved as it is.
+    #[error("{0}")]
+    Invalid(String),
     #[error("{0}")]
     Firebase(#[from] wad_firebase::Error),
 }
