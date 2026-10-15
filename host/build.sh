@@ -105,6 +105,15 @@ sudo_once() {
     SUDO_KEEPALIVE=$!
 }
 
+# A binary into the image without its symbols (the release profile keeps
+# them); a copy that has them stays in .build/debug for backtraces.
+install_stripped() {
+    local name; name="$(basename "$2")"
+    mkdir -p "${ROOT}/.build/debug"
+    objcopy --only-keep-debug "$1" "${ROOT}/.build/debug/${name}.debug"
+    install -s -m 755 "$1" "$2"
+}
+
 # Built here rather than in a container: this laptop runs Fedora 43 like the
 # image, so the app links against the same WebKitGTK. The image build runs
 # `client --version` to check that it loads.
@@ -119,7 +128,7 @@ stage_client() {
     [[ -f "${CLIENT_DIR}/.env.local" ]] || { echo "no ${CLIENT_DIR}/.env.local: WadSpaces Client needs the Firebase web config (see .env.example)" >&2; exit 1; }
     echo ">> building WadSpaces Client (Tauri) in ${CLIENT_DIR}"
     (cd "${CLIENT_DIR}" && npm ci --no-audit --no-fund && npm run build:app)
-    install -m 755 "${ROOT}/target/release/client" "${out}/client"
+    install_stripped "${ROOT}/target/release/client" "${out}/client"
 }
 
 stage_wadd() {
@@ -127,7 +136,7 @@ stage_wadd() {
     rm -rf "${out}" && mkdir -p "${out}"
     echo ">> building wadd (apps/wadd)"
     (cd "${ROOT}" && cargo build --release --quiet -p wadd)
-    install -m 755 "${ROOT}/target/release/wadd" "${out}/wadd"
+    install_stripped "${ROOT}/target/release/wadd" "${out}/wadd"
 }
 
 stage_hud() {
@@ -135,7 +144,7 @@ stage_hud() {
     rm -rf "${out}" && mkdir -p "${out}"
     echo ">> building the HUD (apps/hud)"
     (cd "${ROOT}" && cargo build --release --quiet -p wadspaces-hud)
-    install -m 755 "${ROOT}/target/release/wadspaces-hud" "${out}/hud"
+    install_stripped "${ROOT}/target/release/wadspaces-hud" "${out}/hud"
 }
 
 # WadBrowser for the machine itself (an app wadd runs, like the terminal:

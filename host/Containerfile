@@ -6,7 +6,7 @@
 #   host/build.sh image        (or: podman build -f host/Containerfile -t localhost/wadspaces-host .)
 FROM quay.io/fedora/fedora-bootc:43
 
-RUN dnf -y install \
+RUN dnf -y install --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
       sway greetd podman \
       webkit2gtk4.1 librsvg2 shared-mime-info \
       python3 \
@@ -21,13 +21,13 @@ RUN dnf -y install \
 # Sound: PipeWire in the kiosk session (socket-activated user units). Native
 # wadspaces play through its PulseAudio socket (wad-core's quadlet sets
 # PULSE_SERVER), and the HUD's volume slider is wpctl (wireplumber).
-RUN dnf -y install \
+RUN dnf -y install --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
       pipewire pipewire-pulseaudio pipewire-alsa wireplumber alsa-ucm alsa-sof-firmware \
     && dnf clean all \
     && systemctl --global enable pipewire.socket pipewire-pulse.socket wireplumber.service
 
 # WadBrowser's media: GStreamer's common codecs (WebKitGTK plays through it).
-RUN dnf -y install \
+RUN dnf -y install --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
       gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugin-libav \
     && dnf clean all
 
@@ -47,52 +47,40 @@ RUN kver="$(ls /usr/lib/modules)" \
        done \
     && rm /tmp/initrd.txt
 
-# Tailscale, the trusted network between the owner's machines, from
-# Tailscale's own repo. Its own layer, so the ones
-# above stay cached. tailscaled keeps its state in /var/lib/tailscale, which
-# bootc keeps across updates. Parked for now: installed, but masked below
-# (masked rather than just not enabled, because a machine that had it
-# enabled keeps that in its /etc across updates).
-RUN curl -fsSLo /etc/yum.repos.d/tailscale.repo https://pkgs.tailscale.com/stable/fedora/tailscale.repo \
-    && dnf -y install tailscale \
-    && dnf clean all
-
 # grim: the HUD's switcher (Super+Tab) shows each wadspace as it last looked,
 # a small screenshot taken as it opens. Its own layer, so those above stay cached.
-RUN dnf -y install grim && dnf clean all
+RUN dnf -y install --setopt=install_weak_deps=False --setopt=tsflags=nodocs grim && dnf clean all
 
 COPY host/etc/ /etc/
 COPY host/usr/ /usr/
 # The WadSpaces Client, the Tauri app (built by host/build.sh from apps/client).
 # It's the shell: wadd keeps its window (app_id "client") on screen.
-COPY .build/client-app/client /usr/bin/client
+COPY --chmod=755 .build/client-app/client /usr/bin/client
 # wadd (apps/wadd), built by host/build.sh.
-COPY .build/wadd/wadd /usr/bin/wadd
+COPY --chmod=755 .build/wadd/wadd /usr/bin/wadd
 # The HUD (apps/hud, Rust + GTK4 layer-shell), built by host/build.sh.
-COPY .build/hud/hud /usr/libexec/wadspaces/hud
+COPY --chmod=755 .build/hud/hud /usr/libexec/wadspaces/hud
 # WadBrowser, the machine's own browser app (wadd runs it), built by host/build.sh.
-COPY .build/wadbrowser/wadbrowser /usr/bin/wadbrowser
+COPY --chmod=755 .build/wadbrowser/wadbrowser /usr/bin/wadbrowser
 # Staged by host/build.sh from host/secrets/: the admin password hash, which
 # wadspaces-admin-password.service applies. (No podman secrets are baked in:
 # a machine gets its GitHub token by signing in, or from the account.)
 COPY .build/secrets/ /usr/lib/wadspaces/secrets/
 COPY .build/ssh/ /usr/share/wadspaces/ssh/
 
-RUN chmod 755 /usr/libexec/wadspaces/* /usr/bin/wadd /usr/bin/client /usr/bin/wadbrowser && \
-    /usr/bin/client --version && \
+RUN /usr/bin/client --version && \
     /usr/bin/wadbrowser --version && \
     foot --check-config && \
     find /usr/lib/wadspaces/secrets -type d -exec chmod 700 {} + && \
     find /usr/lib/wadspaces/secrets -type f -exec chmod 600 {} + && \
     chmod 644 /usr/share/wadspaces/ssh/* && \
-    for b in dbus-run-session sway curl nmcli skopeo bootc tailscale wpctl foot; do \
+    for b in dbus-run-session sway curl nmcli skopeo bootc wpctl foot; do \
       command -v "$b" > /dev/null || { echo "missing $b" >&2; exit 1; }; \
     done && \
     ls /usr/lib/firmware/mrvl/pcie8897_uapsta.bin* /usr/lib64/libgtk4-layer-shell.so.0 > /dev/null && \
     /usr/bin/wadd version && \
     systemctl enable greetd.service podman.socket wadd.socket wadd.service \
       wadspaces-admin-password.service wadspaces-import.service && \
-    systemctl mask tailscaled.service && \
     systemctl mask bootc-fetch-apply-updates.timer bootc-fetch-apply-updates.service && \
     systemctl set-default graphical.target && \
     systemctl mask getty@tty1.service && \
