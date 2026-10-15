@@ -52,6 +52,12 @@ COPY host/usr/ /usr/
 # The WadSpaces Client, the Tauri app (built by host/build.sh from apps/client).
 # It's the shell: wadd keeps its window (app_id "client") on screen.
 COPY --chmod=755 .build/client-app/client /usr/bin/client
+# The native WadSpaces Client (apps/desktop) and its sign-in window, beside
+# the Tauri one until the switch (client-session picks), and the account's
+# Firebase project.
+COPY --chmod=755 .build/desktop/client-native /usr/bin/client-native
+COPY --chmod=755 .build/desktop/client-signin /usr/libexec/wadspaces/client-signin
+COPY .build/desktop/firebase.toml /usr/lib/wadspaces/firebase.toml
 # wadd (apps/wadd), built by host/build.sh.
 COPY --chmod=755 .build/wadd/wadd /usr/bin/wadd
 # The HUD (apps/hud, Rust + GTK4 layer-shell), built by host/build.sh.
@@ -70,6 +76,7 @@ COPY .build/ssh/ /usr/share/wadspaces/ssh/
 COPY .build/ours.list /usr/lib/wadspaces/ours.list
 
 RUN /usr/bin/client --version && \
+    /usr/bin/client-native --version && \
     /usr/bin/wadbrowser --version && \
     foot --check-config && \
     find /usr/lib/wadspaces/secrets -type d -exec chmod 700 {} + && \
@@ -93,7 +100,7 @@ RUN /usr/bin/client --version && \
 RUN python3 - <<'EOF'
 import os
 ours = [l.strip() for l in open("/usr/lib/wadspaces/ours.list") if l.strip()]
-ours += ["/usr/bin/client", "/usr/bin/wadd", "/usr/bin/wadbrowser"]
+ours += ["/usr/bin/client", "/usr/bin/client-native", "/usr/bin/wadd", "/usr/bin/wadbrowser"]
 for top in ["/usr/libexec/wadspaces", "/usr/share/wadspaces", "/usr/lib/wadspaces"]:
     ours += [os.path.join(d, f) for d, _, fs in os.walk(top) for f in fs]
 for p in set(ours):

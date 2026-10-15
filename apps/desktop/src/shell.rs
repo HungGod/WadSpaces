@@ -238,6 +238,7 @@ pub fn shell() -> gtk::Widget {
     });
     crate::tour::target("launcher", &launch);
     crate::tour::attach(&frame);
+    crate::chrome::attach(&frame);
     let sh = Rc::new(Shell {
         side: side.clone(),
         side_width: side_width.clone(),

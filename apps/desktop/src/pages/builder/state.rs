@@ -155,6 +155,22 @@ pub fn tell(n: Option<Note>) {
     }
 }
 
+/// Signed out: nothing of theirs stays (the next person's board is read
+/// afresh, with what this machine kept for them).
+pub fn reset() {
+    write(|s| {
+        s.board = Board::default();
+        s.loaded = false;
+        s.unsaved = None;
+        s.save_error = None;
+        s.stale = false;
+        s.created = None;
+        s.renaming = false;
+        s.kept.clear();
+    });
+    changed();
+}
+
 /// The documents as the library has them.
 pub fn docs(s: &AppState) -> Option<Docs> {
     let l = s.library.as_ref()?;
@@ -818,6 +834,21 @@ mod tests {
         assert_eq!(dependents(&s, "template", "base", true), vec!["Dev (recently deleted)", "Dev setup", "Site"]);
         assert_eq!(dependents(&s, "extensions", "e1", true), vec!["Site"]);
         assert!(dependents(&s, "template", "dev", true).is_empty());
+    }
+
+    #[test]
+    fn signing_out_leaves_nothing_of_theirs() {
+        write(|s| {
+            s.board = Board::new(vec![Stack::new("theirs")], vec![]);
+            s.loaded = true;
+            s.unsaved = Some(vec![Stack::new("theirs")]);
+        });
+        write(|s| s.redraw.clear());
+        reset();
+        read(|s| {
+            assert!(s.board.stacks.is_empty() && !s.board.can_undo());
+            assert!(!s.loaded && s.unsaved.is_none());
+        });
     }
 
     #[test]

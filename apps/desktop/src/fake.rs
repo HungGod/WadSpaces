@@ -49,6 +49,7 @@ pub fn load(path: &std::path::Path) {
         s.states = states.into_iter().map(|st| (st.id.clone(), st)).collect();
         s.library = take(&v, "library").ok();
         s.session = take(&v, "session").ok().flatten();
+        s.view = take(&v, "view").ok();
         s.cloud = take(&v, "cloud").ok();
         #[derive(serde::Deserialize)]
         struct B {

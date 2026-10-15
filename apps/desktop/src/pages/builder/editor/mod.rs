@@ -102,6 +102,13 @@ fn the_layer() -> Option<gtk::Overlay> {
     LAYER.with(|l| l.borrow().clone())
 }
 
+/// The open editor, cancelled (its draft goes).
+pub fn cancel() {
+    if let Some(ed) = current() {
+        ed.close(false);
+    }
+}
+
 /// Something shown over the app in the editor's place (the Preview).
 pub fn layer_show(w: &impl IsA<gtk::Widget>) {
     let Some(layer) = the_layer() else { return };
@@ -822,9 +829,7 @@ pub mod sim {
     }
 
     pub fn close() {
-        if let Some(ed) = current() {
-            ed.close(false);
-        }
+        cancel();
     }
 
     pub fn save() {

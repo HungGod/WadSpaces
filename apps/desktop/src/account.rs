@@ -443,6 +443,12 @@ pub fn sign_out() {
         s.library = None;
         Topic::ACCOUNT | Topic::LIBRARY
     });
+    // Nothing of theirs stays for whoever signs in next.
+    crate::pages::builder::editor::cancel();
+    crate::pages::builder::preview::close();
+    crate::pages::builder::state::reset();
+    crate::tour::reset();
+    crate::notices::reset();
 }
 
 pub fn suggested_username() -> String {

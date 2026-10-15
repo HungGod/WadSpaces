@@ -283,6 +283,13 @@ impl Store {
                         Topic::ACTIVITY
                     }
                     Event::Storage { .. } => Topic::STORAGE,
+                    // Something wadd tells whoever's watching: a toast.
+                    Event::Notice { text } => {
+                        gtk::glib::idle_add_local_once(move || {
+                            crate::toast::show(&text, None, crate::toast::Tone::Info)
+                        });
+                        Topic::NONE
+                    }
                     _ => Topic::NONE,
                 }
             }

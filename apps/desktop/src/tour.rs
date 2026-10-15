@@ -166,6 +166,17 @@ pub fn start_once() {
     }
 }
 
+/// Signed out: the tour stops (it starts again for whoever's next, if
+/// they're new).
+pub fn reset() {
+    with(|s| {
+        s.step = None;
+        s.started = false;
+        s.created = false;
+    });
+    clear();
+}
+
 pub fn running() -> bool {
     with(|s| s.step.is_some())
 }

@@ -67,6 +67,16 @@ fn redraw(new: Option<&Notice>) {
     }
 }
 
+/// Signed out: their notices go.
+pub fn reset() {
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.list.clear();
+        s.seen.clear();
+    });
+    redraw(None);
+}
+
 fn read_all() {
     STATE.with(|s| s.borrow_mut().list.iter_mut().for_each(|n| n.read = true));
     redraw(None);

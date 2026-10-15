@@ -189,8 +189,8 @@
   {
    "id": "cosmic-bodybuilding",
    "container": "running",
-   "phase": "ready",
-   "message": null,
+   "phase": "starting",
+   "message": "Opening its desktop",
    "error": null,
    "imagePresent": true,
    "since": 1792020000
@@ -271,5 +271,12 @@
     "Getting the image ready"
    ]
   }
- ]
+ ],
+ "view": {
+  "view": {
+   "kind": "home"
+  },
+  "pending": "cosmic-bodybuilding",
+  "nativeDisplay": true
+ }
 }

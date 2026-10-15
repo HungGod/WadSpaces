@@ -140,6 +140,31 @@ stage_client() {
     install_stripped "${ROOT}/target/release/client" "${out}/client"
 }
 
+# The native WadSpaces Client (apps/desktop, GTK4) and its sign-in window
+# (apps/signin), beside the Tauri one until the switch: client-session runs
+# it when ~/.config/wadspaces/client says "native". Its account settings
+# are the web app's (public) Firebase config, in firebase.toml.
+stage_desktop() {
+    local out="${ROOT}/.build/desktop" env="${CLIENT_DIR}/.env.local"
+    rm -rf "${out}" && mkdir -p "${out}"
+    [[ -f "${env}" ]] || { echo "no ${env}: the native client needs the Firebase web config (see .env.example)" >&2; exit 1; }
+    echo ">> building the native WadSpaces Client (apps/desktop, apps/signin)"
+    (cd "${ROOT}" && cargo build --release --quiet -p wadspaces-desktop -p client-signin)
+    install_stripped "${ROOT}/target/release/wadspaces-desktop" "${out}/client-native"
+    install_stripped "${ROOT}/target/release/client-signin" "${out}/client-signin"
+    local key value
+    {
+        echo "# The account's Firebase project (host/build.sh, from apps/client/.env.local)."
+        for key in api_key:API_KEY project_id:PROJECT_ID auth_domain:AUTH_DOMAIN; do
+            value="$(sed -n "s/^VITE_FIREBASE_${key#*:}=//p" "${env}" | tail -n 1 | tr -d '"')"
+            echo "${key%%:*} = \"${value}\""
+        done
+        value="$(sed -n "s/^VITE_FUNCTIONS_REGION=//p" "${env}" | tail -n 1 | tr -d '"')"
+        if [[ -n "${value}" ]]; then echo "functions_region = \"${value}\""; fi
+    } > "${out}/firebase.toml"
+    grep -q '^api_key = ".\+"' "${out}/firebase.toml" || { echo "no VITE_FIREBASE_API_KEY in ${env}" >&2; exit 1; }
+}
+
 stage_wadd() {
     local out="${ROOT}/.build/wadd"
     rm -rf "${out}" && mkdir -p "${out}"
@@ -169,6 +194,7 @@ stage_wadbrowser() {
 
 # The pictures wadspaces' desktops show (wad-core's catalog icons, the brand,
 # the folder), from the client's public folder: just those, not the shots.
+# The native client reads them too, with the wallpapers and the fonts.
 stage_assets() {
     local out="${ROOT}/.build/assets" pub="${ROOT}/apps/client/public"
     rm -rf "${out}" && mkdir -p "${out}/apps" "${out}/brand"
@@ -180,6 +206,8 @@ stage_assets() {
     cp "${pub}"/brand/*-icon-*.svg "${out}/brand/"
     mkdir -p "${out}/icons" && cp "${pub}"/icons/* "${out}/icons/"
     cp "${pub}/folder.svg" "${out}/"
+    mkdir -p "${out}/wallpapers" && cp "${pub}"/wallpapers/* "${out}/wallpapers/"
+    mkdir -p "${out}/fonts" && cp "${ROOT}"/assets/fonts/* "${out}/fonts/"
 }
 
 # Where host/etc and host/usr's files land in the image: the Containerfile
@@ -434,6 +462,7 @@ case "${TARGET}" in
 esac
 
 stage_client
+stage_desktop
 stage_wadd
 stage_hud
 stage_wadbrowser
