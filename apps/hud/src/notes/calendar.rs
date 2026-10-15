@@ -408,7 +408,7 @@ impl CalendarCard {
         self.scopes_box.append(&chips.row);
         self.scopes.replace(Some((chips, ids)));
         if let Some(d) = glib_date(e.start.date()) {
-            self.day_pick.select_day(&d);
+            self.day_pick.set_date(&d);
         }
         self.all_day.set_active(e.all_day);
         self.times.set_visible(!e.all_day);

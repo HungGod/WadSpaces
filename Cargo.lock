@@ -1671,6 +1671,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "gdk4-wayland"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99cc5266dc4e8745a4c4683b26a0c54977a452809d572c940e39c6844663c0ec"
+dependencies = [
+ "gdk4",
+ "gdk4-wayland-sys",
+ "gio 0.22.10",
+ "glib 0.22.10",
+ "libc",
+]
+
+[[package]]
+name = "gdk4-wayland-sys"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb55bc5225519d34fdf1412db3755af88d1388a1c2a053d92e6751db13d96e68"
+dependencies = [
+ "glib-sys 0.22.9",
+ "libc",
+ "system-deps 9.0.0",
+]
+
+[[package]]
 name = "gdkwayland-sys"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5750,6 +5774,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wad-gtk"
+version = "0.1.0"
+dependencies = [
+ "gtk4",
+ "pango 0.22.9",
+ "resvg",
+ "tracing",
+]
+
+[[package]]
 name = "wad-icons"
 version = "0.1.0"
 dependencies = [
@@ -5870,6 +5904,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "wad-wadd-client"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "wad-config",
+ "wad-proto",
+ "wadd",
+]
+
+[[package]]
+name = "wad-wallpaper"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tiny-skia",
+]
+
+[[package]]
 name = "wad-wasm"
 version = "0.1.0"
 dependencies = [
@@ -5934,6 +5993,23 @@ dependencies = [
  "wad-sway",
  "wad-systemd",
  "wiremock",
+]
+
+[[package]]
+name = "wadspaces-desktop"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "gdk4-wayland",
+ "gtk4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "wad-gtk",
+ "wad-proto",
+ "wad-wadd-client",
 ]
 
 [[package]]

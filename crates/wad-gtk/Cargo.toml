@@ -1,0 +1,13 @@
+[package]
+name = "wad-gtk"
+description = "WadSpaces' look in GTK4: the site's colours as CSS tokens, its fonts, lucide icons, springs, keyed lists"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.11", features = ["v4_20"] }
+resvg = { version = "0.48", default-features = false }
+pango = { version = "0.22", features = ["v1_56"] }
+tracing.workspace = true

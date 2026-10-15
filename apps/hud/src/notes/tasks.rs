@@ -190,7 +190,7 @@ impl TasksCard {
         due_set.connect_clicked(move |_| {
             let open = !c.due_pick.reveals_child();
             if open && let Some(d) = glib_date(c.due.get().unwrap_or_else(|| now().date())) {
-                c.due_calendar.select_day(&d);
+                c.due_calendar.set_date(&d);
             }
             c.due_pick.set_reveal_child(open);
             c.ctx.relayout();

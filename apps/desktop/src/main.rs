@@ -1,0 +1,46 @@
+//! WadSpaces Client, native (GTK4): the machine's shell. It talks to wadd
+//! on its socket (crates/wad-wadd-client), and draws the site's design
+//! (crates/wad-gtk) without a web view.
+//!
+//!   wadspaces-desktop [--kiosk] [--snapshot DIR] [--version]
+//!
+//! --kiosk     full screen, no window frame (the machine's session)
+//! --snapshot  draws each page, dark and light, to DIR/*.png and exits
+
+mod app;
+mod rt;
+mod shell;
+mod store;
+
+#[derive(Debug, Default, Clone)]
+pub struct Args {
+    pub kiosk: bool,
+    pub snapshot: Option<std::path::PathBuf>,
+}
+
+fn main() -> std::process::ExitCode {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "wadspaces_desktop=info,wad_gtk=info".into()),
+        )
+        .with_target(false)
+        .init();
+    let mut args = Args::default();
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--kiosk" => args.kiosk = true,
+            "--snapshot" => args.snapshot = it.next().map(Into::into),
+            "--version" => {
+                println!("wadspaces-desktop {}", env!("CARGO_PKG_VERSION"));
+                return std::process::ExitCode::SUCCESS;
+            }
+            other => {
+                eprintln!("unknown option {other:?}: wadspaces-desktop [--kiosk] [--snapshot DIR] [--version]");
+                return std::process::ExitCode::from(2);
+            }
+        }
+    }
+    app::run(args)
+}
