@@ -474,7 +474,9 @@ podman build -f "${ROOT}/host/Containerfile" -t "${IMAGE%:*}:unchunked" "${ROOT}
 rechunk
 
 case "${TARGET}" in
-    image) ;;
+    image)
+        echo ">> done: ${IMAGE} is built here (nothing written to a drive; host/build.sh update puts it on one)"
+        ;;
     qcow2|iso|raw)
         mkdir -p "${ROOT}/output"
         # bootc-image-builder reads the image from root's storage.
