@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/client/src-tauri", "apps/wadd", "apps/hud", "apps/wadbrowser", "apps/desktop", "xtask"]
+members = ["crates/*", "apps/client/src-tauri", "apps/wadd", "apps/hud", "apps/wadbrowser", "apps/desktop", "apps/signin", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,6 +26,7 @@ wad-notes = { path = "crates/wad-notes" }
 wad-wallpaper = { path = "crates/wad-wallpaper" }
 wad-wadd-client = { path = "crates/wad-wadd-client" }
 wad-gtk = { path = "crates/wad-gtk" }
+wad-account = { path = "crates/wad-account" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

@@ -1,0 +1,12 @@
+[package]
+name = "client-signin"
+description = "The GitHub sign-in window for WadSpaces Client (native): Firebase's sign-in page in WebKit, its answer on stdout"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gtk.workspace = true
+webkit2gtk.workspace = true
+serde_json.workspace = true

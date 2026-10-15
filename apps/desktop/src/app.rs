@@ -56,9 +56,11 @@ fn window(app: &gtk::Application, args: &Args) -> gtk::ApplicationWindow {
         w.set_decorated(false);
         w.fullscreen();
     }
-    // sway knows the shell as "client" (host/etc/sway/wadspaces.conf):
-    // named before it's first shown, so the rules match.
-    w.connect_realize(|w| {
+    // sway knows the shell as "client" (host/etc/sway/wadspaces.conf). GTK
+    // names the window after the application's id once its toplevel exists
+    // (on map); renamed straight after, before its first frame, so sway's
+    // rules see "client".
+    w.connect_map(|w| {
         if let Some(t) = w.surface().and_then(|s| s.downcast::<gdk_wayland::WaylandToplevel>().ok()) {
             t.set_application_id(WINDOW_APP_ID);
         }

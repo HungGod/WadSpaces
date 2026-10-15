@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 use wad_proto::{ApiError, ErrorCode};
 
 pub use functions::Functions;
-pub use identity::{Identity, Tokens};
+pub use identity::{Identity, IdpSignIn, Tokens};
 
 const FIRESTORE: &str = "https://firestore.googleapis.com";
 
@@ -35,6 +35,9 @@ pub enum Error {
     Auth { status: u16, message: String },
     #[error("{message}")]
     Callable { status: String, message: String },
+    /// A commit's precondition didn't hold (the document was there, or wasn't).
+    #[error("Firestore refused the change: {0}")]
+    Precondition(String),
 }
 
 impl From<Error> for ApiError {
@@ -45,6 +48,7 @@ impl From<Error> for ApiError {
             Error::Denied => ErrorCode::Forbidden,
             Error::Network(_) => ErrorCode::Offline,
             Error::Upstream { .. } | Error::Callable { .. } => ErrorCode::Upstream,
+            Error::Precondition(_) => ErrorCode::Conflict,
             Error::Auth { .. } => ErrorCode::Unauthorized,
         };
         ApiError::new(code, e.to_string())
@@ -154,9 +158,53 @@ impl Firestore {
         self.send(self.http.patch(self.url(path)).bearer_auth(id_token).query(&mask).json(&body)).await.map(drop)
     }
 
+    /// Replaces a document with these fields (creating it if need be).
+    pub async fn set(&self, id_token: &str, path: &str, data: &Map<String, Value>) -> Result<(), Error> {
+        check_path(path, true)?;
+        let body = serde_json::json!({ "fields": values::to_fields(data) });
+        self.send(self.http.patch(self.url(path)).bearer_auth(id_token).json(&body)).await.map(drop)
+    }
+
+    /// Writes all of `writes` or none (a transaction without reads): a
+    /// precondition that fails fails them all (Error::Precondition), and
+    /// the rules see the writes together (`getAfter`).
+    pub async fn commit(&self, id_token: &str, writes: &[Write]) -> Result<(), Error> {
+        let body =
+            serde_json::json!({ "writes": writes.iter().map(|w| w.rest(&self.name_of(&w.path))).collect::<Vec<_>>() });
+        for w in writes {
+            check_path(&w.path, true)?;
+        }
+        let url = format!("{}/v1/projects/{}/databases/(default)/documents:commit", self.base, self.project);
+        match self.send(self.http.post(url).bearer_auth(id_token).json(&body)).await {
+            Ok(_) => Ok(()),
+            Err(Error::Upstream { status: 400 | 404 | 409, message })
+                if message.contains("FAILED_PRECONDITION")
+                    || message.contains("ALREADY_EXISTS")
+                    || message.contains("NOT_FOUND") =>
+            {
+                Err(Error::Precondition(message))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A document's full name, as a write names it.
+    fn name_of(&self, path: &str) -> String {
+        format!("projects/{}/databases/(default)/documents/{path}", self.project)
+    }
+
     pub async fn delete(&self, id_token: &str, path: &str) -> Result<(), Error> {
         check_path(path, true)?;
         self.send(self.http.delete(self.url(path)).bearer_auth(id_token)).await.map(drop)
+    }
+
+    /// Runs a structured query on top-level collections (`from` names them):
+    /// the documents.
+    pub async fn query_root(&self, id_token: &str, structured: Value) -> Result<Vec<Value>, Error> {
+        let body = serde_json::json!({ "structuredQuery": structured });
+        let url = format!("{}/v1/projects/{}/databases/(default)/documents:runQuery", self.base, self.project);
+        let rows = self.send(self.http.post(url).bearer_auth(id_token).json(&body)).await?;
+        Ok(rows.as_array().into_iter().flatten().filter_map(|r| r.get("document").cloned()).collect())
     }
 
     /// Runs a structured query on a document's subcollections: the documents.
@@ -167,6 +215,50 @@ impl Firestore {
             .send(self.http.post(format!("{}:runQuery", self.url(parent))).bearer_auth(id_token).json(&body))
             .await?;
         Ok(rows.as_array().into_iter().flatten().filter_map(|r| r.get("document").cloned()).collect())
+    }
+}
+
+/// One write of a commit: a document set to these fields (`$time` values as
+/// in values.rs), with server timestamps and a precondition if wanted.
+#[derive(Debug, Clone)]
+pub struct Write {
+    pub path: String,
+    pub data: Map<String, Value>,
+    /// Fields set to the time the server commits (Firestore's REQUEST_TIME).
+    pub server_time: Vec<String>,
+    /// Some(false): only if it isn't there yet; Some(true): only if it is.
+    pub exists: Option<bool>,
+}
+
+impl Write {
+    pub fn set(path: impl Into<String>, data: Map<String, Value>) -> Self {
+        Self { path: path.into(), data, server_time: vec![], exists: None }
+    }
+
+    /// Only if the document isn't there yet.
+    pub fn creating(mut self) -> Self {
+        self.exists = Some(false);
+        self
+    }
+
+    pub fn now(mut self, field: &str) -> Self {
+        self.server_time.push(field.into());
+        self
+    }
+
+    fn rest(&self, name: &str) -> Value {
+        let mut w = serde_json::json!({ "update": { "name": name, "fields": values::to_fields(&self.data) } });
+        if !self.server_time.is_empty() {
+            w["updateTransforms"] = self
+                .server_time
+                .iter()
+                .map(|f| serde_json::json!({ "fieldPath": f, "setToServerValue": "REQUEST_TIME" }))
+                .collect();
+        }
+        if let Some(e) = self.exists {
+            w["currentDocument"] = serde_json::json!({ "exists": e });
+        }
+        w
     }
 }
 
@@ -203,6 +295,35 @@ mod tests {
         fs.set_strings("idtok", "users/u1/secrets/github_token", &[("value", "gho_abc")]).await.unwrap();
         let denied = fs.set_strings("idtok", "users/u2/secrets/github_token", &[("value", "x")]).await;
         assert!(matches!(denied, Err(Error::Denied)));
+    }
+
+    #[tokio::test]
+    async fn commits_writes_together() {
+        let s = MockServer::start().await;
+        let doc = |p: &str| format!("projects/wad-spaces/databases/(default)/documents/{p}");
+        Mock::given(method("POST"))
+            .and(path("/v1/projects/wad-spaces/databases/(default)/documents:commit"))
+            .and(body_json(json!({"writes": [
+                {"update": {"name": doc("usernames/octo"), "fields": {"uid": {"stringValue": "u1"}}}, "currentDocument": {"exists": false}},
+                {"update": {"name": doc("profiles/u1"), "fields": {"username": {"stringValue": "octo"}}},
+                 "updateTransforms": [{"fieldPath": "createdAt", "setToServerValue": "REQUEST_TIME"}]}
+            ]})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"writeResults": []})))
+            .up_to_n_times(1)
+            .mount(&s)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(400).set_body_string(r#"{"error":{"status":"FAILED_PRECONDITION"}}"#))
+            .mount(&s)
+            .await;
+        let fs = Firestore::with_base(reqwest::Client::new(), &s.uri(), "wad-spaces").unwrap();
+        let o = |k: &str, v: &str| json!({ k: v }).as_object().unwrap().clone();
+        let writes = [
+            Write::set("usernames/octo", o("uid", "u1")).creating(),
+            Write::set("profiles/u1", o("username", "octo")).now("createdAt"),
+        ];
+        fs.commit("t", &writes).await.unwrap();
+        assert!(matches!(fs.commit("t", &writes).await, Err(Error::Precondition(_))));
     }
 
     #[tokio::test]
