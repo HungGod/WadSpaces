@@ -297,7 +297,7 @@ function without(stacks: Stack[], stackId: string, ids: string[]): Stack[] {
  * doesn't fit replaces the stack's templates. Whatever doesn't add up after
  * (setups or keys for an app it doesn't have) shows as a problem to fix.
  */
-function place(stack: Stack, modules: Module[]): { ok: true; stack: Stack; replaced: Module[] } | { ok: false; why: string } {
+export function place(stack: Stack, modules: Module[]): { ok: true; stack: Stack; replaced: Module[] } | { ok: false; why: string } {
   const adding = modules.filter((m): m is TemplateModule => m.layer === "template");
   for (let i = 1; i < adding.length; i++) {
     const v = buildsOn(adding[i], adding[i - 1], appName);
@@ -342,7 +342,7 @@ function fresh(modules: Module[]): Stack {
 }
 
 /** A copied customization's name: the original's with " - n", n counting the copies. */
-function copyName(name: string, taken: string[]): string {
+export function copyName(name: string, taken: string[]): string {
   const base = name.replace(/ - \d+$/, "");
   if (!base.trim()) return name;
   const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} - (\\d+)$`);
@@ -351,7 +351,7 @@ function copyName(name: string, taken: string[]): string {
 }
 
 /** Templates with the same apps are one template (the same image), shared by the stacks that have it. */
-const sameApps = (a: TemplateModule, b: TemplateModule) => a.apps.length === b.apps.length && a.apps.every((x) => b.apps.includes(x));
+export const sameApps = (a: TemplateModule, b: TemplateModule) => a.apps.length === b.apps.length && a.apps.every((x) => b.apps.includes(x));
 
 /** Renames a shared template everywhere it's used. Returns the stacks and how many of them it touched. */
 function renameTemplate(stacks: Stack[], t: TemplateModule, name: string): { stacks: Stack[]; count: number } {
@@ -369,7 +369,7 @@ function renameTemplate(stacks: Stack[], t: TemplateModule, name: string): { sta
  * template they're built on (its apps) and their app setups. Stacks that
  * differ only in their customization share it, and its name.
  */
-function extSig(s: Stack): string | null {
+export function extSig(s: Stack): string | null {
   const e = s.extensions;
   if (!e) return null;
   const sorted = (xs: string[]) => [...xs].sort().join(",");
@@ -435,7 +435,7 @@ function landing(modules: Module[], from: ModuleSource, move: boolean | undefine
  * longest chain each building on the one before (Dev → Game Dev), so the new
  * one can stack on top of them.
  */
-function chainUnder(t: TemplateModule, stacks: Stack[]): TemplateModule[] {
+export function chainUnder(t: TemplateModule, stacks: Stack[]): TemplateModule[] {
   const sig = (apps: string[]) => [...apps].sort().join(",");
   const within = (a: TemplateModule, b: { apps: string[] }) => a.apps.length < b.apps.length && a.apps.every((x) => b.apps.includes(x));
   const found = new Map<string, TemplateModule>();

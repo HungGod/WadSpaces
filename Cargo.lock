@@ -5861,6 +5861,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wad-board"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wad-core",
+]
+
+[[package]]
 name = "wad-clip"
 version = "0.1.0"
 dependencies = [
