@@ -56,6 +56,9 @@ impl Page {
 
 struct Shell {
     side: gtk::Box,
+    side_width: wad_gtk::Width,
+    tray: gtk::Box,
+    narrow_now: Rc<Cell<bool>>,
     brand: gtk::Box,
     /// What centres when narrow (the nav's rows, the profile).
     centred: Vec<gtk::Widget>,
@@ -83,7 +86,6 @@ pub fn shell() -> gtk::Widget {
     // --- The sidebar.
     let side = gtk::Box::new(gtk::Orientation::Vertical, 0);
     side.add_css_class("sidebar");
-    // Its width is the spring's alone (the profile's text would widen it).
     side.set_hexpand(false);
 
     let brand = gtk::Box::new(gtk::Orientation::Horizontal, 10);
@@ -135,6 +137,9 @@ pub fn shell() -> gtk::Widget {
     bottom.add_css_class("side-bottom");
     bottom.set_vexpand(true);
     bottom.set_valign(gtk::Align::End);
+    let narrow_now = Rc::new(Cell::new(false));
+    let tray = crate::activity::tray(narrow_now.clone());
+    bottom.append(&tray);
 
     let launch = gtk::Button::new();
     launch.add_css_class("launch");
@@ -182,11 +187,14 @@ pub fn shell() -> gtk::Widget {
     bottom.append(&profile);
     side.append(&bottom);
 
-    root.append(&side);
+    // Exactly the spring's width, whatever's in it.
+    let side_width = wad_gtk::Width::new(&side, WIDE as i32);
+    root.append(&side_width);
 
     // --- The page.
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.set_hexpand(true);
+    content.append(&crate::focus::banner());
     let stack = gtk::Stack::new();
     stack.set_transition_type(gtk::StackTransitionType::Crossfade);
     stack.set_transition_duration(120);
@@ -219,6 +227,9 @@ pub fn shell() -> gtk::Widget {
     launch.connect_clicked(|_| crate::launcher::open());
     let sh = Rc::new(Shell {
         side: side.clone(),
+        side_width: side_width.clone(),
+        tray,
+        narrow_now,
         brand: brand.clone(),
         centred,
         stack,
@@ -293,7 +304,7 @@ pub fn go(p: Page) {
 
 fn s_width(s: &Shell, w: f64) {
     let w = w.round() as i32;
-    s.side.set_size_request(w, -1);
+    s.side_width.set_width(w);
     s.collapse.set_margin_start((w - 12).max(0));
 }
 
@@ -337,6 +348,9 @@ impl Shell {
             self.side.add_css_class("narrow");
         } else {
             self.side.remove_css_class("narrow");
+        }
+        if self.narrow_now.replace(narrow) != narrow {
+            crate::activity::redraw(&self.tray, narrow);
         }
         let along = if narrow { gtk::Align::Center } else { gtk::Align::Fill };
         self.brand.set_halign(if narrow { gtk::Align::Center } else { gtk::Align::Start });

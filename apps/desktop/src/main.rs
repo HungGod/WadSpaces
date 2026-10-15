@@ -8,8 +8,10 @@
 //! --snapshot  draws each page, dark and light, to DIR/*.png and exits
 
 mod account;
+mod activity;
 mod app;
 mod fake;
+mod focus;
 mod images;
 mod launch;
 mod launcher;

@@ -662,3 +662,122 @@ spinbutton.number {
   color: var(--fg);
   box-shadow: inset 0 0 0 1px var(--line);
 }
+
+/* ------------------------------------------------------------ activity */
+.tray-card {
+  padding: 8px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.tray-head {
+  padding: 2px 6px 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.3px;
+  color: var(--faint);
+}
+.tray-row { border-radius: 12px; }
+.tray-row:hover { background: var(--surface-2); }
+button.tray-open { all: unset; padding: 6px; }
+.tray-name { font-size: 12px; font-weight: 500; }
+.tray-ref { font-family: monospace; font-size: 10.5px; color: var(--faint); }
+.tray-pct { font-size: 12px; color: var(--faint); font-feature-settings: "tnum"; }
+.tray-done { font-size: 12px; font-weight: 500; color: var(--accent); }
+window.theme-light .tray-done { color: var(--fg); }
+.tray-error { font-size: 12px; color: var(--accent-2); }
+.tray-part { font-size: 11px; color: var(--muted); }
+button.tray-x {
+  all: unset;
+  min-width: 28px;
+  min-height: 28px;
+  margin-right: 4px;
+  border-radius: 8px;
+  color: var(--faint);
+}
+button.tray-x > wad-icon { margin: 7px; }
+button.tray-x:hover { background: var(--surface-3); color: var(--fg); }
+wad-icon.accent-2 { color: var(--accent-2); }
+
+button.ring {
+  all: unset;
+  border-radius: 12px;
+  color: var(--accent);
+}
+button.ring:hover { background: var(--surface-2); }
+.ring-count {
+  min-width: 16px;
+  min-height: 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+progressbar.thin > trough {
+  min-height: 4px;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+progressbar.thin > trough > progress {
+  min-height: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.log-frame {
+  border-radius: 16px;
+  background: #07040f;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+}
+textview.log, textview.log > text {
+  background: transparent;
+  color: #e9e3ff;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 16px;
+}
+.launch-part {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* ---------------------------------------------------------------- focus */
+.focus-banner { border-bottom: 1px solid var(--line); }
+.focus-row { padding: 10px 24px; background: var(--accent-soft); }
+.focus-tag { font-size: 14px; font-weight: 600; color: var(--accent); }
+.focus-clock {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+.focus-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+  color: var(--fg);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+button.focus-open {
+  all: unset;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+progressbar.focus-progress > trough {
+  min-height: 2px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+progressbar.focus-progress > trough > progress {
+  min-height: 2px;
+  background: var(--accent);
+}

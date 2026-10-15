@@ -27,6 +27,8 @@ impl Topic {
     pub const ACCOUNT: Topic = Topic(1 << 8);
     /// The account's library (templates, Extensions, wadspaces) and machines.
     pub const LIBRARY: Topic = Topic(1 << 9);
+    /// Builds and launches under way (the sidebar's tray).
+    pub const ACTIVITY: Topic = Topic(1 << 10);
     pub const NONE: Topic = Topic(0);
 
     pub fn any(self, other: Topic) -> bool {
@@ -54,6 +56,15 @@ pub struct AppState {
     pub cloud: Option<CloudLink>,
     pub account: AccountState,
     pub library: Option<wad_account::Library>,
+    /// Builds since the app started, with their logs (the tray's).
+    pub builds: Vec<(wad_proto::v1::Build, Vec<String>)>,
+    pub launches: Vec<(wad_proto::v1::Launch, Vec<String>)>,
+}
+
+/// A job's log, with lines from `from` on (an event repeats or skips none).
+pub(crate) fn take_lines(log: &mut Vec<String>, from: u64, lines: Vec<String>) {
+    log.truncate(from as usize);
+    log.extend(lines);
 }
 
 /// The person signed in, as far as the app knows.
@@ -231,6 +242,28 @@ impl Store {
                         });
                         s.cloud = Some(c);
                         if same { Topic::NONE } else { Topic::CLOUD }
+                    }
+                    Event::Build(b) => {
+                        let id = b.build.id.clone();
+                        match s.builds.iter_mut().find(|(x, _)| x.id == id) {
+                            Some((x, log)) => {
+                                *x = b.build;
+                                take_lines(log, b.from, b.lines);
+                            }
+                            None => s.builds.push((b.build, b.lines)),
+                        }
+                        Topic::ACTIVITY
+                    }
+                    Event::Launch(l) => {
+                        let id = l.launch.id.clone();
+                        match s.launches.iter_mut().find(|(x, _)| x.id == id) {
+                            Some((x, log)) => {
+                                *x = l.launch;
+                                take_lines(log, l.from, l.lines);
+                            }
+                            None => s.launches.push((l.launch, l.lines)),
+                        }
+                        Topic::ACTIVITY
                     }
                     _ => Topic::NONE,
                 }

@@ -25,6 +25,20 @@ pub fn load(path: &std::path::Path) {
         let states: Vec<wad_proto::v1::WorkspaceState> = take(&v, "states").unwrap_or_default();
         s.states = states.into_iter().map(|st| (st.id.clone(), st)).collect();
         s.library = take(&v, "library").ok();
+        s.session = take(&v, "session").ok().flatten();
+        #[derive(serde::Deserialize)]
+        struct B {
+            build: wad_proto::v1::Build,
+            lines: Vec<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct L {
+            launch: wad_proto::v1::Launch,
+            lines: Vec<String>,
+        }
+        s.builds = take::<Vec<B>>(&v, "builds").unwrap_or_default().into_iter().map(|b| (b.build, b.lines)).collect();
+        s.launches =
+            take::<Vec<L>>(&v, "launches").unwrap_or_default().into_iter().map(|l| (l.launch, l.lines)).collect();
         s.account.checked = true;
         s.account.user = take(&v, "user").ok();
         s.account.github = Some(true);
@@ -38,6 +52,13 @@ pub fn load(path: &std::path::Path) {
             starters_created: true,
             last_session: v.get("lastSession").cloned(),
         });
-        Topic::ACCOUNT | Topic::LIBRARY | Topic::MACHINE | Topic::WORKSPACES | Topic::STATES | Topic::WADD
+        Topic::ACCOUNT
+            | Topic::LIBRARY
+            | Topic::MACHINE
+            | Topic::WORKSPACES
+            | Topic::STATES
+            | Topic::WADD
+            | Topic::SESSION
+            | Topic::ACTIVITY
     });
 }

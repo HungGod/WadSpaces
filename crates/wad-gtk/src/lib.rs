@@ -8,8 +8,10 @@ pub mod icon;
 pub mod keyed;
 pub mod spring;
 pub mod theme;
+pub mod width;
 
 pub use desktop::{DesktopIcon, DesktopThumb};
 pub use icon::{Icon, Svg};
 pub use spring::{Params, Spring};
 pub use theme::Theme;
+pub use width::Width;
