@@ -70,7 +70,9 @@ Use it as the machine's shell for normal work. Then check:
 - A build from the Builder's bucket; a template edited and saved.
 - A focus session, and a restart in the middle of one.
 - Memory: about 60 MB idle (80 MB with the Builder open), against the
-  Tauri app's. On the Surface:
+  Tauri app's. In the headless harness on the laptop (KWin, nothing else
+  sharing GTK), it's 62 MB for an empty account and 86 MB for the sample's
+  two wadspaces, each with a picture wallpaper. On the Surface:
   `grep Pss /proc/$(pidof client-native)/smaps_rollup`. On a laptop:
   `dev/headless.sh measure [--tauri]`.
 - 0% CPU while a wadspace is on screen.

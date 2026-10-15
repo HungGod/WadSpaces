@@ -69,7 +69,7 @@ pub fn open(stack_id: &str) {
     let desk = gtk::Overlay::new();
     desk.add_css_class("preview-desktop");
     desk.set_vexpand(true);
-    desk.set_child(Some(&faces::wallpaper_of(stack.look().map(|l| &l.wallpaper))));
+    desk.set_child(Some(&faces::wallpaper_sized(stack.look().map(|l| &l.wallpaper), true)));
     let window = gtk::Box::new(gtk::Orientation::Vertical, 0);
     window.set_halign(gtk::Align::Center);
     window.set_valign(gtk::Align::Center);

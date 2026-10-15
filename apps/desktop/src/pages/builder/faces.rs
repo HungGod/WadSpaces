@@ -391,8 +391,14 @@ fn prompts_for(stack: &Stack, subs: &[CustomSub]) -> (Vec<(&'static str, String)
     (bar, is_blank_wallpaper(look.map(|l| &l.wallpaper)))
 }
 
-/// A wallpaper (`{type, value}`) drawn to fill its box.
+/// A wallpaper (`{type, value}`) drawn to fill its box (a picture, made
+/// thumbnail-sized).
 pub fn wallpaper_of(w: Option<&serde_json::Value>) -> wad_gtk::Wallpaper {
+    wallpaper_sized(w, false)
+}
+
+/// A wallpaper drawn to fill its box; `full`: a picture at the screen's size.
+pub fn wallpaper_sized(w: Option<&serde_json::Value>, full: bool) -> wad_gtk::Wallpaper {
     let v = wad_gtk::Wallpaper::new();
     let wall: Wallpaper = w
         .and_then(|w| serde_json::from_value(w.clone()).ok())
@@ -400,7 +406,12 @@ pub fn wallpaper_of(w: Option<&serde_json::Value>) -> wad_gtk::Wallpaper {
     let paint = wall.paint();
     v.set_paint(&paint);
     if let Paint::Image(src) = &paint {
-        images::wallpaper(src, images::later(&v, |v, t| v.set_picture(Some(t))));
+        let later = images::later(&v, |v, t| v.set_picture(Some(t)));
+        if full {
+            images::wallpaper_full(src, later);
+        } else {
+            images::wallpaper(src, later);
+        }
     }
     v
 }

@@ -7,12 +7,15 @@
 # native one (/usr/bin/client-native, apps/desktop). A line "native" in
 # ~/.config/wadspaces/client runs the native one (read at each start: sign
 # out, or reboot, to change).
+#
+# The native one runs with two malloc arenas: its few threads (decoding
+# pictures) otherwise keep memory they've freed.
 pick="${XDG_CONFIG_HOME:-${HOME}/.config}/wadspaces/client"
 while true; do
-    bin=/usr/bin/client
+    bin=/usr/bin/client env=()
     if [[ -x /usr/bin/client-native ]] && grep -qx native "${pick}" 2> /dev/null; then
-        bin=/usr/bin/client-native
+        bin=/usr/bin/client-native env=(MALLOC_ARENA_MAX=2)
     fi
-    systemd-cat -t client "${bin}" --kiosk
+    env "${env[@]}" systemd-cat -t client "${bin}" --kiosk
     sleep 2
 done

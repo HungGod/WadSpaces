@@ -97,15 +97,27 @@ pub fn desktop_icon(src: &str, on: impl FnOnce(gdk::Texture) + 'static) {
             Err(_) => asset(&src)?,
         };
         wad_icons::decode::decode(&bytes)
-            .map(|img| image::imageops::resize(&img, 96, 96, image::imageops::FilterType::Triangle))
+            .map(|img| if img.width() > 96 { image::imageops::thumbnail(&img, 96, 96) } else { img })
     });
 }
 
-/// A wallpaper that's a picture: a data: URL (the Builder keeps uploads so)
-/// or one of WadSpaces' own (/wallpapers/...). Kept at most 1920 wide.
+/// A wallpaper that's a picture, for a thumbnail (cards, the board, the
+/// pickers): at most 960 wide (a thumbnail's never more than about half a
+/// screen, on a screen twice as dense).
 pub fn wallpaper(value: &str, on: impl FnOnce(gdk::Texture) + 'static) {
+    wallpaper_at(value, 960, on);
+}
+
+/// A wallpaper that's a picture, the size of the screen (Preview).
+pub fn wallpaper_full(value: &str, on: impl FnOnce(gdk::Texture) + 'static) {
+    wallpaper_at(value, 1920, on);
+}
+
+/// A wallpaper that's a picture: a data: URL (the Builder keeps uploads so)
+/// or one of WadSpaces' own (/wallpapers/...), kept at most `max` wide.
+fn wallpaper_at(value: &str, max: u32, on: impl FnOnce(gdk::Texture) + 'static) {
     let v = value.to_string();
-    let key = format!("wall {}", if v.len() > 96 { format!("{}…{}", &v[..48], v.len()) } else { v.clone() });
+    let key = format!("wall{max} {}", if v.len() > 96 { format!("{}…{}", &v[..48], v.len()) } else { v.clone() });
     get(key, on, async move {
         let bytes = if let Some(data) = v.strip_prefix("data:") {
             let b64 = data.split_once(";base64,")?.1;
@@ -114,13 +126,9 @@ pub fn wallpaper(value: &str, on: impl FnOnce(gdk::Texture) + 'static) {
             asset(&v)?
         };
         let img = wad_icons::decode::decode(&bytes)?;
-        Some(if img.width() > 1920 {
-            image::imageops::resize(
-                &img,
-                1920,
-                img.height() * 1920 / img.width(),
-                image::imageops::FilterType::Triangle,
-            )
+        Some(if img.width() > max {
+            // (thumbnail: integer area sampling, nothing allocated but the result)
+            image::imageops::thumbnail(&img, max, img.height() * max / img.width())
         } else {
             img
         })
