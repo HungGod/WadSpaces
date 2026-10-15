@@ -63,6 +63,16 @@ fn window(app: &gtk::Application, args: &Args) -> gtk::ApplicationWindow {
         w.set_decorated(false);
         w.fullscreen();
     }
+    // Esc closes the top dialog.
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    keys.connect_key_pressed(|_, key, _, _| {
+        if key == gtk::gdk::Key::Escape && crate::modal::escape() {
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    w.add_controller(keys);
     // sway knows the shell as "client" (host/etc/sway/wadspaces.conf). GTK
     // names the window after the application's id once its toplevel exists
     // (on map); renamed straight after, before its first frame, so sway's
@@ -110,6 +120,12 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
             wad_gtk::theme::set(&display, t);
             settle(700).await;
             shot(&w, &dir.join(format!("shell-{}.png", t.name())));
+        }
+        crate::launcher::open();
+        for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+            wad_gtk::theme::set(&display, t);
+            settle(900).await;
+            shot(&w, &dir.join(format!("launcher-{}.png", t.name())));
         }
         if let Some(app) = w.application() {
             app.quit();

@@ -38,7 +38,8 @@ pub fn button(text: &str, icon: Option<&'static str>, variant: Variant, size: Si
     let px = if size == Size::Sm { 14 } else { 16 };
     let after = icon.is_some_and(|i| i.starts_with("arrow-"));
     if let Some(i) = icon.filter(|_| !after) {
-        row.append(&Icon::new(i, px));
+        // Play is filled, as lucide-react's fill-current draws it.
+        row.append(&if i == "play" { Icon::filled(i, px) } else { Icon::new(i, px) });
     }
     if !text.is_empty() {
         row.append(&gtk::Label::new(Some(text)));

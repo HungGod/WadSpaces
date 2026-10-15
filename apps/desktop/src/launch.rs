@@ -19,6 +19,22 @@ use crate::store::store;
 pub enum RunItem {
     Wadspace(String),
     Terminal,
+    /// One of the machine's own apps as it is (wadd's "browser", "browser-focus").
+    App(String),
+    /// A saved WadBrowser setup (its document).
+    Browser(Value),
+}
+
+/// A WadBrowser setup's sign-ins as wadd mounts them: each web app's, by slot.
+fn browser_signins(secrets: &Value) -> Vec<Value> {
+    secrets
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(slot, r)| {
+            json!({ "id": r["id"], "app": slot.trim_start_matches("web:"), "web": true, "name": r["name"], "kind": r["kind"], "slot": slot })
+        })
+        .collect()
 }
 
 /// A layer image's state against the library (the web app's imageState).
@@ -167,8 +183,14 @@ pub async fn launch(items: Vec<RunItem>, focus_minutes: Option<u32>) -> Result<V
         .iter()
         .enumerate()
         .map(|(n, i)| match i {
-            RunItem::Wadspace(id) => json!({ "kind": "workspace", "workspace": id, "background": n > 0 }),
+            RunItem::Wadspace(id) | RunItem::App(id) => json!({ "kind": "workspace", "workspace": id, "background": n > 0 }),
             RunItem::Terminal => json!({ "kind": "terminal", "background": n > 0 }),
+            RunItem::Browser(b) => json!({
+                "kind": "browser",
+                "setup": { "name": b["name"], "mode": b["mode"], "webapps": b["webapps"], "signins": browser_signins(&b["secrets"]) },
+                "savedId": b["id"],
+                "background": n > 0,
+            }),
         })
         .collect();
     let started = rt::run(async move {

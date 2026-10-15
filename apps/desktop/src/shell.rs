@@ -214,7 +214,9 @@ pub fn shell() -> gtk::Widget {
 
     let mut centred: Vec<gtk::Widget> = rows.iter().map(|r| r.clone().upcast()).collect();
     centred.push(profile.clone().upcast());
+    frame.add_overlay(&crate::modal::layer());
     frame.add_overlay(&crate::toast::host());
+    launch.connect_clicked(|_| crate::launcher::open());
     let sh = Rc::new(Shell {
         side: side.clone(),
         brand: brand.clone(),

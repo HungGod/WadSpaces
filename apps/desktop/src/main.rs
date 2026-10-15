@@ -12,6 +12,8 @@ mod app;
 mod fake;
 mod images;
 mod launch;
+mod launcher;
+mod modal;
 mod pages;
 mod rt;
 mod setup;

@@ -178,6 +178,7 @@ stage_assets() {
         mkdir -p "${out}/apps/${app}" && cp "${f}" "${out}/apps/${app}/"
     done
     cp "${pub}"/brand/*-icon-*.svg "${out}/brand/"
+    mkdir -p "${out}/icons" && cp "${pub}"/icons/* "${out}/icons/"
     cp "${pub}/folder.svg" "${out}/"
 }
 

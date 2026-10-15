@@ -178,25 +178,42 @@ pub fn page() -> gtk::Widget {
     super::page(&body)
 }
 
+/// What the last launch started, as the launcher starts it: wadspaces, then
+/// the machine's own apps (WadBrowsers, saved setups, the terminal).
+fn last_items(session: &Value, s: &AppState) -> (Vec<RunItem>, Vec<Value>, Vec<String>) {
+    let live = s.wadspaces();
+    let (mut items, mut spaces, mut names) = (vec![], vec![], vec![]);
+    for id in session["wadspaceIds"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        if let Some(w) = live.iter().find(|w| w["id"].as_str() == Some(id)) {
+            names.push(s.wadspace_name(w));
+            spaces.push((*w).clone());
+            items.push(RunItem::Wadspace(id.into()));
+        } else if id == "terminal" {
+            names.push("Terminal".into());
+            items.push(RunItem::Terminal);
+        } else if id == "browser" || id == "browser-focus" {
+            names.push(if id == "browser" { "WadBrowser" } else { "WadBrowser Focus" }.into());
+            items.push(RunItem::App(id.into()));
+        } else if let Some(b) = id.strip_prefix("browser-").and_then(|bid| {
+            s.library
+                .as_ref()?
+                .browsers
+                .iter()
+                .find(|b| b["id"].as_str() == Some(bid) && b.get("deletedAt").is_none_or(Value::is_null))
+        }) {
+            names.push(b["name"].as_str().unwrap_or("WadBrowser").into());
+            items.push(RunItem::Browser(b.clone()));
+        }
+    }
+    (items, spaces, names)
+}
+
 fn jump_back_in(slot: &gtk::Box, s: &AppState) {
     ui::clear(slot);
     let session = launch::last_session();
-    let live = s.wadspaces();
-    let spaces: Vec<&Value> = session
-        .as_ref()
-        .map(|v| {
-            v["wadspaceIds"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|id| live.iter().find(|w| w["id"] == *id).copied())
-                .collect()
-        })
-        .unwrap_or_default();
-    let terminal = session
-        .as_ref()
-        .is_some_and(|v| v["wadspaceIds"].as_array().is_some_and(|a| a.iter().any(|i| i == "terminal")));
-    if spaces.is_empty() && !terminal {
+    let (items, spaces, names) = session.as_ref().map(|v| last_items(v, s)).unwrap_or_default();
+    let spaces: Vec<&Value> = spaces.iter().collect();
+    if items.is_empty() {
         let card = gtk::Box::new(gtk::Orientation::Horizontal, 16);
         card.add_css_class("empty-card");
         let tile = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -252,10 +269,6 @@ fn jump_back_in(slot: &gtk::Box, s: &AppState) {
     }
     badges.append(&badge("This machine", None, false));
     text.append(&badges);
-    let mut names: Vec<String> = spaces.iter().map(|w| s.wadspace_name(w)).collect();
-    if terminal {
-        names.push("Terminal".into());
-    }
     let title =
         gtk::Label::new(Some(&if names.len() == 1 { names[0].clone() } else { format!("{} together", names.len()) }));
     title.add_css_class("jump-title");
@@ -281,11 +294,6 @@ fn jump_back_in(slot: &gtk::Box, s: &AppState) {
     row.set_margin_top(16);
     let again =
         ui::button(if focus { "Start focus again" } else { "Jump back in" }, Some("play"), Variant::Primary, Size::Md);
-    let mut items: Vec<RunItem> =
-        spaces.iter().filter_map(|w| w["id"].as_str().map(|id| RunItem::Wadspace(id.into()))).collect();
-    if terminal {
-        items.push(RunItem::Terminal);
-    }
     again.connect_clicked(move |b| {
         b.set_sensitive(false);
         let (b, items) = (b.clone(), items.clone());
