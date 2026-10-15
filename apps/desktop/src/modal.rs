@@ -100,6 +100,38 @@ impl Modal {
         m
     }
 
+    /// A drawer: a panel along the right, `width` wide and the window's
+    /// height, sliding in (the web app's Drawer). Its body is the panel.
+    pub fn drawer(width: i32) -> Modal {
+        let root = gtk::Overlay::new();
+        let dim = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        dim.add_css_class("modal-dim");
+        dim.add_css_class("drawer-dim");
+        root.set_child(Some(&dim));
+        let panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        panel.add_css_class("drawer");
+        panel.set_halign(gtk::Align::End);
+        panel.set_valign(gtk::Align::Fill);
+        panel.set_size_request(width, -1);
+        panel.set_overflow(gtk::Overflow::Hidden);
+        root.add_overlay(&panel);
+        let m = Modal(Rc::new(Inner { root, body: panel.clone(), dismissable: true, on_close: RefCell::default() }));
+        let click = gtk::GestureClick::new();
+        let mm = m.clone();
+        click.connect_released(move |_, _, _, _| mm.close());
+        dim.add_controller(click);
+        LAYER.with(|l| {
+            if let Some(layer) = l.borrow().as_ref() {
+                layer.add_overlay(&m.0.root);
+                layer.set_visible(true);
+                layer.set_can_target(true);
+            }
+        });
+        OPEN.with(|o| o.borrow_mut().push(m.clone()));
+        glib::idle_add_local_once(move || panel.add_css_class("shown"));
+        m
+    }
+
     pub fn body(&self) -> &gtk::Box {
         &self.0.body
     }

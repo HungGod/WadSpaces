@@ -220,6 +220,15 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
         crate::pages::machines::pick("m-desk");
         settle(800).await;
         shot(&w, &dir.join("machines-other-dark.png"));
+        // A wadspace's details.
+        crate::details::open("vanua-academy");
+        for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+            wad_gtk::theme::set(&display, t);
+            settle(900).await;
+            shot(&w, &dir.join(format!("details-{}.png", t.name())));
+        }
+        crate::modal::escape();
+        wad_gtk::theme::set(&display, wad_gtk::Theme::Dark);
         crate::shell::go(crate::shell::Page::Builder);
         for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
             wad_gtk::theme::set(&display, t);

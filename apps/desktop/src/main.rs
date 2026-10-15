@@ -10,6 +10,7 @@
 mod account;
 mod activity;
 mod app;
+mod details;
 mod drag;
 mod fake;
 mod focus;

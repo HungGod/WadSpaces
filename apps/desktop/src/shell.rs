@@ -183,6 +183,7 @@ pub fn shell() -> gtk::Widget {
     out.add_css_class("icon-button");
     out.add_css_class("small");
     out.set_tooltip_text(Some("Sign out"));
+    out.update_property(&[gtk::accessible::Property::Label("Sign out")]);
     out.set_child(Some(&Icon::new("log-out", 16)));
     out.set_valign(gtk::Align::Center);
     out.connect_clicked(|_| crate::account::sign_out());

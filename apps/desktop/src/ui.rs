@@ -179,11 +179,12 @@ pub fn clear(b: &gtk::Box) {
 }
 
 /// A square button with only an icon (the web app's IconButton); its label
-/// is its tooltip.
+/// is its tooltip, and what a screen reader says.
 pub fn icon_button(icon: &'static str, label: &str, px: i32) -> gtk::Button {
     let b = gtk::Button::new();
     b.add_css_class("icon-button");
     b.set_tooltip_text(Some(label));
+    b.update_property(&[gtk::accessible::Property::Label(label)]);
     b.set_child(Some(&if icon == "play" || icon == "square" { Icon::filled(icon, px) } else { Icon::new(icon, px) }));
     b.set_valign(gtk::Align::Center);
     b
@@ -354,6 +355,7 @@ pub fn menu(icon: &'static str, label: &str, items: Vec<MenuItem>) -> gtk::MenuB
     let m = gtk::MenuButton::new();
     m.add_css_class("menu-button");
     m.set_tooltip_text(Some(label));
+    m.update_property(&[gtk::accessible::Property::Label(label)]);
     m.set_child(Some(&Icon::new(icon, 16)));
     m.set_valign(gtk::Align::Center);
     let pop = gtk::Popover::new();

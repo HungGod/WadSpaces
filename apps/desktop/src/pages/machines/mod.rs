@@ -10,7 +10,7 @@ mod files;
 mod history;
 mod storage;
 mod tree;
-mod wadspaces;
+pub mod wadspaces;
 
 use std::cell::RefCell;
 use std::rc::Rc;

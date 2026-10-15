@@ -2222,3 +2222,43 @@ button.link.tour-skip { font-size: 12px; color: var(--faint); }
 button.link.tour-skip:hover { color: var(--fg); }
 button.link.tour-link { margin-top: 8px; font-size: 14px; color: var(--muted); }
 button.link.tour-link:hover { color: var(--fg); }
+
+/* ------------------------------------------------- a wadspace's details */
+.drawer-dim { background: rgb(5 3 11 / 0.5); }
+.drawer {
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 30px 80px -20px var(--shadow);
+  opacity: 0;
+  transform: translateX(60px);
+  transition: opacity 220ms, transform 260ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.drawer.shown { opacity: 1; transform: none; }
+.drawer-fade { background: linear-gradient(to top, var(--surface), transparent); }
+.drawer-body { padding: 4px 24px 24px 24px; }
+.drawer-title { font-family: "Space Grotesk", sans-serif; font-size: 24px; font-weight: 700; }
+.badge.mono { font-family: monospace; }
+.drawer-card, .drawer-row {
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.drawer-row { padding: 8px 12px; border-radius: 12px; font-size: 14px; }
+.drawer-run { padding: 6px 8px; font-size: 13px; }
+button.icon-button.glass { background: rgb(0 0 0 / 0.4); color: #fff; }
+button.icon-button.glass:hover { background: rgb(0 0 0 / 0.6); }
+.drawer-section { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; color: var(--faint); }
+
+/* ------------------------------------------------------ keyboard focus */
+/* Tabbing about: a ring round what has the focus (the web app's
+   focus-visible), whatever it's styled like otherwise. */
+button:focus-visible, menubutton > button:focus-visible, checkbutton:focus-visible, switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+window.theme-light button:focus-visible, window.theme-light menubutton > button:focus-visible,
+window.theme-light checkbutton:focus-visible, window.theme-light switch:focus-visible { outline-color: var(--fg); }
+.wb .stack.first-ws { border: 1.5px dashed var(--line-strong); border-radius: 18px; background: rgb(20 13 34 / 0.35); }
+window.theme-light .wb .stack.first-ws { background: rgb(10 6 20 / 0.03); }

@@ -451,8 +451,9 @@ impl Flow {
         let mm = m.clone();
         cancel.connect_clicked(move |_| mm.close());
         let del = ui::button("Delete", Some("trash"), Variant::Danger, Size::Md);
-        let (mm, me, id) = (m.clone(), self.clone(), id.to_string());
+        let (mm, me, id, label) = (m.clone(), self.clone(), id.to_string(), label.to_string());
         del.connect_clicked(move |b| {
+            let label = label.clone();
             b.set_sensitive(false);
             let doc = store()
                 .read_now(|st| st.library.as_ref().and_then(|l| l.browsers.iter().find(|x| s_eq(x, &id)).cloned()));
@@ -462,10 +463,36 @@ impl Flow {
                 let now = launch::now_iso();
                 doc["deletedAt"] = now.clone().into();
                 doc["updatedAt"] = now.into();
+                let kept = doc.clone();
                 match crate::account::save_browser(doc).await {
                     Ok(()) => {
                         mm.close();
                         me.pick_view();
+                        // Undo brings it back (deleted softly).
+                        let me = me.clone();
+                        crate::toast::with_action(
+                            &format!("Deleted {label}"),
+                            crate::toast::Tone::Info,
+                            "Undo",
+                            move || {
+                                let mut doc = kept.clone();
+                                if let Some(o) = doc.as_object_mut() {
+                                    o.remove("deletedAt");
+                                    o.insert("updatedAt".into(), launch::now_iso().into());
+                                }
+                                let me = me.clone();
+                                glib::spawn_future_local(async move {
+                                    match crate::account::save_browser(doc).await {
+                                        Ok(()) => {
+                                            if me.count.parent().is_some() {
+                                                me.pick_view();
+                                            }
+                                        }
+                                        Err(e) => crate::toast::error("Couldn't bring it back", &e),
+                                    }
+                                });
+                            },
+                        );
                     }
                     Err(e) => {
                         crate::toast::error("Can't delete it", &e);

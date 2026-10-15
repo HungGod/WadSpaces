@@ -36,6 +36,36 @@ thread_local! {
     static PANEL: glib::WeakRef<gtk::Box> = Default::default();
 }
 
+thread_local! {
+    /// A stack asked for from elsewhere (and whether to copy it), handled
+    /// once the board has it.
+    static ASKED: std::cell::RefCell<Option<(String, bool)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Shows the Builder on a stack (the web app's ?stack=<id>), or (`copy`)
+/// on a copy of it, made beside it.
+pub fn show_stack(id: &str, copy: bool) {
+    ASKED.with(|a| a.replace(Some((id.to_string(), copy))));
+    crate::shell::go(crate::shell::Page::Builder);
+    state::changed();
+}
+
+fn take_asked() {
+    let Some((id, copy)) = ASKED.with(|a| a.borrow().clone()) else { return };
+    // Not on the board (yet: the documents may still be loading).
+    let Some(at) = state::read(|s| s.board.stacks.iter().position(|x| x.id == id)) else { return };
+    ASKED.with(|a| a.replace(None));
+    if !copy {
+        state::set_created(id);
+        return;
+    }
+    let (modules, name) = state::read(|s| (s.board.stacks[at].modules(), stack_name(&s.board.stacks[at])));
+    let from = wad_board::board::From::Stack { stack_id: id };
+    let made = state::edit(|b| b.new_stack(&modules, &from, at + 1, false, &[]));
+    state::tell(Some(wad_board::board::Note { text: format!("Copied {name}"), undo: true }));
+    state::set_created(made);
+}
+
 /// The page.
 pub fn page() -> gtk::Widget {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -98,6 +128,13 @@ pub fn page() -> gtk::Widget {
         }
     });
 
+    // A stack asked for, once it's there.
+    state::on_change(|| {
+        if ASKED.with(|a| a.borrow().is_some()) {
+            glib::idle_add_local_once(take_asked);
+        }
+    });
+
     // Drawn again when the board changes; the library read into it.
     let r = row.downgrade();
     let (adj2, spring2) = (adj.clone(), spring.clone());
@@ -139,6 +176,7 @@ fn nav_button(icon: &'static str, tip: &str) -> gtk::Button {
     b.add_css_class("stacks-nav");
     b.set_child(Some(&Icon::new(icon, 20)));
     b.set_tooltip_text(Some(tip));
+    b.update_property(&[gtk::accessible::Property::Label(tip)]);
     b.set_valign(gtk::Align::Center);
     b.set_margin_start(6);
     b.set_margin_end(6);
