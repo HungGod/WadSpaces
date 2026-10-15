@@ -117,6 +117,7 @@ describe("Storage's report", () => {
     fake.thisMachine = true;
     fake.sizes = { ...fake.sizes, other: SAMPLE_OTHER };
     await open("/machines");
+    fireEvent.click(await screen.findByRole("button", { name: "Storage" }));
     // Closed at first: just a line.
     expect(await screen.findByRole("button", { name: /Report/ })).toBeTruthy();
     expect(screen.queryByText("Everything else, part by part")).toBeNull();
@@ -403,13 +404,15 @@ describe("Machines", () => {
     fake.running.add("cosmic-bodybuilding");
     fake.sizes = { ...fake.sizes, layers: { "template:writing": 1.6e9 }, homes: { "cosmic-bodybuilding": 9e8 } };
     await open("/machines");
-    // The storage tree: the base, the templates, the wadspaces.
+    // VanuaAcademy isn't built here: listed, to build.
+    expect(await screen.findByText(/1 running · 1 installed · 1 not built here/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Build here/ })).toBeTruthy();
+    // The storage tree, on its own tab: the base, the templates, the wadspaces.
+    expect(screen.queryByText(/WadSpaces uses/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Storage" }));
     expect(await screen.findByText(/WadSpaces uses/)).toBeTruthy();
     expect(screen.getByText("WadSpaces base")).toBeTruthy();
     expect(screen.getAllByText("Cosmic Bodybuilding").length).toBeGreaterThan(0);
-    // VanuaAcademy isn't built here: listed, to build.
-    expect(screen.getByText(/1 running · 1 installed · 1 not built here/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Build here/ })).toBeTruthy();
   });
 });
 
@@ -418,6 +421,7 @@ describe("Machines' storage", () => {
     fake.thisMachine = true;
     fake.installed.set("cosmic-bodybuilding", fake.wadspaces.get("cosmic-bodybuilding") as Wadspace);
     await open("/machines");
+    fireEvent.click(await screen.findByRole("button", { name: "Storage" }));
     const node = async (name: string) => (await screen.findAllByRole("button", { pressed: false })).find((b) => b.textContent?.includes(name))!;
     fireEvent.click(await node("Writing"));
     // Cosmic is installed on Writing's image: it has to go too.
