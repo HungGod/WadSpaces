@@ -791,6 +791,21 @@ impl Board {
             }
             _ => None,
         };
+        // A stack's bottom template whose apps changed to take in all of
+        // another stack's template builds on it, as a new one does (Dev
+        // given Tiled sits on Dev). Its own stack isn't looked in: a
+        // template only it has is changed where it is.
+        let chain: Vec<TemplateModule> = match (&m, &was) {
+            (Module::Template(t), Some(w))
+                if !same_apps(w, t)
+                    && !t.apps.is_empty()
+                    && self.stack(stack_id).and_then(|st| st.templates.first()).is_some_and(|x| x.id == t.id) =>
+            {
+                let others: Vec<Stack> = self.stacks.iter().filter(|st| st.id != stack_id).cloned().collect();
+                chain_under(t, &others)
+            }
+            _ => vec![],
+        };
         let base = shared.as_ref().map(|(s, _)| s.clone()).unwrap_or_else(|| self.stacks.clone());
         let list = base
             .into_iter()
@@ -818,12 +833,35 @@ impl Board {
                                 }
                             }
                         }
+                        if !chain.is_empty() {
+                            let mut under: Vec<TemplateModule> = chain
+                                .iter()
+                                .filter_map(|c| match clone_module(&Module::Template(c.clone()), false) {
+                                    Module::Template(c) => Some(c),
+                                    _ => None,
+                                })
+                                .collect();
+                            under.append(&mut st.templates);
+                            st.templates = under;
+                        }
                     }
                 }
                 st
             })
             .collect();
         self.commit(list, None);
+        if !chain.is_empty() {
+            let names: Vec<&str> = chain.iter().map(|c| c.name.as_str()).collect();
+            return note(
+                format!(
+                    "{} has all the apps of {}, so it's stacked on {}",
+                    module_name(&m),
+                    names.join(" → "),
+                    if chain.len() == 1 { "it" } else { "them" }
+                ),
+                true,
+            );
+        }
         match (shared, was, &m) {
             (Some((_, count)), Some(w), Module::Template(t)) if count > 1 => note(
                 format!("Saved, and renamed {} to {} in all {count} wadspaces that share it", w.name, t.name),
@@ -1098,6 +1136,35 @@ mod tests {
                 wallpaper: blank_wallpaper(),
             })],
         }
+    }
+
+    #[test]
+    fn a_shared_template_given_more_apps_stacks_on_it_and_an_unshared_one_changes_in_place() {
+        let mut b = board();
+        // A copy of Alpha's stack shares Dev.
+        let mut c = b.stacks[0].clone();
+        c.id = "c".into();
+        c.templates[0].id = "dev@c".into();
+        b.stacks.push(c);
+        let mut vg = b.stacks[2].templates[0].clone();
+        vg.name = "VG Dev".into();
+        vg.apps.extend(["tiled".to_string(), "libresprite".to_string()]);
+        let n = b.save_module("c", false, false, Module::Template(vg)).unwrap();
+        assert_eq!(n.text, "VG Dev has all the apps of Dev, so it's stacked on it");
+        let names: Vec<&str> = b.stacks[2].templates.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["Dev", "VG Dev"]);
+        assert_eq!(b.stacks[0].templates.len(), 1);
+        // Writing, only Beta's, given VS Code: still one template.
+        let mut w = b.stacks[1].templates[0].clone();
+        w.apps.push("vscode".into());
+        let n = b.save_module("b", false, false, Module::Template(w)).unwrap();
+        assert_eq!(n.text, "Saved Template");
+        assert_eq!(b.stacks[1].templates.len(), 1);
+        // A rename alone never stacks.
+        let mut r = b.stacks[2].templates[1].clone();
+        r.name = "Game Dev".into();
+        b.save_module("c", false, false, Module::Template(r)).unwrap();
+        assert_eq!(b.stacks[2].templates.len(), 2);
     }
 
     fn board() -> Board {

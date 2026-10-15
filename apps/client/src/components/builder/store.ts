@@ -704,6 +704,14 @@ export const useBoard = create<State>()(
           // A shared template renamed (its apps unchanged) is renamed everywhere.
           const was = m.layer === "template" ? s.stacks.find((st) => st.id === e.stackId)?.templates.find((t) => t.id === m.id) : undefined;
           const shared = was && m.layer === "template" && was.name !== m.name && sameApps(was, m) ? renameTemplate(s.stacks, was, m.name) : null;
+          // A stack's bottom template whose apps changed to take in all of another stack's
+          // template builds on it, as a new one does (Dev given Tiled sits on Dev). Its own
+          // stack isn't looked in: a template only it has is changed where it is.
+          const home = s.stacks.find((st) => st.id === e.stackId);
+          const chain =
+            m.layer === "template" && was && !sameApps(was, m) && m.apps.length && home?.templates[0]?.id === m.id
+              ? chainUnder(m, s.stacks.filter((st) => st.id !== e.stackId))
+              : [];
           commit({
             stacks: (shared?.stacks ?? s.stacks).map((st) => {
               if (st.id !== e.stackId) return st;
@@ -711,12 +719,11 @@ export const useBoard = create<State>()(
               // Templates above build on this one, so an app added here reaches them too.
               const at = st.templates.findIndex((t) => t.id === m.id);
               const added = m.apps.filter((a) => !st.templates[at]?.apps.includes(a));
-              return {
-                ...st,
-                templates: st.templates.map((t, i) => (i === at ? m : i > at ? { ...t, apps: [...t.apps, ...added.filter((a) => !t.apps.includes(a))] } : t)),
-              };
+              const templates = st.templates.map((t, i) => (i === at ? m : i > at ? { ...t, apps: [...t.apps, ...added.filter((a) => !t.apps.includes(a))] } : t));
+              return { ...st, templates: [...chain.map((t) => cloneModule(t, false) as TemplateModule), ...templates] };
             }),
           });
+          if (chain.length) return get().toast(`${moduleName(m)} has all the apps of ${chain.map((t) => t.name).join(" → ")}, so it's stacked on ${chain.length === 1 ? "it" : "them"}`, true);
           get().toast(shared && shared.count > 1 ? `Saved, and renamed ${was!.name} to ${(m as TemplateModule).name} in all ${shared.count} wadspaces that share it` : `Saved ${LAYER_INFO[m.layer].label}`, true);
         },
         rename(stackId, moduleId, name) {
