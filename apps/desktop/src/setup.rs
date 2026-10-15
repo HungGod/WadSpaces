@@ -89,8 +89,9 @@ fn frame() -> Frame {
             Theme::Light => include_bytes!("../../../apps/client/public/brand/wadspaces-logo-light.svg"),
         }
     };
-    // The lockup is 880×560: 144 tall.
-    let logo = wad_gtk::Svg::new(logo_svg(wad_gtk::theme::shown()), 226, 144);
+    // The lockup, as wide as the web app's (its SVG is 880×560 at 144 tall),
+    // centred on what it draws: the file's margins aren't even.
+    let logo = wad_gtk::Svg::trimmed(logo_svg(wad_gtk::theme::shown()), 210, 110);
     logo.add_css_class("auth-logo");
     logo.set_halign(gtk::Align::Center);
     let l = logo.clone();

@@ -36,8 +36,11 @@ window.theme-light .backdrop {
   padding: 0;
 }
 
+/* (GTK's unitless line-height scales the font's own; in px it's the web's
+   leading-none: the line exactly the font's size.) */
 .lockup-wad {
   font-family: "Space Grotesk", sans-serif;
+  line-height: 22px;
   font-size: 22px;
   font-weight: 700;
   letter-spacing: 1.76px;
@@ -50,6 +53,8 @@ window.theme-light .backdrop {
 }
 .lockup-spaces {
   font-family: "Space Grotesk", sans-serif;
+  line-height: 10.5px;
+  margin-right: 4px; /* the letter spacing after its last letter, as the web's has */
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 4.41px;
@@ -532,15 +537,17 @@ button.cta:hover { color: var(--fg); }
 }
 .thumb-blank { border-radius: 12px; background: var(--surface-2); }
 
-button.wadspace-card {
+button.card-pic {
   all: unset;
+  border-radius: 16px;
 }
-button.wadspace-card wad-desktop.card-thumb {
+.wadspace-card wad-desktop.card-thumb {
   box-shadow: 0 20px 60px -20px var(--shadow), 0 0 0 1px var(--line-strong);
   border-radius: 16px;
   transition: transform 150ms;
 }
-button.wadspace-card:hover wad-desktop.card-thumb { transform: translateY(-2px); }
+button.card-pic:hover wad-desktop.card-thumb { transform: translateY(-2px); }
+button.btn.card-edit { box-shadow: inset 0 0 0 1px var(--line-strong); }
 
 button.first-wadspace {
   all: unset;
@@ -1413,7 +1420,7 @@ button.stacks-nav > wad-icon { margin: 0 9px; }
 button.stacks-nav:hover { border-color: var(--fg); }
 
 .wb .stack {
-  padding: 8px;
+  padding: 8px 4px;
   border-radius: 20px;
   border: 1.5px dashed transparent;
   transition: border-color 150ms, background-color 150ms;
@@ -1424,7 +1431,7 @@ button.stacks-nav:hover { border-color: var(--fg); }
 .wb .stack.drop-no { border-color: var(--no); background: rgb(255 93 122 / 0.08); }
 button.broken-banner {
   all: unset;
-  margin-bottom: 8px;
+  margin: 0 4px 4px 4px;
   padding: 7px 10px;
   border-radius: 10px;
   font-size: 12px;
@@ -1629,8 +1636,11 @@ window.theme-light .wb .mod.blank-mod .taskbar { background: rgb(10 6 20 / 0.06)
 
 .wb .strip-plus, .wb .strip-more { font-size: 11px; font-weight: 600; color: var(--layer-template); }
 .wb .stack-modules > .mod-tile + .mod-tile { margin-top: 0; }
+/* Room inside the column's scroller for a tile lifting on hover and for
+   the outlines drops and selection draw round it (it clips at its edges). */
+.wb .stack-modules { padding: 4px; }
 
-.wb .stack-foot { margin-top: 10px; min-height: 28px; padding: 0 2px; }
+.wb .stack-foot { margin: 6px 4px 0 4px; min-height: 28px; padding: 0 2px; }
 .wb .stack-name {
   font-family: "Space Grotesk", sans-serif;
   font-size: 14px;

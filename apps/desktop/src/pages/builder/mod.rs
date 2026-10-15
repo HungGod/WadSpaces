@@ -267,7 +267,10 @@ fn topbar() -> gtk::Widget {
     hints.set_max_children_per_line(4);
     hints.set_column_spacing(14);
     hints.set_row_spacing(4);
-    hints.set_hexpand(true);
+    // Packed to the left at their own widths (the web app's wrapping row),
+    // not spread over the bar.
+    hints.set_hexpand(false);
+    hints.set_halign(gtk::Align::Start);
     hints.set_valign(gtk::Align::Center);
     for (k, text) in [
         ("drag", "a module (and what's on top) to copy it"),
@@ -281,6 +284,9 @@ fn topbar() -> gtk::Widget {
         hints.insert(&h, -1);
     }
     bar.append(&hints);
+    let spring = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    spring.set_hexpand(true);
+    bar.append(&spring);
     let not_saved = ui::button("Not saved · Retry", Some("cloud-off"), Variant::Ghost, Size::Sm);
     not_saved.add_css_class("not-saved");
     not_saved.connect_clicked(|_| state::retry());

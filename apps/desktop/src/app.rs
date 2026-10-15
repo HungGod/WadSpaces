@@ -333,7 +333,10 @@ fn save_png(w: &impl IsA<gtk::Widget>, path: &std::path::Path) -> Result<(), Str
     let w = w.upcast_ref::<gtk::Widget>();
     let paintable = gtk::WidgetPaintable::new(Some(w));
     let (width, height) = (w.width() as f64, w.height() as f64);
+    // At the screen's scale: what it shows, pixel for pixel.
+    let k = w.scale_factor() as f64;
     let snap = gtk::Snapshot::new();
+    snap.scale(k as f32, k as f32);
     paintable.snapshot(&snap, width, height);
     let node = snap.to_node().ok_or("nothing drawn")?;
     let renderer = w.native().and_then(|n| n.renderer()).ok_or("no renderer")?;

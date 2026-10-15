@@ -216,19 +216,10 @@ fn template_screen(t: &TemplateModule, below: Option<&TemplateModule>) -> gtk::W
         desk.attach(&label("No apps yet: open it to add some", "screen-empty"), 0, 0, 1, 1);
     }
     o.add_overlay(&desk);
+    // A desktop's taskbar, bare: the apps are on the desktop.
     let task = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     task.add_css_class("taskbar");
     task.set_valign(gtk::Align::End);
-    let logo = wad_gtk::Svg::new(
-        include_bytes!("../../../../client/public/brand/wadspaces-icon-dark-transparent.svg"),
-        14,
-        14,
-    );
-    logo.add_css_class("tb-logo");
-    task.append(&logo);
-    for id in &t.apps {
-        task.append(&img(&catalog::app(id).map(|a| a.icon).unwrap_or_default(), 16));
-    }
     o.add_overlay(&task);
     o.upcast()
 }
@@ -445,9 +436,12 @@ fn sub_icon(sub: &AnySub) -> gtk::Widget {
     match sub {
         AnySub::App(a) => img(app_sub_info(a.key()).2, 12).upcast(),
         AnySub::Custom(CustomSub::Look(l)) => {
+            // A screen's shape.
             let w = wallpaper_of(Some(&l.wallpaper));
             w.add_css_class("swatch");
-            w.set_size_request(12, 12);
+            w.set_size_request(18, 11);
+            w.set_valign(gtk::Align::Center);
+            w.set_halign(gtk::Align::Center);
             w.set_overflow(gtk::Overflow::Hidden);
             w.upcast()
         }

@@ -101,13 +101,22 @@ struct Active {
     lit: RefCell<Vec<gtk::Widget>>,
     hint: gtk::Label,
     done: Cell<bool>,
+    /// The pointer moved since the targets were last asked (they're asked
+    /// once a frame, however often it moves).
+    stale: Cell<bool>,
 }
 
 type Registered = (glib::WeakRef<gtk::Widget>, Rc<dyn Target>);
 
+/// A widget's key in the targets: where it is (checked against it, in
+/// case another took its place).
+fn key(w: &gtk::Widget) -> usize {
+    w.as_ptr() as usize
+}
+
 thread_local! {
     static LAYER: RefCell<Option<gtk::Fixed>> = const { RefCell::new(None) };
-    static TARGETS: RefCell<Vec<Registered>> = const { RefCell::new(Vec::new()) };
+    static TARGETS: RefCell<std::collections::HashMap<usize, Registered>> = RefCell::default();
     static SCROLLERS: RefCell<Vec<glib::WeakRef<gtk::ScrolledWindow>>> = const { RefCell::new(Vec::new()) };
     static ACTIVE: RefCell<Option<Rc<Active>>> = const { RefCell::new(None) };
 }
@@ -132,10 +141,11 @@ pub fn active() -> bool {
 
 /// Makes `w` a drop target.
 pub fn target(w: &impl IsA<gtk::Widget>, t: impl Target + 'static) {
+    let w = w.upcast_ref::<gtk::Widget>();
     TARGETS.with(|ts| {
         let mut ts = ts.borrow_mut();
-        ts.retain(|(w, _)| w.upgrade().is_some());
-        ts.push((w.upcast_ref::<gtk::Widget>().downgrade(), Rc::new(t)));
+        ts.retain(|_, (w, _)| w.upgrade().is_some());
+        ts.insert(key(w), (w.downgrade(), Rc::new(t)));
     });
 }
 
@@ -149,7 +159,7 @@ pub fn autoscroll(sw: &gtk::ScrolledWindow) {
 }
 
 fn target_of(w: &gtk::Widget) -> Option<Rc<dyn Target>> {
-    TARGETS.with(|ts| ts.borrow().iter().find(|(x, _)| x.upgrade().as_ref() == Some(w)).map(|(_, t)| t.clone()))
+    TARGETS.with(|ts| ts.borrow().get(&key(w)).filter(|(x, _)| x.upgrade().as_ref() == Some(w)).map(|(_, t)| t.clone()))
 }
 
 /// Makes `w` draggable: `make` runs as the drag starts (with Shift held or
@@ -228,10 +238,11 @@ fn begin(payload: Payload, ghost: gtk::Widget, origin: (f64, f64), grab: (f64, f
         lit: RefCell::default(),
         hint,
         done: Cell::new(false),
+        stale: Cell::new(false),
     });
     ACTIVE.with(|x| x.replace(Some(a.clone())));
     // What could take it lights up (asked with no pointer: NaN).
-    let all: Vec<Registered> = TARGETS.with(|ts| ts.borrow().clone());
+    let all: Vec<Registered> = TARGETS.with(|ts| ts.borrow().values().cloned().collect());
     for (w, t) in all {
         if let Some(w) = w.upgrade()
             && t.accepts(&a.payload, Mods::default(), (f64::NAN, f64::NAN)).is_some_and(|v| v.ok)
@@ -336,7 +347,16 @@ fn moved(p: (f64, f64), mods: Mods) {
         layer.move_(&a.ghost, p.0 - a.grab.0, p.1 - a.grab.1);
         layer.move_(&a.hint, p.0 + 18.0, p.1 - 40.0);
     }
-    update(&a);
+    // The ghost follows every move; what's under it is asked once a frame.
+    if !a.stale.replace(true) {
+        let aa = a.clone();
+        a.ghost.add_tick_callback(move |_, _| {
+            if aa.stale.replace(false) && !aa.done.get() {
+                update(&aa);
+            }
+            glib::ControlFlow::Break
+        });
+    }
 }
 
 /// Asks the target under the pointer again (it changed its mind without
@@ -387,19 +407,32 @@ fn update(a: &Rc<Active>) {
         w1.add_css_class(if v.ok { "drop-ok" } else { "drop-no" });
         w1.remove_css_class(if v.ok { "drop-no" } else { "drop-ok" });
     }
-    a.hint.remove_css_class("ok");
-    a.hint.remove_css_class("no");
-    match &found {
-        Some((_, _, v)) => {
-            a.hint.add_css_class(if v.ok { "ok" } else { "no" });
-            a.hint.set_text(v.why.as_deref().unwrap_or(""));
+    // The hint changes only when what it says does.
+    let (tone, text) = match &found {
+        Some((_, _, v)) => (Some(v.ok), v.why.as_deref().unwrap_or("")),
+        None => (
+            None,
+            match a.payload {
+                Payload::Modules { .. } | Payload::Sub { .. } => {
+                    "Drop on a stack to copy it there · right-click to cancel"
+                }
+                _ => "Right-click to cancel",
+            },
+        ),
+    };
+    for (class, on) in [("ok", tone == Some(true)), ("no", tone == Some(false))] {
+        if on != a.hint.has_css_class(class) {
+            if on {
+                a.hint.add_css_class(class);
+            } else {
+                a.hint.remove_css_class(class);
+            }
         }
-        None => a.hint.set_text(match a.payload {
-            Payload::Modules { .. } | Payload::Sub { .. } => "Drop on a stack to copy it there · right-click to cancel",
-            _ => "Right-click to cancel",
-        }),
     }
-    a.hint.set_visible(!a.hint.text().is_empty());
+    if a.hint.text() != text {
+        a.hint.set_text(text);
+    }
+    a.hint.set_visible(!text.is_empty());
     a.hover.replace(found);
 }
 
@@ -435,6 +468,10 @@ pub mod sim {
 /// Ends the drag: dropped where it fits, else snapped back.
 fn finish(drop: bool) {
     let Some(a) = ACTIVE.with(|x| x.borrow().clone()) else { return };
+    // Let go before the frame asked what's under it: ask now.
+    if a.stale.replace(false) && !a.done.get() {
+        update(&a);
+    }
     if a.done.replace(true) {
         return;
     }

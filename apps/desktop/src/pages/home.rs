@@ -452,24 +452,61 @@ fn your_wadspaces(grid: &gtk::Grid, s: &AppState) {
         return;
     }
     for (n, w) in all.iter().take(4).enumerate() {
-        let b = gtk::Button::new();
-        b.add_css_class("wadspace-card");
-        let col = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        let t = thumb(s, w);
-        t.set_radius(16.0);
-        t.add_css_class("card-thumb");
-        col.append(&t);
-        let name = gtk::Label::new(Some(&s.wadspace_name(w)));
-        name.add_css_class("row-title");
-        name.set_xalign(0.0);
-        name.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        col.append(&name);
-        b.set_child(Some(&col));
-        b.set_tooltip_text(Some(&format!("Open {} in the Builder", s.wadspace_name(w))));
-        b.connect_clicked(|_| crate::shell::go(Page::Builder));
-        grid.attach(&b, n as i32, 0, 1, 1);
+        grid.attach(&wadspace_card(s, w), n as i32, 0, 1, 1);
     }
     for c in all.len().min(4)..4 {
         grid.attach(&gtk::Box::new(gtk::Orientation::Vertical, 0), c as i32, 0, 1, 1);
     }
+}
+
+/// One of their wadspaces: its picture (a click opens its stack in the
+/// Builder), its name, Launch and Edit.
+fn wadspace_card(s: &AppState, w: &Value) -> gtk::Widget {
+    let id = w["id"].as_str().unwrap_or_default().to_string();
+    let name = s.wadspace_name(w);
+    let col = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    col.add_css_class("wadspace-card");
+    let pic = gtk::Button::new();
+    pic.add_css_class("card-pic");
+    let t = thumb(s, w);
+    t.set_radius(16.0);
+    t.add_css_class("card-thumb");
+    pic.set_child(Some(&t));
+    pic.set_tooltip_text(Some(&format!("Edit {name} in the Builder")));
+    let i = id.clone();
+    pic.connect_clicked(move |_| crate::pages::builder::show_stack(&i, false));
+    col.append(&pic);
+    let l = gtk::Label::new(Some(&name));
+    l.add_css_class("row-title");
+    l.set_xalign(0.0);
+    l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    col.append(&l);
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let locked = crate::pages::machines::locked(s, &id);
+    let go = ui::button("Launch", Some(if locked { "lock" } else { "play" }), Variant::Primary, Size::Sm);
+    go.set_valign(gtk::Align::Center);
+    if locked {
+        go.set_sensitive(false);
+        go.set_tooltip_text(Some("Focus mode: locked until it ends"));
+    }
+    let i = id.clone();
+    go.connect_clicked(move |b| {
+        b.set_sensitive(false);
+        let (b, i) = (b.clone(), i.clone());
+        glib::spawn_future_local(async move {
+            if let Err(e) = launch::launch(vec![RunItem::Wadspace(i)], None).await {
+                crate::toast::error("Couldn't launch", &e);
+            }
+            b.set_sensitive(true);
+        });
+    });
+    row.append(&go);
+    let edit = ui::button("Edit", Some("pencil"), Variant::Ghost, Size::Sm);
+    edit.set_tooltip_text(Some("Edit it in the Builder"));
+    edit.add_css_class("card-edit");
+    let i = id;
+    edit.connect_clicked(move |_| crate::pages::builder::show_stack(&i, false));
+    row.append(&edit);
+    col.append(&row);
+    col.upcast()
 }

@@ -154,7 +154,7 @@ pub fn build(ed: &Rc<Editor>) -> gtk::Widget {
     desktop.add_overlay(&grid);
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     bar.set_valign(gtk::Align::End);
-    live_box(ed, &bar, |ed, b| b.append(&taskbar(&draft_of(ed).apps)));
+    bar.append(&taskbar());
     desktop.add_overlay(&bar);
     drag::target(&desktop, DeskTarget(Rc::downgrade(ed), tpl.clone()));
     PARTS.with(|p| {
@@ -337,23 +337,14 @@ fn desk_app(ed: &Rc<Editor>, tpl: &Rc<Tpl>, id: &str, at: usize, picked: bool) -
     cell.upcast()
 }
 
-fn taskbar(apps: &[String]) -> gtk::Box {
+/// The desktop's taskbar: just its clock (the apps are on the desktop).
+fn taskbar() -> gtk::Box {
     let t = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     t.add_css_class("desk-taskbar");
     t.set_hexpand(true);
-    let logo = wad_gtk::Svg::new(
-        include_bytes!("../../../../../client/public/brand/wadspaces-icon-dark-transparent.svg"),
-        22,
-        22,
-    );
-    t.append(&logo);
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    for id in apps {
-        row.append(&img(&catalog::app(id).map(|a| a.icon).unwrap_or_default(), 22));
-    }
-    row.set_hexpand(true);
-    t.append(&row);
     let clock = gtk::Label::new(Some("9:41"));
+    clock.set_hexpand(true);
+    clock.set_xalign(1.0);
     clock.add_css_class("tb-clock");
     t.append(&clock);
     t
@@ -389,6 +380,32 @@ fn stage_notes(ed: &Rc<Editor>, b: &gtk::Box) {
             ),
             "chain-note",
         ));
+    }
+    // Saved, it goes on top of the templates elsewhere whose apps it has
+    // (a new one in an empty stack, or the bottom one given other apps).
+    let own = ed.stack();
+    let bottom = match ed.original() {
+        None => own.templates.is_empty(),
+        Some(Module::Template(o)) => own.templates.first().is_some_and(|x| x.id == o.id) && !board::same_apps(&o, &t),
+        Some(_) => false,
+    };
+    if bottom && !t.apps.is_empty() {
+        let others: Vec<Stack> =
+            crate::pages::builder::state::read(|s| s.board.stacks.iter().filter(|x| x.id != own.id).cloned().collect());
+        let chain = board::chain_under(&t, &others);
+        if !chain.is_empty() {
+            let names: Vec<&str> = chain.iter().map(|c| c.name.as_str()).collect();
+            let one = chain.len() == 1;
+            b.append(&icon_note(
+                "layers",
+                &format!(
+                    "Saved, it goes on top of {}: it has all of {} apps.",
+                    names.join(" → "),
+                    if one { format!("{}'s", names[0]) } else { "their".into() }
+                ),
+                "chain-note",
+            ));
+        }
     }
     let l = ui::wrapping(
         "Just this template's apps, in the order the desktop shows them. Preview a stack to see it finished.",

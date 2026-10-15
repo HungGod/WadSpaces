@@ -143,12 +143,6 @@ fn taskbar(me: &Rc<Preview>, icons: &[DesktopIcon]) -> gtk::Widget {
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     bar.add_css_class("pv-taskbar");
     bar.set_valign(gtk::Align::End);
-    let logo = wad_gtk::Svg::new(
-        include_bytes!("../../../../client/public/brand/wadspaces-icon-dark-transparent.svg"),
-        22,
-        22,
-    );
-    bar.append(&logo);
     for i in icons.iter().filter(|i| i.id.starts_with("app:")) {
         let b = gtk::Button::new();
         b.add_css_class("pv-tb-app");

@@ -8,6 +8,9 @@
 #                                                     processes) once it's settled;
 #                                                     --tauri: the Tauri client's too
 #
+# The screen is 1280×800 at scale 1; WIDTH, HEIGHT (its pixels) and SCALE
+# change it (the Surface Book 2: WIDTH=3000 HEIGHT=2000 SCALE=2).
+#
 # Only what this script starts is stopped, by PID. GTK's portals are off
 # (GDK_DEBUG=no-portals): no helpers are left behind.
 set -euo pipefail
@@ -30,7 +33,7 @@ env -u WAYLAND_DISPLAY -u DISPLAY WADD_SOCKET="${WADD_SOCKET:-/nonexistent/wadd.
     dbus-run-session -- bash -c '
 set -u
 SOCK="wad-desktop-$$"
-kwin_wayland --virtual --socket "${SOCK}" --width 1280 --height 800 > "${WORK}/kwin.log" 2>&1 &
+kwin_wayland --virtual --socket "${SOCK}" --width "${WIDTH:-1280}" --height "${HEIGHT:-800}" > "${WORK}/kwin.log" 2>&1 &
 KWIN=$!
 # On the way out: kwin, and whatever this session'"'"'s bus started (the
 # virtual kwin'"'"'s keyboard asks for portals): only processes on this bus.
@@ -42,6 +45,12 @@ ours() {
 }
 trap "kill ${KWIN} 2>/dev/null; wait ${KWIN} 2>/dev/null; for p in \$(ours); do kill \$p 2>/dev/null; done" EXIT
 for _ in $(seq 50); do [[ -S "${XDG_RUNTIME_DIR}/${SOCK}" ]] && break; sleep 0.2; done
+# A virtual output takes its scale afterwards (kwin --scale is for windows).
+if [[ "${SCALE:-1}" != "1" ]]; then
+    WAYLAND_DISPLAY="${SOCK}" kscreen-doctor -o >> "${WORK}/kwin.log" 2>&1 || true
+    WAYLAND_DISPLAY="${SOCK}" kscreen-doctor "output.1.scale.${SCALE}" >> "${WORK}/kwin.log" 2>&1 || true
+    sleep 1
+fi
 export WAYLAND_DISPLAY="${SOCK}" GDK_BACKEND=wayland GDK_DEBUG=no-portals GTK_A11Y=none
 
 # The proportional memory of a process and everything it started, in MB.

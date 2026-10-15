@@ -211,6 +211,8 @@ mod svg_imp {
     pub struct Svg {
         pub data: Cell<&'static [u8]>,
         pub size: Cell<(i32, i32)>,
+        /// Fit what's drawn, not the SVG's box (its margins may be uneven).
+        pub trim: Cell<bool>,
         /// The last drawing, and the pixel size it was made at.
         pub drawn: RefCell<Option<((u32, u32), gdk::Texture)>>,
     }
@@ -243,23 +245,39 @@ mod svg_imp {
             let px = ((lw * k) as u32, (lh * k) as u32);
             let mut drawn = self.drawn.borrow_mut();
             if drawn.as_ref().is_none_or(|(at, _)| *at != px) {
-                *drawn = render_fit(self.data.get(), px).map(|t| (px, t));
+                *drawn = render_fit(self.data.get(), px, self.trim.get()).map(|t| (px, t));
             }
+            // Centred in what it's given (a row taller than it, a column wider).
             if let Some((_, t)) = drawn.as_ref() {
-                snapshot.append_texture(t, &graphene::Rect::new(0.0, 0.0, lw as f32, lh as f32));
+                let (x, y) = ((w.width() - lw) as f32 / 2.0, (w.height() - lh) as f32 / 2.0);
+                snapshot.append_texture(t, &graphene::Rect::new(x.max(0.0), y.max(0.0), lw as f32, lh as f32));
             }
         }
     }
 
-    /// The SVG fitted into `w`×`h` pixels, centred.
-    fn render_fit(svg: &[u8], (w, h): (u32, u32)) -> Option<gdk::Texture> {
+    /// The SVG fitted into `w`×`h` pixels, centred (`trim`: what it draws,
+    /// rather than its whole box).
+    fn render_fit(svg: &[u8], (w, h): (u32, u32), trim: bool) -> Option<gdk::Texture> {
         use resvg::{tiny_skia, usvg};
         let text = std::str::from_utf8(svg).ok()?;
         let tree = usvg::Tree::from_str(text, &options(text)).ok()?;
-        let (sw, sh) = (tree.size().width(), tree.size().height());
+        let (x0, y0, sw, sh) = match trim {
+            true => {
+                let b = tree.root().abs_stroke_bounding_box();
+                (b.x(), b.y(), b.width().max(1.0), b.height().max(1.0))
+            }
+            false => (0.0, 0.0, tree.size().width(), tree.size().height()),
+        };
         let k = (w as f32 / sw).min(h as f32 / sh);
         let mut pm = tiny_skia::Pixmap::new(w.max(1), h.max(1))?;
-        let t = tiny_skia::Transform::from_row(k, 0.0, 0.0, k, (w as f32 - sw * k) / 2.0, (h as f32 - sh * k) / 2.0);
+        let t = tiny_skia::Transform::from_row(
+            k,
+            0.0,
+            0.0,
+            k,
+            (w as f32 - sw * k) / 2.0 - x0 * k,
+            (h as f32 - sh * k) / 2.0 - y0 * k,
+        );
         resvg::render(&tree, t, &mut pm.as_mut());
         Some(premultiplied(pm, w.max(1), h.max(1)))
     }
@@ -276,6 +294,14 @@ impl Svg {
         let me: Self = glib::Object::new();
         me.imp().data.set(data);
         me.imp().size.set((width, height));
+        me
+    }
+
+    /// What the SVG draws fitted into `width`×`height` and centred, its own
+    /// box's margins left out (a logo whose margins aren't even).
+    pub fn trimmed(data: &'static [u8], width: i32, height: i32) -> Self {
+        let me = Self::new(data, width, height);
+        me.imp().trim.set(true);
         me
     }
 
