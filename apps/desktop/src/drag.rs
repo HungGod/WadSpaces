@@ -15,13 +15,40 @@ use std::time::Duration;
 
 use gtk::{glib, graphene, prelude::*};
 use wad_board::board::{From, SubFrom};
-use wad_board::{AnySub, Module};
+use wad_board::{AnySub, Module, WebApp};
 
 /// What's being dragged.
 #[derive(Debug, Clone)]
 pub enum Payload {
-    Modules { modules: Vec<Module>, from: From },
-    Sub { sub: AnySub, from: SubFrom },
+    Modules {
+        modules: Vec<Module>,
+        from: From,
+    },
+    Sub {
+        sub: AnySub,
+        from: SubFrom,
+    },
+    /// A catalog app (the template editor); `at` when it's on the desktop.
+    App {
+        app_id: String,
+        at: Option<usize>,
+    },
+    /// One thing an app is set up with (the Extensions editor).
+    Item(Item),
+    /// WadBrowser's apps (one, or several Ctrl+clicked) moving between key
+    /// groups (the Customization editor).
+    Member {
+        members: Vec<String>,
+        group: String,
+    },
+}
+
+/// What an app is set up with: a web app, a VS Code extension, a tool.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Item {
+    WebApp(WebApp),
+    Extension(String),
+    Tool(String),
 }
 
 /// What a drop here does ("Copy to VanuaAcademy"), or why it can't.
@@ -367,7 +394,10 @@ fn update(a: &Rc<Active>) {
             a.hint.add_css_class(if v.ok { "ok" } else { "no" });
             a.hint.set_text(v.why.as_deref().unwrap_or(""));
         }
-        None => a.hint.set_text("Drop on a stack to copy it there · right-click to cancel"),
+        None => a.hint.set_text(match a.payload {
+            Payload::Modules { .. } | Payload::Sub { .. } => "Drop on a stack to copy it there · right-click to cancel",
+            _ => "Right-click to cancel",
+        }),
     }
     a.hint.set_visible(!a.hint.text().is_empty());
     a.hover.replace(found);

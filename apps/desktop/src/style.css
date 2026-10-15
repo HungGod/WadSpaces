@@ -1802,3 +1802,295 @@ button.bucket.drop-no { border-color: var(--no); opacity: 0.7; }
   color: var(--fg);
   box-shadow: 0 20px 60px -20px var(--shadow);
 }
+
+/* ------------------------------------------------------------- editors */
+/* The Builder's editors (builder.css's editor parts): grown out of a
+   module to fill the window, its layer's colour along the top. */
+.editor-scrim { background: rgb(5 3 10 / 0.6); opacity: 0; transition: opacity 300ms; }
+.editor-scrim.shown { opacity: 1; }
+window.theme-light .editor-scrim { background: rgb(10 6 20 / 0.32); }
+.wb.editor-template { --kc: var(--layer-template); }
+.wb.editor-extensions { --kc: var(--layer-extensions); }
+.wb.editor-customization { --kc: var(--layer-customization); }
+.wb.editor {
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: inset 0 4px 0 var(--kc), inset 0 0 0 1px var(--line-strong), 0 30px 90px -20px rgb(0 0 0 / 0.9);
+  transition: border-radius 320ms;
+}
+.wb.editor:not(.open) { border-radius: 12px; }
+.wb .editor-head { padding: 14px 16px 12px 20px; border-bottom: 1px solid var(--line); }
+.wb .editor-icon {
+  min-width: 38px;
+  min-height: 38px;
+  border-radius: 10px;
+  color: var(--kc);
+  background: color-mix(in srgb, var(--kc) 14%, transparent);
+}
+.wb .editor-kind {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--kc);
+}
+.wb .editor-title { font-family: "Space Grotesk", sans-serif; font-size: 20px; font-weight: 700; }
+.wb.editor:not(.open) .editor-title { font-size: 14px; }
+.wb .editor-body { opacity: 0; transition: opacity 180ms; }
+.wb.editor.open .editor-body { opacity: 1; }
+.wb .name-clash { color: var(--danger); font-size: 12px; }
+.wb .fork-note { color: var(--unbuilt); font-size: 12px; }
+.wb button.btn.btn-mini { box-shadow: inset 0 0 0 1px var(--unbuilt); color: var(--unbuilt); }
+
+.wb .panel {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.wb .panel.focused { border-color: var(--kc); }
+.wb scrolledwindow.panel { padding: 0; }
+.wb scrolledwindow.panel > viewport > box { padding: 14px; }
+.wb .field { margin-bottom: 10px; }
+.wb .field-name { font-size: 11px; color: var(--faint); letter-spacing: 0.06em; }
+.wb .group-label { font-size: 11px; color: var(--faint); letter-spacing: 0.06em; font-weight: 600; }
+.wb scrolledwindow.textarea {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.wb scrolledwindow.textarea textview, .wb scrolledwindow.textarea textview > text {
+  background: transparent;
+  color: var(--fg);
+  font-size: 14px;
+}
+.wb scrolledwindow.textarea:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+.wb .faint { color: var(--faint); }
+.wb .small { font-size: 11.5px; }
+.wb .warn-note { color: #ffb36b; font-size: 12px; }
+window.theme-light .wb .warn-note { color: var(--unbuilt); }
+.wb .warn-note.block { margin-top: 12px; padding: 8px 10px; border: 1px dashed #ffb36b; border-radius: 10px; }
+.wb .chain-note { color: var(--layer-template); font-size: 12px; }
+window.theme-light .wb .chain-note { color: #1679b8; }
+
+/* The template editor: apps, the desktop, the picked app. */
+.wb .tpl-editor, .wb .ext-editor { padding: 14px; }
+.wb .palette-app {
+  padding: 8px 4px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 11px;
+}
+.wb .palette-app:hover { border-color: var(--layer-template); }
+.wb .palette-app.on { opacity: 0.35; }
+.wb .palette-app.on:hover { border-color: var(--line); }
+.wb scrolledwindow.palette.drop-ok { outline: 2px solid var(--ok); outline-offset: -2px; }
+.wb scrolledwindow.palette.drop-no { outline: 2px solid var(--no); outline-offset: -2px; }
+.wb scrolledwindow.palette.drop-could { outline: 1.5px dashed rgb(198 255 31 / 0.45); outline-offset: -2px; }
+.wb .desktop {
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  background:
+    radial-gradient(circle 420px at 15% 0%, rgb(127 211 255 / 0.22), transparent 60%),
+    linear-gradient(160deg, #0d1a2b, #090d18);
+  color: #f5f2fa;
+}
+.wb .desktop.drop-ok { outline: 2px solid var(--layer-template); outline-offset: -2px; }
+.wb .desk-cell { border-radius: 10px; border: 1px dashed transparent; }
+window.is-dragging .wb .desk-cell { border-color: rgb(255 255 255 / 0.08); }
+.wb .desk-cell.drop-ok { box-shadow: inset 3px 0 0 var(--ok); background: rgb(198 255 31 / 0.06); }
+.wb .desk-cell.next-spot { opacity: 0; font-size: 11px; color: rgb(127 211 255 / 0.7); }
+window.is-dragging .wb .desk-cell.next-spot { opacity: 1; border: 1.5px dashed rgb(127 211 255 / 0.45); }
+window.is-dragging .wb .desktop.drop-ok .desk-cell.next-spot {
+  border-style: solid;
+  border-color: var(--layer-template);
+  background: rgb(127 211 255 / 0.12);
+  color: var(--layer-template);
+}
+.wb .desk-icon {
+  padding: 6px;
+  border-radius: 10px;
+  min-width: 80px;
+  font-size: 11.5px;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
+}
+.wb .desk-icon:hover, .wb .desk-icon.picked { background: rgb(255 255 255 / 0.12); }
+.wb .desk-icon.picked { box-shadow: inset 0 0 0 1.5px var(--layer-template); }
+.wb .desk-icon.locked { opacity: 0.5; }
+.wb .desk-icon.locked:hover { background: none; }
+.wb .desk-icon.ghosted { color: #f5f2fa; }
+.wb button.desk-x, .wb button.item-x {
+  all: unset;
+  min-width: 18px;
+  min-height: 18px;
+  border-radius: 99px;
+  background: var(--danger);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.wb button.desk-x > wad-icon, .wb button.item-x > wad-icon { margin: 4px; }
+.wb .desk-cell:hover button.desk-x, .wb .win-item:hover button.item-x { opacity: 1; }
+.wb .desk-lock {
+  min-width: 17px;
+  min-height: 17px;
+  margin: 2px;
+  border-radius: 99px;
+  background: rgb(10 6 20 / 0.8);
+  color: var(--layer-template);
+}
+.wb .desk-lock > wad-icon { margin: 4px; }
+.wb .desk-taskbar {
+  min-height: 40px;
+  padding: 0 12px;
+  background: rgb(10 6 20 / 0.8);
+}
+.wb .tb-clock { color: rgb(245 242 250 / 0.62); font-size: 12px; }
+.wb .stage-notes { color: var(--faint); font-size: 12px; }
+.wb .app-detail .panel-title-sm { margin-top: 4px; }
+.wb .facts { margin: 6px 0 12px 0; font-size: 12px; }
+.wb .fact-name { color: var(--faint); }
+
+/* The Extensions editor: what to add, and the apps' windows. */
+.wb .pal-section { margin-top: 10px; }
+.wb flowbox.pal-items > flowboxchild, .wb flowbox.win-items > flowboxchild,
+.wb flowbox.members > flowboxchild, .wb flowbox.suggest > flowboxchild { padding: 0; }
+.wb .pal-item {
+  padding-right: 6px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  background: var(--surface-2);
+}
+.wb .pal-item:hover { box-shadow: inset 0 0 0 1px var(--layer-extensions); }
+.wb .pal-plus { color: var(--faint); }
+.wb .pal-item:hover .pal-plus { color: var(--layer-extensions); }
+.wb .item { padding: 4px 6px; font-size: 12px; }
+.wb .drag-ghost .item, .drag-ghost .wb .item {
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--layer-extensions);
+}
+.wb .ext-main { padding-left: 2px; }
+.wb .big-win {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  background: linear-gradient(160deg, #111a0d, #0b0d10);
+  color: #f5f2fa;
+}
+.wb .big-win.focused { box-shadow: inset 0 0 0 1.5px var(--layer-extensions); }
+.wb .big-win.drop-ok { box-shadow: inset 0 0 0 2px var(--ok); }
+.wb .big-win.drop-no { box-shadow: inset 0 0 0 2px var(--no); }
+.wb .big-win.drop-could { box-shadow: inset 0 0 0 1.5px rgb(198 255 31 / 0.45); }
+.wb .big-win-bar {
+  min-height: 36px;
+  padding: 0 8px 0 12px;
+  border-radius: 12px 12px 0 0;
+  background: #241a39;
+}
+.wb .big-win-app { font-weight: 600; }
+.wb .big-win .win-count { color: rgb(245 242 250 / 0.4); }
+.wb .big-win-body { padding: 12px; min-height: 40px; }
+.wb .big-win .empty-note { color: rgb(245 242 250 / 0.4); }
+.wb .win-item { border-radius: 9px; background: rgb(255 255 255 / 0.06); box-shadow: inset 0 0 0 1px rgb(240 234 250 / 0.09); }
+.wb .win-item button.item-x { margin: -6px -6px 0 0; min-width: 16px; min-height: 16px; }
+.wb .win-item button.item-x > wad-icon { margin: 3px; }
+.wb .segmented.small-seg > button { padding: 3px 8px; font-size: 11px; }
+
+/* The Customization editor: the look, projects and keys. */
+.wb .cz-editor { padding: 14px; }
+.wb .mini-desktop { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.wb .cz-row { padding: 7px 9px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); }
+.wb .mount-face { font-size: 12px; }
+.wb .proj-name { font-weight: 600; }
+.wb .proj-note { margin-bottom: 4px; }
+.wb button.gh-proj {
+  all: unset;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 12.5px;
+}
+.wb button.gh-proj:hover { border-color: var(--layer-customization); }
+.wb button.gh-proj.on { opacity: 0.55; }
+.wb .gh-name { font-weight: 600; }
+.wb .gh-private { font-size: 10px; padding: 0 6px; border-radius: 99px; border: 1px solid var(--line-strong); color: var(--faint); }
+.wb .gh-meta { color: var(--faint); font-size: 11px; }
+.wb .gh-act { min-width: 44px; color: var(--layer-customization); font-weight: 600; font-size: 11.5px; }
+.wb button.gh-proj.on .gh-act { color: var(--faint); }
+.wb button.btn.sug { min-height: 24px; padding: 0 8px; border-radius: 99px; box-shadow: inset 0 0 0 1px var(--line-strong); font-size: 11.5px; color: var(--muted); }
+.wb button.btn.sug:hover { box-shadow: inset 0 0 0 1px var(--layer-customization); color: var(--fg); }
+.wb .picker { margin-top: 8px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--bg-2); }
+.wb .picker-head { padding: 8px 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
+.wb .picker-path { font-family: monospace; font-weight: 400; font-size: 11.5px; color: var(--faint); }
+.wb .picker-list { padding: 4px; }
+.wb button.picker-row, .wb checkbutton.picker-row { padding: 6px 8px; border-radius: 8px; background: none; box-shadow: none; }
+.wb button.picker-row:hover, .wb checkbutton.picker-row:hover { background: var(--surface-2); }
+.wb .picker-foot { padding: 8px 10px; border-top: 1px solid var(--line); }
+
+.wb .key-app { padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+.wb .key-app-head { padding-top: 4px; font-size: 12px; font-weight: 600; }
+.wb .key-line { min-height: 38px; padding: 5px 6px 5px 8px; border-radius: 10px; border: 1px solid transparent; }
+.wb .key-line.group { border-color: var(--line); background: rgb(255 255 255 / 0.02); }
+.wb .key-line.group.empty { border-style: dashed; }
+.wb .key-line.group.drop-could { border: 1px dashed rgb(255 61 129 / 0.5); outline: none; }
+.wb .key-line.group.drop-ok { border: 1px solid var(--layer-customization); background: rgb(255 61 129 / 0.1); outline: none; }
+.wb .key-src { font-size: 12.5px; }
+.wb .member {
+  padding: 3px 8px 3px 4px;
+  border-radius: 99px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  font-size: 11.5px;
+}
+.wb .member:hover { border-color: var(--layer-customization); }
+.wb .member.picked { border-color: var(--layer-customization); background: rgb(255 61 129 / 0.22); }
+.wb .member-more { padding: 0 5px; border-radius: 99px; background: var(--layer-customization); color: #fff; font-size: 10px; font-weight: 700; }
+.wb .drop-here { color: var(--faint); font-size: 12px; font-style: italic; }
+.wb .wire { min-width: 24px; min-height: 0; border-top: 2px dashed var(--line-strong); }
+.wb .wire.on { border-top: 2px solid var(--layer-customization); }
+.wb menubutton.key-btn > button {
+  all: unset;
+  padding: 5px 10px;
+  border-radius: 9px;
+  border: 1.5px dashed var(--line-strong);
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 600;
+}
+.wb menubutton.key-btn > button:hover { border-color: var(--layer-customization); color: var(--fg); }
+.wb menubutton.key-btn.set > button {
+  border: 1.5px solid var(--layer-customization);
+  background: var(--accent-2-soft);
+  color: #ffc1d6;
+}
+window.theme-light .wb menubutton.key-btn.set > button { color: var(--layer-customization); }
+.wb .key-edit {
+  padding: 2px 4px 2px 10px;
+  border-radius: 9px;
+  border: 1.5px solid var(--layer-customization);
+  background: var(--accent-2-soft);
+  color: #ffc1d6;
+}
+.wb .key-edit > entry { min-height: 26px; border: none; box-shadow: none; background: transparent; color: var(--fg); font-size: 12px; font-weight: 600; }
+.wb .key-edit > entry.clash { color: var(--danger); }
+.wb button.key-line.new-group {
+  all: unset;
+  min-height: 34px;
+  border-radius: 10px;
+  border: 1.5px dashed color-mix(in srgb, var(--layer-customization) 45%, transparent);
+  color: color-mix(in srgb, var(--layer-customization) 80%, var(--fg));
+  font-size: 12px;
+  font-weight: 600;
+}
+.wb button.key-line.new-group:hover, window.is-dragging .wb button.key-line.new-group {
+  border-color: var(--layer-customization);
+  background: rgb(255 61 129 / 0.06);
+}
+.wb button.key-line.new-group.drop-ok { border-style: solid; background: rgb(255 61 129 / 0.14); outline: none; }
+popover.key-menu .group-label { font-size: 11px; color: var(--faint); letter-spacing: 0.06em; }
+popover.key-menu .faint { color: var(--faint); }
+popover.key-menu button.menu-item { font-size: 12.5px; }

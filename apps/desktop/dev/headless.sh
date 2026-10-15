@@ -37,7 +37,7 @@ KWIN=$!
 ours() {
     for p in $(pgrep -u "$(id -u)" || true); do
         [[ "$p" == "$$" ]] && continue
-        tr "\0" "\n" < "/proc/$p/environ" 2>/dev/null | grep -qxF "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}" && echo "$p"
+        tr "\0" "\n" 2>/dev/null < "/proc/$p/environ" | grep -qxF "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}" && echo "$p"
     done
 }
 trap "kill ${KWIN} 2>/dev/null; wait ${KWIN} 2>/dev/null; for p in \$(ours); do kill \$p 2>/dev/null; done" EXIT

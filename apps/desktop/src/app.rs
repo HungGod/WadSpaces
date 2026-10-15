@@ -63,11 +63,11 @@ fn window(app: &gtk::Application, args: &Args) -> gtk::ApplicationWindow {
         w.set_decorated(false);
         w.fullscreen();
     }
-    // Esc closes the top dialog.
+    // Esc closes the top dialog (or the Builder's editor).
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed(|_, key, _, _| {
-        if key == gtk::gdk::Key::Escape && crate::modal::escape() {
+        if key == gtk::gdk::Key::Escape && (crate::modal::escape() || crate::pages::builder::editor::escape()) {
             return glib::Propagation::Stop;
         }
         glib::Propagation::Proceed
@@ -178,6 +178,52 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
             crate::pages::builder::sim::drop_after_last();
             settle(900).await;
             shot(&w, &dir.join("builder-dropped-dark.png"));
+        }
+        // The editors: a template's, Extensions' (open on WadBrowser) and a
+        // Customization's; a Customization open on its keys; Extensions set
+        // up new.
+        use crate::pages::builder::editor;
+        use wad_board::Layer;
+        for (layer, focus, name) in [
+            (Layer::Template, None, "builder-template"),
+            (Layer::Extensions, Some("wadbrowser"), "builder-extensions"),
+            (Layer::Customization, None, "builder-customization"),
+        ] {
+            if editor::sim::open("vanua-academy", layer, focus) {
+                for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+                    wad_gtk::theme::set(&display, t);
+                    settle(1000).await;
+                    shot(&w, &dir.join(format!("{name}-{}.png", t.name())));
+                }
+                editor::sim::close();
+                settle(700).await;
+            }
+        }
+        wad_gtk::theme::set(&display, wad_gtk::Theme::Dark);
+        for (stack, layer, focus, name) in [
+            ("vanua-academy", Layer::Customization, Some("secrets"), "builder-customization-keys"),
+            ("cosmic-bodybuilding", Layer::Extensions, None, "builder-extensions-new"),
+        ] {
+            if editor::sim::open(stack, layer, focus) {
+                settle(1100).await;
+                shot(&w, &dir.join(format!("{name}-dark.png")));
+                editor::sim::close();
+                settle(700).await;
+            }
+        }
+        // An app dragged onto a template's desktop, then saved.
+        if editor::sim::open("cosmic-bodybuilding", Layer::Template, None) {
+            settle(900).await;
+            if editor::template::sim::pick_up("vscode") {
+                editor::template::sim::over_desktop();
+                settle(400).await;
+                shot(&w, &dir.join("builder-template-drag-dark.png"));
+                crate::drag::sim::end(true);
+                settle(600).await;
+            }
+            editor::sim::save();
+            settle(1200).await;
+            shot(&w, &dir.join("builder-template-saved-dark.png"));
         }
         crate::shell::go(crate::shell::Page::Secrets);
         for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {

@@ -270,6 +270,7 @@ impl Target for ModuleTarget {
                         }
                     }
                 }
+                _ => None,
             }
         })
     }
@@ -288,6 +289,7 @@ impl Target for ModuleTarget {
                 let layer = self.module.layer();
                 state::edit(|b| b.place_sub(sub, from, &self.stack_id, layer, false));
             }
+            _ => {}
         }
     }
 }
@@ -324,6 +326,7 @@ impl Target for BuildTarget {
                     }
                 })
             }
+            _ => None,
         }
     }
 
@@ -360,6 +363,7 @@ impl Target for DeleteTarget {
                 SubFrom::Module { .. } => Verdict::yes(format!("Delete {}", faces::sub_summary(sub, None).0)),
                 SubFrom::Deleted { .. } => Verdict::no("Already deleted"),
             },
+            _ => None,
         }
     }
 
@@ -374,6 +378,7 @@ impl Target for DeleteTarget {
                 let n = state::edit(|b| b.delete_sub(sub, from));
                 state::tell(n);
             }
+            _ => {}
         }
     }
 }

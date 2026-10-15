@@ -7,6 +7,7 @@
 //! them back.
 
 pub mod drops;
+pub mod editor;
 pub mod faces;
 pub mod state;
 
@@ -320,9 +321,9 @@ fn first_wadspace(s: &AppState) -> gtk::Widget {
     p.add_css_class("rail-note");
     intro.append(&p);
     col.append(&intro);
-    col.append(&blank_tile(faces::blank_customization(&empty)));
-    col.append(&blank_tile(faces::blank_extensions(&empty)));
-    col.append(&add_button(Layer::Template));
+    col.append(&blank_tile(faces::blank_customization(&empty), Layer::Customization, editor::NEW));
+    col.append(&blank_tile(faces::blank_extensions(&empty), Layer::Extensions, editor::NEW));
+    col.append(&add_button(Layer::Template, editor::NEW));
     let foot = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     foot.add_css_class("stack-foot");
     let n = gtk::Label::new(Some("No wadspaces yet"));
@@ -334,7 +335,7 @@ fn first_wadspace(s: &AppState) -> gtk::Widget {
     col.upcast()
 }
 
-fn add_button(layer: Layer) -> gtk::Button {
+fn add_button(layer: Layer, stack_id: &str) -> gtk::Button {
     let text = match layer {
         Layer::Template => "Add a template",
         Layer::Extensions => "Add extensions",
@@ -350,15 +351,55 @@ fn add_button(layer: Layer) -> gtk::Button {
             Layer::Customization => "customization",
         }
     ));
+    let id = stack_id.to_string();
+    b.connect_clicked(move |b| editor::add(layer, &id, Some(b.clone().upcast()), None));
     b
 }
 
-fn blank_tile(face: Face) -> gtk::Widget {
+/// A click (not Ctrl+click: that selects) runs `f` with what was clicked.
+fn on_click(w: &impl IsA<gtk::Widget>, f: impl Fn(gtk::Widget) + 'static) {
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |g, _, _, _| {
+        if g.current_event_state().contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+            return;
+        }
+        g.set_state(gtk::EventSequenceState::Claimed);
+        if let Some(w) = g.widget() {
+            f(w);
+        }
+    });
+    w.add_controller(click);
+}
+
+/// A layer a stack hasn't got: a click sets one up (a blank window or a
+/// prompt opens the editor on its part).
+fn blank_tile(face: Face, layer: Layer, stack_id: &str) -> gtk::Widget {
     let t = gtk::Box::new(gtk::Orientation::Vertical, 0);
     t.add_css_class("mod-tile");
     t.add_css_class("blank");
     t.append(&face.root);
+    let tip = match layer {
+        Layer::Extensions => "Set up this wadspace's Extensions",
+        _ => "Set up this wadspace's Customization",
+    };
+    t.set_tooltip_text(Some(tip));
+    for (focus, w) in face.blanks.iter().map(|(k, w)| (*k, w)).chain(face.prompts.iter().map(|(k, w)| (*k, w))) {
+        let id = stack_id.to_string();
+        let tile = t.downgrade();
+        on_click(w, move |_| editor::add(layer, &id, tile.upgrade().map(|t| t.upcast()), Some(focus)));
+    }
+    let id = stack_id.to_string();
+    on_click(&t, move |t| editor::add(layer, &id, Some(t), None));
     t.upcast()
+}
+
+/// A module's tile, by its id (to shrink the editor back into).
+pub(super) fn tile_widget(module_id: &str) -> Option<gtk::Widget> {
+    let row = WIDGETS.with(|w| w.borrow().0.upgrade())?;
+    let name = format!("mod:{module_id}");
+    let mut all = vec![];
+    sim::descendants(row.upcast_ref(), &mut all);
+    all.into_iter().find(|w| w.widget_name() == name)
 }
 
 /// What the stack's chip says: (class, words).
@@ -414,18 +455,18 @@ fn column(s: &AppState, stack: &Stack) -> gtk::Widget {
     mods.add_css_class("stack-modules");
     match &stack.customization {
         Some(c) => mods.append(&tile(s, stack, &Module::Customization(c.clone()), false)),
-        None => mods.append(&blank_tile(faces::blank_customization(stack))),
+        None => mods.append(&blank_tile(faces::blank_customization(stack), Layer::Customization, &stack.id)),
     }
     match &stack.extensions {
         Some(e) => mods.append(&tile(s, stack, &Module::Extensions(e.clone()), false)),
-        None => mods.append(&blank_tile(faces::blank_extensions(stack))),
+        None => mods.append(&blank_tile(faces::blank_extensions(stack), Layer::Extensions, &stack.id)),
     }
     let n = stack.templates.len();
     for (i, t) in stack.templates.iter().enumerate().rev() {
         mods.append(&tile(s, stack, &Module::Template(t.clone()), i + 1 < n));
     }
     if stack.templates.is_empty() {
-        mods.append(&add_button(Layer::Template));
+        mods.append(&add_button(Layer::Template, &stack.id));
     }
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
@@ -484,11 +525,12 @@ fn tile(s: &AppState, stack: &Stack, m: &Module, compact: bool) -> gtk::Widget {
     let face = faces::module(stack, m, compact, built);
     let t = gtk::Box::new(gtk::Orientation::Vertical, 0);
     t.add_css_class("mod-tile");
+    t.set_widget_name(&format!("mod:{}", m.id()));
     let selected = state::read(|st| st.board.selected.iter().any(|x| x == m.id()));
     if selected {
         t.add_css_class("selected");
     }
-    t.set_tooltip_text(Some("Ctrl+click to select · drag to copy onto another stack"));
+    t.set_tooltip_text(Some("Click to edit · Ctrl+click to select · drag to copy onto another stack"));
     let o = gtk::Overlay::new();
     o.set_child(Some(&face.root));
     if selected {
@@ -525,6 +567,17 @@ fn tile(s: &AppState, stack: &Stack, m: &Module, compact: bool) -> gtk::Widget {
         Module::Customization(c) => c.subs.iter().cloned().map(AnySub::Custom).collect(),
         Module::Template(_) => vec![],
     };
+    // A submodule, a blank window or a prompt opens the editor on its part.
+    let parts = face
+        .subs
+        .iter()
+        .filter_map(|(id, w)| subs.iter().find(|x| x.id() == id).map(|x| (x.key(), w)))
+        .chain(face.blanks.iter().map(|(k, w)| (*k, w)))
+        .chain(face.prompts.iter().map(|(k, w)| (*k, w)));
+    for (focus, w) in parts {
+        let (stack_id, module_id, tile) = (stack.id.clone(), m.id().to_string(), t.downgrade());
+        on_click(w, move |_| editor::edit(&stack_id, &module_id, Some(focus), tile.upgrade().map(|t| t.upcast())));
+    }
     for (sub_id, w) in &face.subs {
         let Some(sub) = subs.iter().find(|x| x.id() == sub_id).cloned() else { continue };
         let (stack_id, layer, st) = (stack.id.clone(), m.layer(), stack.clone());
@@ -542,12 +595,14 @@ fn tile(s: &AppState, stack: &Stack, m: &Module, compact: bool) -> gtk::Widget {
             ))
         });
     }
-    // Ctrl+click picks it out (for Build and Delete).
+    // A click opens it; Ctrl+click picks it out (for Build and Delete).
     let click = gtk::GestureClick::new();
-    let id = m.id().to_string();
+    let (id, stack_id) = (m.id().to_string(), stack.id.clone());
     click.connect_released(move |g, _, _, _| {
         if g.current_event_state().contains(gtk::gdk::ModifierType::CONTROL_MASK) {
             state::edit(|b| b.toggle_select(&id));
+        } else {
+            editor::edit(&stack_id, &id, None, g.widget());
         }
     });
     t.add_controller(click);
@@ -918,7 +973,7 @@ fn buckets(panel: &gtk::Box) -> gtk::Widget {
 pub mod sim {
     use super::*;
 
-    fn descendants(w: &gtk::Widget, out: &mut Vec<gtk::Widget>) {
+    pub(super) fn descendants(w: &gtk::Widget, out: &mut Vec<gtk::Widget>) {
         let mut c = w.first_child();
         while let Some(x) = c {
             out.push(x.clone());

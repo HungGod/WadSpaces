@@ -224,6 +224,7 @@ pub fn shell() -> gtk::Widget {
 
     let mut centred: Vec<gtk::Widget> = rows.iter().map(|r| r.clone().upcast()).collect();
     centred.push(profile.clone().upcast());
+    frame.add_overlay(&crate::pages::builder::editor::layer());
     frame.add_overlay(&crate::modal::layer());
     frame.add_overlay(&crate::toast::host());
     frame.add_overlay(&crate::drag::layer());

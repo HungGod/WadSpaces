@@ -48,6 +48,14 @@
     { "id": "cosmic-bodybuilding", "container": "running", "phase": "ready", "message": null, "error": null, "imagePresent": true, "since": 1792020000 }
   ],
   "wadd": {
+    "/v1/github/repos": {
+      "login": "dwadsworth",
+      "repos": [
+        { "fullName": "dwadsworth/wadspaces", "name": "wadspaces", "private": true, "url": "https://github.com/dwadsworth/wadspaces.git", "defaultBranch": "main", "pushedAt": "2026-10-14T21:03:00Z", "description": "Desktops in containers" },
+        { "fullName": "dwadsworth/vanua-academy", "name": "vanua-academy", "private": true, "url": "https://github.com/dwadsworth/vanua-academy.git", "defaultBranch": "main", "pushedAt": "2026-10-10T08:12:00Z", "description": "Vanua Academy's site" },
+        { "fullName": "dwadsworth/notes", "name": "notes", "private": false, "url": "https://github.com/dwadsworth/notes.git", "defaultBranch": "main", "pushedAt": "2026-09-28T17:40:00Z", "description": "" }
+      ]
+    },
     "/v1/metrics": { "cpu": 14.0, "mem": 38.0, "memUsed": 3100000000, "memTotal": 8000000000, "diskFree": 48000000000, "diskTotal": 120000000000, "load": 0.4, "gpu": "Intel HD 620" },
     "/v1/projects": [
       { "id": "writing", "name": "Writing", "mountName": "Writing", "source": null, "setup": "", "deleted": false, "createdAt": 0, "updatedAt": 0, "synced": true, "legacy": false }

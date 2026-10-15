@@ -203,6 +203,7 @@ impl FakeGit {
         std::fs::create_dir(&rec).unwrap();
         let script = format!(
             r#"#!/bin/bash
+[ "$1" = --probe ] && exit 0
 printf '%s\n' "$@" > {rec}/argv
 env > {rec}/env
 dest="${{@: -1}}"
@@ -220,6 +221,14 @@ exit 0
         let prog = dir.join("git");
         std::fs::write(&prog, script).unwrap();
         std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Another test's child, forked while the script was open for writing,
+        // keeps it busy until it execs: run it once it's free.
+        for _ in 0..100 {
+            match std::process::Command::new(&prog).arg("--probe").status() {
+                Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                _ => break,
+            }
+        }
         Self { git: Git::with_program(&prog), _d: d, dir }
     }
 
