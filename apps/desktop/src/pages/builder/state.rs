@@ -8,10 +8,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use gtk::glib;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wad_board::board::Note;
-use wad_board::{Board, Docs, Module, Stack};
+use wad_board::{Board, Deleted, Docs, Layer, Module, Stack};
 use wad_proto::v1::ImageRow;
+use wad_wadd_client::Method;
 
 use crate::launch::{self, ImageState};
 use crate::store::{AppState, Topic, store};
@@ -41,6 +43,8 @@ pub struct State {
     /// Draws the board again (the page's), when it's changed.
     redraw: Vec<Box<dyn Fn()>>,
     scheduled: bool,
+    /// What's kept on this machine, as last written.
+    kept: String,
 }
 
 thread_local! {
@@ -78,8 +82,51 @@ pub fn changed() {
                 s.redraw = fs;
                 s.redraw.append(&mut later);
             });
+            keep();
         });
     }
+}
+
+/// What the board keeps on this machine (the web app keeps it in the
+/// browser): Recently deleted, and work not saved yet.
+#[derive(Default, Serialize, Deserialize)]
+struct Kept {
+    deleted: Vec<Deleted>,
+    unsaved: Option<Vec<Stack>>,
+}
+
+const KEPT: &str = "builder.json";
+
+/// Written when it's changed (not on a made-up machine).
+fn keep() {
+    if crate::fake::on() {
+        return;
+    }
+    let Some(path) = crate::account::data_file(KEPT) else { return };
+    let text = read(|s| {
+        if !s.loaded {
+            return None;
+        }
+        serde_json::to_string(&Kept { deleted: s.board.deleted.clone(), unsaved: s.unsaved.clone() }).ok()
+    });
+    let Some(text) = text else { return };
+    if write(|s| std::mem::replace(&mut s.kept, text.clone()) == text) {
+        return;
+    }
+    if let Err(e) = wad_account::write_private(&path, text.as_bytes()) {
+        tracing::warn!("{}: {e}", path.display());
+    }
+}
+
+/// What was kept, read at the first start of the board.
+fn kept() -> Kept {
+    if crate::fake::on() {
+        return Kept::default();
+    }
+    crate::account::data_file(KEPT)
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
 }
 
 /// An edit of the board; saved, drawn again, and its note shown.
@@ -144,6 +191,16 @@ pub fn set_renaming(on: bool) {
 /// own writes are out, or it has work not saved yet.
 pub fn take_library(s: &AppState) {
     let Some(docs) = docs(s) else { return };
+    // The first read: what this machine kept (Recently deleted, unsaved work).
+    if read(|st| !st.loaded) {
+        let k = kept();
+        write(|st| {
+            st.board.deleted = k.deleted;
+            if st.unsaved.is_none() {
+                st.unsaved = k.unsaved;
+            }
+        });
+    }
     let retry = write(|st| {
         if let Some(unsaved) = st.unsaved.clone() {
             if !st.loaded {
@@ -455,4 +512,320 @@ pub fn build_all(only: Option<Vec<String>>) {
         None,
         crate::toast::Tone::Info,
     );
+}
+
+// ─────────────────────────── gone for good ───────────────────────────
+
+fn s_of<'a>(v: &'a Value, k: &str) -> &'a str {
+    v.get(k).and_then(Value::as_str).unwrap_or("")
+}
+
+fn deleted_doc(v: &Value) -> bool {
+    !s_of(v, "deletedAt").is_empty()
+}
+
+/// What's built on a document (`kind`: "template", "extensions"): their
+/// names (`with_deleted`: those deleted too, said so).
+fn dependents(s: &AppState, kind: &str, id: &str, with_deleted: bool) -> Vec<String> {
+    let Some(d) = docs(s) else { return vec![] };
+    let name = |v: &Value, n: String| if deleted_doc(v) { format!("{n} (recently deleted)") } else { n };
+    let pick = |v: &&Value| with_deleted || !deleted_doc(v);
+    match kind {
+        "template" => d
+            .templates
+            .iter()
+            .filter(pick)
+            .filter(|t| s_of(t, "parent") == id)
+            .map(|t| name(t, s_of(t, "name").into()))
+            .chain(
+                d.extensions
+                    .iter()
+                    .filter(pick)
+                    .filter(|e| s_of(e, "templateId") == id)
+                    .map(|e| name(e, s_of(e, "name").into())),
+            )
+            .chain(
+                d.wadspaces
+                    .iter()
+                    .filter(pick)
+                    .filter(|w| s_of(w, "template") == id)
+                    .map(|w| name(w, s.wadspace_name(w))),
+            )
+            .collect(),
+        "extensions" => d
+            .wadspaces
+            .iter()
+            .filter(pick)
+            .filter(|w| s_of(w, "extensions") == id)
+            .map(|w| name(w, s.wadspace_name(w)))
+            .collect(),
+        _ => vec![],
+    }
+}
+
+/// A document gone for good (`kind`: "template", "extensions",
+/// "wadspace"), with its image here; refused while anything (deleted or
+/// not) is built on it.
+async fn purge(kind: &'static str, id: String) -> Result<(), String> {
+    let deps = store().read_now(|s| dependents(s, kind, &id, true));
+    if !deps.is_empty() {
+        let one = deps.len() == 1;
+        return Err(format!(
+            "{} {} built on it: delete {} for good first.",
+            deps.join(", "),
+            if one { "is" } else { "are" },
+            if one { "that" } else { "those" }
+        ));
+    }
+    let (collection, image) = match kind {
+        "template" => ("templates", Some(format!("template:{id}"))),
+        "extensions" => ("extensions", Some(format!("custom:{id}"))),
+        _ => ("wadspaces", None),
+    };
+    if let Some(layer) = &image {
+        let path = format!("/v1/images/{}", crate::ui::enc(layer));
+        if let Err(e) = crate::pages::machines::send::<Value>(Method::DELETE, path, None).await {
+            tracing::debug!("{layer}: {e}");
+        }
+    }
+    crate::account::delete_doc(collection, id).await?;
+    if image.is_some() {
+        refresh_images();
+    }
+    Ok(())
+}
+
+/// Wadspaces deleted with no entry in Recently deleted (before, or
+/// elsewhere): restored or deleted for good from there too.
+pub fn orphans(s: &AppState) -> Vec<Value> {
+    let listed: Vec<String> = read(|st| {
+        st.board
+            .deleted
+            .iter()
+            .filter_map(|d| match d {
+                Deleted::Module { module: Module::Customization(c), .. } => c.id.split('@').nth(1).map(String::from),
+                _ => None,
+            })
+            .collect()
+    });
+    let on_board: Vec<String> = read(|st| st.board.stacks.iter().map(|x| x.id.clone()).collect());
+    s.library
+        .iter()
+        .flat_map(|l| l.wadspaces.iter())
+        .filter(|w| {
+            deleted_doc(w) && !listed.iter().any(|l| l == s_of(w, "id")) && !on_board.iter().any(|b| b == s_of(w, "id"))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Recently deleted entries gone for good, with the documents behind them
+/// that nothing else has (and their images here), and wadspaces left over.
+pub fn delete_forever(ids: Vec<String>, orphans: Vec<String>) {
+    let (going, staying, stacks) = read(|s| {
+        let (g, k): (Vec<Deleted>, Vec<Deleted>) =
+            s.board.deleted.iter().cloned().partition(|d| ids.iter().any(|i| i == d.id()));
+        (g, k, s.board.stacks.clone())
+    });
+    write(|s| s.board.deleted = staying.clone());
+    changed();
+    // A document something still has (a stack, an entry left) stays.
+    let kept_doc = |layer: Layer, doc: &str| {
+        let on_board = stacks.iter().any(|st| match layer {
+            Layer::Template => st.templates.iter().any(|t| t.doc.as_deref() == Some(doc)),
+            _ => st.extensions.as_ref().and_then(|e| e.doc.as_deref()) == Some(doc),
+        });
+        on_board
+            || staying.iter().any(
+                |d| matches!(d, Deleted::Module { module, .. } if module.layer() == layer && module.doc() == Some(doc)),
+            )
+    };
+    let (templates, wadspaces) = store().read_now(|s| {
+        let d = docs(s).unwrap_or_default();
+        (d.templates, d.wadspaces)
+    });
+    let mut purge_list: Vec<(&'static str, String, i32)> = vec![];
+    for d in &going {
+        let Deleted::Module { module, .. } = d else { continue };
+        match module {
+            Module::Customization(c) => {
+                let stack_id = c.id.split('@').nth(1).unwrap_or_default();
+                let gone = wadspaces.iter().any(|w| s_of(w, "id") == stack_id && deleted_doc(w));
+                if gone && !stacks.iter().any(|st| st.id == stack_id) {
+                    purge_list.push(("wadspace", stack_id.to_string(), 0));
+                }
+            }
+            m => {
+                let Some(doc) = m.doc().filter(|d| !kept_doc(m.layer(), d)) else { continue };
+                if m.layer() == Layer::Template {
+                    // Templates at the top of a chain first: one under another goes after it.
+                    let mut depth = 0;
+                    let mut t = templates.iter().find(|x| s_of(x, "id") == doc);
+                    while let Some(p) = t.map(|x| s_of(x, "parent")).filter(|p| !p.is_empty()) {
+                        depth -= 1;
+                        t = templates.iter().find(|x| s_of(x, "id") == p);
+                    }
+                    purge_list.push(("template", doc.to_string(), 10 + depth));
+                } else {
+                    purge_list.push(("extensions", doc.to_string(), 1));
+                }
+            }
+        }
+    }
+    let n = going.len() + orphans.len();
+    for w in orphans {
+        purge_list.push(("wadspace", w, 0));
+    }
+    purge_list.sort_by_key(|p| p.2);
+    let mut seen: Vec<String> = vec![];
+    purge_list.retain(|(k, id, _)| {
+        let key = format!("{k}:{id}");
+        !seen.contains(&key) && {
+            seen.push(key);
+            true
+        }
+    });
+    glib::spawn_future_local(async move {
+        let mut failed: Vec<String> = vec![];
+        for (kind, id, _) in purge_list {
+            if crate::fake::on() {
+                continue;
+            }
+            if let Err(e) = purge(kind, id).await {
+                failed.push(e);
+            }
+        }
+        let text = if !failed.is_empty() {
+            format!("Deleted for good, except: {}", failed.join(" "))
+        } else if n == 1 {
+            "Deleted it for good".to_string()
+        } else {
+            format!("Deleted {n} for good")
+        };
+        crate::toast::show(&text, None, crate::toast::Tone::Info);
+    });
+}
+
+/// A wadspace deleted elsewhere (or before), back on the board: with the
+/// Extensions and templates it's built on, if they went too.
+pub fn restore_wadspace(id: String) {
+    glib::spawn_future_local(async move {
+        let (w, docs) = store().read_now(|s| {
+            let w = s.library.iter().flat_map(|l| l.wadspaces.iter()).find(|w| s_of(w, "id") == id).cloned();
+            (w, docs(s))
+        });
+        let (Some(w), Some(docs)) = (w, docs) else { return };
+        let mut back: Vec<(&'static str, Value)> = vec![];
+        if let Some(e) = docs.extensions.iter().find(|e| s_of(e, "id") == s_of(&w, "extensions") && deleted_doc(e)) {
+            back.push(("extensions", e.clone()));
+        }
+        let mut t = docs.templates.iter().find(|t| s_of(t, "id") == s_of(&w, "template"));
+        while let Some(x) = t {
+            if deleted_doc(x) {
+                back.push(("templates", x.clone()));
+            }
+            let parent = s_of(x, "parent");
+            t = (!parent.is_empty()).then(|| docs.templates.iter().find(|y| s_of(y, "id") == parent)).flatten();
+        }
+        back.push(("wadspaces", w.clone()));
+        let now = launch::now_iso();
+        for (collection, mut doc) in back {
+            if let Some(o) = doc.as_object_mut() {
+                o.remove("deletedAt");
+                o.insert("updatedAt".into(), now.clone().into());
+            }
+            if let Err(e) = crate::account::write_doc(collection, doc.clone()).await {
+                crate::toast::error("Couldn't restore it", &e);
+                return;
+            }
+            store().update(|s| match s.library.as_mut() {
+                Some(l) => {
+                    let list = match collection {
+                        "templates" => &mut l.templates,
+                        "extensions" => &mut l.extensions,
+                        _ => &mut l.wadspaces,
+                    };
+                    match list.iter_mut().find(|x| x["id"] == doc["id"]) {
+                        Some(x) => *x = doc.clone(),
+                        None => list.push(doc.clone()),
+                    }
+                    Topic::LIBRARY
+                }
+                None => Topic::NONE,
+            });
+        }
+        crate::toast::show(
+            &format!("Restored {}", store().read_now(|s| s.wadspace_name(&w))),
+            None,
+            crate::toast::Tone::Info,
+        );
+    });
+}
+
+/// "5m ago" (the web app's timeAgo), from Unix milliseconds.
+pub fn time_ago(ms: f64) -> String {
+    let now =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as f64).unwrap_or(0.0);
+    let s = ((now - ms) / 1000.0).max(0.0);
+    if s < 60.0 {
+        return "just now".into();
+    }
+    let m = s / 60.0;
+    if m < 60.0 {
+        return format!("{}m ago", m.floor());
+    }
+    let h = m / 60.0;
+    if h < 24.0 {
+        return format!("{}h ago", h.floor());
+    }
+    let d = h / 24.0;
+    if d < 30.0 {
+        return format!("{}d ago", d.floor());
+    }
+    glib::DateTime::from_unix_local((ms / 1000.0) as i64)
+        .ok()
+        .and_then(|t| t.format("%x").ok())
+        .map(|t| t.to_string())
+        .unwrap_or_default()
+}
+
+/// An ISO time as Unix milliseconds.
+pub fn iso_ms(iso: &str) -> Option<f64> {
+    glib::DateTime::from_iso8601(iso, None).ok().map(|t| t.to_unix() as f64 * 1000.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn whats_built_on_a_document_is_named_deleted_or_not() {
+        let lib = wad_account::Library {
+            templates: vec![
+                json!({ "id": "base", "name": "Base", "apps": ["vscode"] }),
+                json!({ "id": "dev", "name": "Dev", "parent": "base", "apps": ["vscode", "wadbrowser"], "deletedAt": "2026-10-01T00:00:00Z" }),
+            ],
+            extensions: vec![json!({ "id": "e1", "name": "Dev setup", "templateId": "base" })],
+            wadspaces: vec![
+                json!({ "id": "w1", "template": "base", "extensions": "e1", "customization": { "name": "Site" } }),
+            ],
+            ..Default::default()
+        };
+        let s = AppState { library: Some(lib), ..Default::default() };
+        assert_eq!(dependents(&s, "template", "base", false), vec!["Dev setup", "Site"]);
+        assert_eq!(dependents(&s, "template", "base", true), vec!["Dev (recently deleted)", "Dev setup", "Site"]);
+        assert_eq!(dependents(&s, "extensions", "e1", true), vec!["Site"]);
+        assert!(dependents(&s, "template", "dev", true).is_empty());
+    }
+
+    #[test]
+    fn times_read_as_how_long_ago() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64;
+        assert_eq!(time_ago(now - 10_000.0), "just now");
+        assert_eq!(time_ago(now - 5.5 * 60_000.0), "5m ago");
+        assert_eq!(time_ago(now - 3.0 * 3_600_000.0), "3h ago");
+        assert_eq!(time_ago(now - 2.0 * 86_400_000.0), "2d ago");
+        assert_eq!(iso_ms("1970-01-01T00:00:01Z"), Some(1000.0));
+    }
 }

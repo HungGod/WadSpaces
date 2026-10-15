@@ -110,6 +110,20 @@ impl Account {
         Ok(self.firestore().set(&tok, &format!("users/{uid}/{collection}/{id}"), &data).await?)
     }
 
+    /// One of their documents (`templates`, `extensions`, `browsers`)
+    /// deleted for good.
+    pub async fn delete_doc(&self, collection: &str, id: &str) -> Result<(), Error> {
+        let uid = self.user().map(|u| u.uid).ok_or(Error::SignedOut)?;
+        let tok = self.id_token().await?;
+        Ok(self.firestore().delete(&tok, &format!("users/{uid}/{collection}/{id}")).await?)
+    }
+
+    /// A wadspace deleted for good.
+    pub async fn delete_wadspace(&self, id: &str) -> Result<(), Error> {
+        let tok = self.id_token().await?;
+        Ok(self.firestore().delete(&tok, &format!("wadspaces/{id}")).await?)
+    }
+
     /// The library as last read on this machine (for a quick start, or offline).
     pub fn cached_library(&self) -> Option<Library> {
         serde_json::from_slice(&std::fs::read(self.library_file()?).ok()?).ok()
@@ -117,12 +131,18 @@ impl Account {
 
     /// ~/.local/share/io.wadspaces.client/account/<uid>/library.json
     fn library_file(&self) -> Option<PathBuf> {
+        self.data_file("library.json")
+    }
+
+    /// A file of theirs on this machine:
+    /// ~/.local/share/io.wadspaces.client/account/<uid>/<name>.
+    pub fn data_file(&self, name: &str) -> Option<PathBuf> {
         let uid = self.user()?.uid;
         let data = std::env::var_os("XDG_DATA_HOME")
             .filter(|d| !d.is_empty())
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-        Some(data.join("io.wadspaces.client/account").join(uid).join("library.json"))
+        Some(data.join("io.wadspaces.client/account").join(uid).join(name))
     }
 }
 

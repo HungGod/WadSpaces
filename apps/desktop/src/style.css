@@ -2094,3 +2094,44 @@ window.theme-light .wb menubutton.key-btn.set > button { color: var(--layer-cust
 popover.key-menu .group-label { font-size: 11px; color: var(--faint); letter-spacing: 0.06em; }
 popover.key-menu .faint { color: var(--faint); }
 popover.key-menu button.menu-item { font-size: 12.5px; }
+
+/* Preview: the finished desktop, nothing launched. */
+.wb.preview {
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line-strong), 0 30px 90px -20px rgb(0 0 0 / 0.9);
+}
+.wb .preview-head { padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); }
+.wb .preview-title { font-family: "Space Grotesk", sans-serif; font-size: 16px; font-weight: 700; }
+.wb .preview-note { font-size: 12px; color: var(--faint); }
+.wb .preview-desktop { border-radius: 0 0 16px 16px; color: #f5f2fa; }
+.wb flowbox.pv-icons > flowboxchild { padding: 0; }
+.wb button.pv-icon {
+  all: unset;
+  padding: 8px 4px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #f5f2fa;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
+}
+.wb button.pv-icon:hover, .wb button.pv-icon.on { background: rgb(255 255 255 / 0.12); }
+.wb .pv-taskbar { min-height: 44px; padding: 0 14px; background: rgb(10 6 20 / 0.82); border-radius: 0 0 16px 16px; }
+.wb button.pv-tb-app { all: unset; padding: 3px; border-radius: 6px; }
+.wb button.pv-tb-app:hover { background: rgb(255 255 255 / 0.1); }
+.wb .pv-tray, .wb .pv-clock { font-size: 12px; color: rgb(245 242 250 / 0.62); }
+.wb .mock-window {
+  border-radius: 12px;
+  background: #140d22;
+  color: #f5f2fa;
+  box-shadow: inset 0 0 0 1px rgb(240 234 250 / 0.18), 0 24px 60px -16px rgb(0 0 0 / 0.9);
+}
+.wb .mw-bar { min-height: 34px; padding: 0 6px 0 12px; border-radius: 12px 12px 0 0; background: #241a39; font-weight: 600; }
+.wb .mw-body { padding: 12px 14px 14px 14px; font-size: 13px; }
+.wb .mw-body .faint { color: rgb(245 242 250 / 0.4); }
+.wb .mw-li { margin-left: 6px; }
+.wb .mw-url { font-family: monospace; font-size: 12px; padding: 6px 10px; border-radius: 8px; background: #0a0614; }
+
+/* Recently deleted: bins, Empty, wadspaces deleted before. */
+button.btn.sure { box-shadow: inset 0 0 0 1px var(--danger); }
+.deleted-name { font-weight: 600; font-size: 13px; }

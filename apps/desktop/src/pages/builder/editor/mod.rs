@@ -102,6 +102,24 @@ fn the_layer() -> Option<gtk::Overlay> {
     LAYER.with(|l| l.borrow().clone())
 }
 
+/// Something shown over the app in the editor's place (the Preview).
+pub fn layer_show(w: &impl IsA<gtk::Widget>) {
+    let Some(layer) = the_layer() else { return };
+    layer.add_overlay(w);
+    layer.set_visible(true);
+    layer.set_can_target(true);
+}
+
+/// It goes (the layer hides when nothing's left on it).
+pub fn layer_hide(w: &impl IsA<gtk::Widget>) {
+    let Some(layer) = the_layer() else { return };
+    layer.remove_overlay(w);
+    if layer.first_child().is_none() {
+        layer.set_visible(false);
+        layer.set_can_target(false);
+    }
+}
+
 /// The editor open now.
 pub fn current() -> Option<Rc<Editor>> {
     OPEN.with(|o| o.borrow().clone())
@@ -117,6 +135,9 @@ pub fn menu_opened(p: &gtk::Popover) {
 pub fn escape() -> bool {
     if let Some(p) = MENU.with(|m| m.borrow().upgrade()).filter(|p| p.is_visible()) {
         p.popdown();
+        return true;
+    }
+    if super::preview::close() {
         return true;
     }
     let Some(ed) = current() else { return false };
@@ -399,9 +420,7 @@ pub fn open(e: Editing) {
         });
     ed.from.set(from);
     ed.place(from);
-    layer.add_overlay(&root);
-    layer.set_visible(true);
-    layer.set_can_target(true);
+    layer_show(&root);
     OPEN.with(|o| o.replace(Some(ed.clone())));
     let s = scrim.clone();
     glib::idle_add_local_once(move || s.add_css_class("shown"));
@@ -676,11 +695,7 @@ impl Editor {
     }
 
     fn gone(&self) {
-        if let Some(layer) = the_layer() {
-            layer.remove_overlay(&self.root);
-            layer.set_visible(false);
-            layer.set_can_target(false);
-        }
+        layer_hide(&self.root);
         self.redraws.borrow_mut().clear();
         self.kept.borrow_mut().clear();
         OPEN.with(|o| o.replace(None));

@@ -391,7 +391,8 @@ fn prompts_for(stack: &Stack, subs: &[CustomSub]) -> (Vec<(&'static str, String)
     (bar, is_blank_wallpaper(look.map(|l| &l.wallpaper)))
 }
 
-fn wallpaper_of(w: Option<&serde_json::Value>) -> wad_gtk::Wallpaper {
+/// A wallpaper (`{type, value}`) drawn to fill its box.
+pub fn wallpaper_of(w: Option<&serde_json::Value>) -> wad_gtk::Wallpaper {
     let v = wad_gtk::Wallpaper::new();
     let wall: Wallpaper = w
         .and_then(|w| serde_json::from_value(w.clone()).ok())

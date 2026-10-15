@@ -9,6 +9,7 @@
 pub mod drops;
 pub mod editor;
 pub mod faces;
+pub mod preview;
 pub mod state;
 
 use std::cell::Cell;
@@ -31,6 +32,8 @@ const STACK_W: i32 = faces::MOD_W + 18;
 thread_local! {
     /// The row of stacks and the Delete bucket (for the snapshots' drags).
     static WIDGETS: std::cell::RefCell<(glib::WeakRef<gtk::Box>, glib::WeakRef<gtk::Button>)> = Default::default();
+    /// Recently deleted's panel (for the snapshots).
+    static PANEL: glib::WeakRef<gtk::Box> = Default::default();
 }
 
 /// The page.
@@ -79,6 +82,7 @@ pub fn page() -> gtk::Widget {
     }
     root.append(&board);
     let panel = drops::deleted_panel();
+    PANEL.with(|p| p.set(Some(&panel)));
     root.append(&buckets(&panel));
     drag::target(&row, drops::GapsTarget::new(&row));
     WIDGETS.with(|w| w.borrow_mut().0 = row.downgrade());
@@ -511,6 +515,8 @@ fn column(s: &AppState, stack: &Stack) -> gtk::Widget {
     }
     let preview = ui::icon_button("eye", "Preview: see the finished wadspace (nothing is launched)", 14);
     preview.add_css_class("btn-preview");
+    let id = stack.id.clone();
+    preview.connect_clicked(move |_| preview::open(&id));
     foot.append(&preview);
     col.append(&foot);
     col.upcast()
@@ -1015,6 +1021,21 @@ pub mod sim {
     pub fn over_delete() {
         if let Some(d) = WIDGETS.with(|w| w.borrow().1.upgrade()) {
             drag::sim::over(&d, 0.0, 20.0);
+        }
+    }
+
+    /// A stack's customization deleted (into Recently deleted).
+    pub fn delete_customization(stack_id: &str) {
+        let Some(c) = state::read(|s| s.board.stack(stack_id).and_then(|st| st.customization.clone())) else { return };
+        let from = wad_board::board::From::Stack { stack_id: stack_id.into() };
+        state::edit(|b| b.delete_modules(&[Module::Customization(c)], &from));
+    }
+
+    /// Recently deleted, open.
+    pub fn show_deleted() {
+        if let Some(p) = PANEL.with(|p| p.upgrade()) {
+            drops::fill_deleted(&p);
+            p.set_visible(true);
         }
     }
 

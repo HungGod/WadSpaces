@@ -412,12 +412,45 @@ pub fn deleted_panel() -> gtk::Box {
 
 pub fn fill_deleted(panel: &gtk::Box) {
     ui::clear(panel);
+    let deleted = state::read(|s| s.board.deleted.clone());
+    let orphans = store().read_now(state::orphans);
     let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let t = gtk::Label::new(Some("Recently deleted"));
     t.add_css_class("strong");
     t.set_hexpand(true);
     t.set_xalign(0.0);
     head.append(&t);
+    if !deleted.is_empty() || !orphans.is_empty() {
+        let empty = ui::button("Empty", Some("trash"), ui::Variant::Ghost, ui::Size::Sm);
+        empty.add_css_class("danger-text");
+        empty.set_tooltip_text(Some("Delete everything here for good"));
+        let sure = Rc::new(Cell::new(false));
+        let (s2, ids, ws) = (
+            sure.clone(),
+            deleted.iter().map(|d| d.id().to_string()).collect::<Vec<_>>(),
+            orphans.iter().filter_map(|w| w["id"].as_str().map(String::from)).collect::<Vec<_>>(),
+        );
+        empty.connect_clicked(move |b| {
+            if !s2.replace(true) {
+                ui::set_text(b, "Click again: for good");
+                b.add_css_class("sure");
+                return;
+            }
+            state::delete_forever(ids.clone(), ws.clone());
+        });
+        let leave = gtk::EventControllerMotion::new();
+        let (s2, eb) = (sure, empty.downgrade());
+        leave.connect_leave(move |_| {
+            if s2.replace(false)
+                && let Some(b) = eb.upgrade()
+            {
+                ui::set_text(&b, "Empty");
+                b.remove_css_class("sure");
+            }
+        });
+        empty.add_controller(leave);
+        head.append(&empty);
+    }
     let x = ui::icon_button("x", "Close", 14);
     let p = panel.downgrade();
     x.connect_clicked(move |_| {
@@ -427,11 +460,12 @@ pub fn fill_deleted(panel: &gtk::Box) {
     });
     head.append(&x);
     panel.append(&head);
-    let note = ui::wrapping("Drag one back onto a stack, or between two stacks, to restore it.");
+    let note = ui::wrapping(
+        "Drag one back onto a stack, or between two stacks, to restore it. The bin deletes it for good: its document, and its image when nothing else uses them.",
+    );
     note.add_css_class("rail-note");
     panel.append(&note);
-    let deleted = state::read(|s| s.board.deleted.clone());
-    if deleted.is_empty() {
+    if deleted.is_empty() && orphans.is_empty() {
         let e = gtk::Label::new(Some("Nothing here."));
         e.add_css_class("empty-note");
         e.set_xalign(0.0);
@@ -441,18 +475,26 @@ pub fn fill_deleted(panel: &gtk::Box) {
     for d in deleted {
         let item = gtk::Box::new(gtk::Orientation::Vertical, 4);
         item.add_css_class("deleted-item");
-        let (face, from_text): (gtk::Widget, String) = match &d {
-            Deleted::Module { module, from, .. } => (
+        let (face, from_text, at, what): (gtk::Widget, String, f64, String) = match &d {
+            Deleted::Module { module, from, at, .. } => (
                 faces::pile(&stack_of(std::slice::from_ref(module)), std::slice::from_ref(module)).upcast(),
                 from.clone(),
+                *at,
+                module_name(module),
             ),
-            Deleted::Sub { sub, from, .. } => (faces::chip(sub, None).upcast(), from.clone()),
+            Deleted::Sub { sub, from, at, .. } => {
+                (faces::chip(sub, None).upcast(), from.clone(), *at, faces::sub_summary(sub, None).0)
+            }
         };
         item.append(&face);
-        let l = gtk::Label::new(Some(&format!("from {from_text}")));
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let l = gtk::Label::new(Some(&format!("from {from_text} · {}", state::time_ago(at))));
         l.add_css_class("tiny-muted");
         l.set_xalign(0.0);
-        item.append(&l);
+        l.set_hexpand(true);
+        row.append(&l);
+        row.append(&forever(&what, d.id().to_string(), None));
+        item.append(&row);
         let dd = d.clone();
         drag::draggable(&item, move |_| match &dd {
             Deleted::Module { id, module, .. } => Some((
@@ -466,6 +508,33 @@ pub fn fill_deleted(panel: &gtk::Box) {
         });
         list.append(&item);
     }
+    for w in orphans {
+        let id = w["id"].as_str().unwrap_or_default().to_string();
+        let name = store().read_now(|s| s.wadspace_name(&w));
+        let item = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        item.add_css_class("deleted-item");
+        let texts = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        texts.set_hexpand(true);
+        let n = gtk::Label::new(Some(&name));
+        n.add_css_class("deleted-name");
+        n.set_xalign(0.0);
+        texts.append(&n);
+        let when = w["deletedAt"].as_str().and_then(state::iso_ms).map(state::time_ago).unwrap_or_default();
+        let l = gtk::Label::new(Some(&format!("a wadspace, deleted {when}")));
+        l.add_css_class("tiny-muted");
+        l.set_xalign(0.0);
+        texts.append(&l);
+        item.append(&texts);
+        let back = ui::button("Restore", Some("undo-2"), ui::Variant::Ghost, ui::Size::Sm);
+        back.set_valign(gtk::Align::Center);
+        let id2 = id.clone();
+        back.connect_clicked(move |_| state::restore_wadspace(id2.clone()));
+        item.append(&back);
+        let bin = forever(&name, String::new(), Some(id));
+        bin.set_valign(gtk::Align::Center);
+        item.append(&bin);
+        list.append(&item);
+    }
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
     scroll.set_max_content_height(420);
@@ -473,4 +542,16 @@ pub fn fill_deleted(panel: &gtk::Box) {
     scroll.set_child(Some(&list));
     drag::autoscroll(&scroll);
     panel.append(&scroll);
+}
+
+/// An entry's bin: gone for good (an entry by its id, or a wadspace left over).
+fn forever(what: &str, id: String, wadspace: Option<String>) -> gtk::Button {
+    let b = ui::icon_button("trash", "Delete for good", 13);
+    b.add_css_class("danger-text");
+    b.update_property(&[gtk::accessible::Property::Label(&format!("Delete {what} for good"))]);
+    b.connect_clicked(move |_| match &wadspace {
+        Some(w) => state::delete_forever(vec![], vec![w.clone()]),
+        None => state::delete_forever(vec![id.clone()], vec![]),
+    });
+    b
 }

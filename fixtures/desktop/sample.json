@@ -32,7 +32,10 @@
           "projects": [{ "id": "vanua-academy", "kind": "github", "repo": "HungGod/VanuaAcademy", "as": "VanuaAcademy", "setup": "npm ci" }],
           "secrets": { "bySlot": { "ext:anthropic.claude-code": { "id": "vanua-claude", "name": "VanuaAcademy-claude", "kind": "vscode-claude-code" } },
             "groups": [{ "members": ["browser", "web:github", "web:claude", "web:google-firebase", "web:gmail"], "key": { "id": "work-web", "name": "Work", "kind": "web" } }] } },
-        "createdAt": "2026-09-26T00:00:00.000Z", "updatedAt": "2026-09-26T00:00:00.000Z" }
+        "createdAt": "2026-09-26T00:00:00.000Z", "updatedAt": "2026-09-26T00:00:00.000Z" },
+      { "version": 3, "id": "old-site", "owner": "me", "order": 3, "template": "dev",
+        "customization": { "name": "Old site", "description": "", "wallpaper": { "type": "gradient", "value": "linear-gradient(160deg, #17112a 0%, #0e0919 100%)" }, "projects": [], "secrets": { "bySlot": {} } },
+        "createdAt": "2026-08-01T00:00:00.000Z", "updatedAt": "2026-10-12T09:00:00.000Z", "deletedAt": "2026-10-12T09:00:00.000Z" }
     ],
     "machines": [
       { "id": "m-surface", "hostname": "surface", "name": "Surface", "daemonVersion": "0.1.0", "lastSeen": "2026-10-15T01:00:00.000Z", "workspaces": [] },

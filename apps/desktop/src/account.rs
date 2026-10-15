@@ -169,6 +169,39 @@ pub async fn write_doc(collection: &'static str, doc: serde_json::Value) -> Resu
     .map_err(|e| e.to_string())
 }
 
+/// A document deleted for good (`collection`: "templates", "extensions"
+/// or "wadspaces"), and from the library here.
+pub async fn delete_doc(collection: &'static str, id: String) -> Result<(), String> {
+    let a = account().filter(|a| a.user().is_some()).ok_or("Sign in first.")?;
+    let id2 = id.clone();
+    rt::run(async move {
+        if collection == "wadspaces" { a.delete_wadspace(&id2).await } else { a.delete_doc(collection, &id2).await }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    store().update(|s| match s.library.as_mut() {
+        Some(l) => {
+            let list = match collection {
+                "templates" => &mut l.templates,
+                "extensions" => {
+                    l.customizations.retain(|x| x["id"] != id.as_str());
+                    &mut l.extensions
+                }
+                _ => &mut l.wadspaces,
+            };
+            list.retain(|x| x["id"] != id.as_str());
+            Topic::LIBRARY
+        }
+        None => Topic::NONE,
+    });
+    Ok(())
+}
+
+/// A file of the signed-in person's on this machine (None: no one's in).
+pub fn data_file(name: &str) -> Option<std::path::PathBuf> {
+    account().and_then(|a| a.data_file(name))
+}
+
 /// Who's signed in (their uid), for stamping documents.
 pub fn uid() -> Option<String> {
     account().and_then(|a| a.user()).map(|u| u.uid)

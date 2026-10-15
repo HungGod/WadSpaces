@@ -135,6 +135,8 @@ pub struct FoldersSub {
 /// key they share.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KeyGroup {
+    /// (Documents may have none: kept so, as the web app keeps them.)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub id: String,
     pub members: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -646,6 +648,14 @@ mod tests {
         assert_eq!(module_name(&c), "Dev copy");
         assert_eq!(radix36(35), "z");
         assert_eq!(radix36(36), "10");
+    }
+
+    #[test]
+    fn key_groups_without_ids_read_and_write_as_they_are() {
+        let v = json!({ "id": "s", "origin": "S", "bySlot": {}, "groups": [{ "members": ["browser"], "key": { "id": "k" } }] });
+        let sub: SecretsSub = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(sub.groups.as_ref().map(|g| g[0].members.len()), Some(1));
+        assert_eq!(serde_json::to_value(&sub).unwrap(), v);
     }
 
     #[test]

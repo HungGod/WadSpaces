@@ -225,6 +225,21 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
             settle(1200).await;
             shot(&w, &dir.join("builder-template-saved-dark.png"));
         }
+        // A stack previewed, VS Code's window open.
+        crate::pages::builder::preview::open("vanua-academy");
+        crate::pages::builder::preview::sim_show("app:vscode");
+        for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+            wad_gtk::theme::set(&display, t);
+            settle(900).await;
+            shot(&w, &dir.join(format!("builder-preview-{}.png", t.name())));
+        }
+        crate::pages::builder::preview::close();
+        wad_gtk::theme::set(&display, wad_gtk::Theme::Dark);
+        // Recently deleted: a customization just deleted, a wadspace deleted before.
+        crate::pages::builder::sim::delete_customization("cosmic-bodybuilding");
+        crate::pages::builder::sim::show_deleted();
+        settle(900).await;
+        shot(&w, &dir.join("builder-deleted-dark.png"));
         crate::shell::go(crate::shell::Page::Secrets);
         for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
             wad_gtk::theme::set(&display, t);
