@@ -1,0 +1,291 @@
+//! Launching (the web app's data/local/layers.ts launch and data/layers.ts):
+//! each wadspace is installed as it is now (with its wallpaper drawn), its
+//! layer built first when it has to be, then wadd starts them all
+//! together, the first on screen. What was launched is kept for "Jump back
+//! in".
+
+use std::collections::HashMap;
+
+use serde_json::{Value, json};
+use wad_core::layers as core;
+use wad_proto::v1::ImageRow;
+use wad_wadd_client::{Method, Wadd};
+
+use crate::rt;
+use crate::store::store;
+
+/// What the launcher starts.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunItem {
+    Wadspace(String),
+    Terminal,
+}
+
+/// A layer image's state against the library (the web app's imageState).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageState {
+    Never,
+    Changed,
+    Update,
+    Built,
+}
+
+fn s<'a>(v: &'a Value, k: &str) -> &'a str {
+    v.get(k).and_then(Value::as_str).unwrap_or("")
+}
+
+pub fn image_state(key: &str, lib: &Value, images: &HashMap<String, ImageRow>) -> ImageState {
+    let Some(row) = images.get(key) else { return ImageState::Never };
+    let under = |parent: Option<String>, sha: &str| -> ImageState {
+        if row.dockerfile_sha != sha {
+            return ImageState::Changed;
+        }
+        let Some(pk) = parent else {
+            let base = images.get("base");
+            return if base.is_some_and(|b| !row.from.is_empty() && b.id != row.from) {
+                ImageState::Update
+            } else {
+                ImageState::Built
+            };
+        };
+        match image_state(&pk, lib, images) {
+            ImageState::Changed | ImageState::Never => ImageState::Changed,
+            p => match images.get(&pk) {
+                Some(parent) if parent.id == row.from => p,
+                _ => ImageState::Update,
+            },
+        }
+    };
+    let find = |coll: &str, id: &str| lib[coll].as_array().into_iter().flatten().find(|x| s(x, "id") == id).cloned();
+    if let Some(tid) = key.strip_prefix("template:") {
+        let Some(t) = find("templates", tid) else { return ImageState::Built };
+        let chain = core::chain_of(lib, tid);
+        let parent = (chain.len() > 1).then(|| chain[chain.len() - 2].clone());
+        let sha =
+            core::template_layer(&t, parent.as_ref().unwrap_or(&Value::Null))["sha"].as_str().unwrap_or("").to_string();
+        return under(parent.map(|p| format!("template:{}", s(&p, "id"))), &sha);
+    }
+    let Some(e) = key.strip_prefix("custom:").and_then(|id| find("extensions", id)) else { return ImageState::Built };
+    let Some(t) = find("templates", s(&e, "templateId")) else { return ImageState::Built };
+    let sha = core::extensions_layer(&e, &t)["sha"].as_str().unwrap_or("").to_string();
+    under(Some(format!("template:{}", s(&t, "id"))), &sha)
+}
+
+/// Why a stack can't be installed or built yet (the web app's notReady).
+pub fn not_ready(w: &Value, lib: &Value) -> Option<&'static str> {
+    if s(w, "template").is_empty() {
+        return Some("It needs a template with apps.");
+    }
+    if core::resolve_stack(lib, w).is_null() {
+        return Some("Its template is gone.");
+    }
+    if !w["customization"].is_object() {
+        return Some("It needs a customization.");
+    }
+    if s(&w["customization"], "name").trim().is_empty() {
+        return Some("Its customization needs a name.");
+    }
+    None
+}
+
+/// The layer build request: a template's (with those it builds on), or an
+/// Extensions layer's (its template and those under it).
+fn layer_request(key: &str, lib: &Value) -> Result<Value, String> {
+    let on = |tid: &str| -> Result<(Value, Vec<Value>), String> {
+        let chain = core::chain_of(lib, tid);
+        let (t, parents) = chain.split_last().ok_or("That template is gone.")?;
+        Ok((t.clone(), parents.to_vec()))
+    };
+    if let Some(tid) = key.strip_prefix("template:") {
+        let (template, parents) = on(tid)?;
+        return Ok(json!({ "layer": key, "template": template, "parents": parents, "extensions": null }));
+    }
+    let id = key.strip_prefix("custom:").unwrap_or(key);
+    let e = lib["extensions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|x| s(x, "id") == id)
+        .cloned()
+        .ok_or("Those Extensions are gone.")?;
+    let (template, parents) = on(s(&e, "templateId"))?;
+    Ok(json!({ "layer": key, "template": template, "parents": parents, "extensions": e }))
+}
+
+/// The machine's time zone (what the wadspace's clock shows).
+fn time_zone() -> String {
+    std::fs::read_link("/etc/localtime")
+        .ok()
+        .and_then(|p| p.to_str().and_then(|p| p.split("zoneinfo/").nth(1)).map(String::from))
+        .unwrap_or_else(|| "Etc/UTC".into())
+}
+
+/// A wallpaper as the file the image shows: a gradient drawn to a PNG, a
+/// picture as a JPEG.
+pub fn wallpaper_upload(wall: &Value) -> Result<Value, String> {
+    let kind = s(wall, "type");
+    let value = s(wall, "value");
+    if kind == "image" {
+        let bytes = match value.strip_prefix("data:").and_then(|d| d.split_once(";base64,")) {
+            Some((_, b64)) => {
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).map_err(|e| e.to_string())?
+            }
+            None => return Err("That wallpaper's picture isn't here.".into()),
+        };
+        let img = image::load_from_memory(&bytes).map_err(|e| format!("The wallpaper's picture didn't read: {e}"))?;
+        let img = if img.width() > 2560 {
+            img.resize(2560, img.height() * 2560 / img.width(), image::imageops::FilterType::Triangle)
+        } else {
+            img
+        };
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.to_rgb8()
+            .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90))
+            .map_err(|e| e.to_string())?;
+        return Ok(
+            json!({ "ext": "jpg", "data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, out.into_inner()) }),
+        );
+    }
+    let layers =
+        if kind == "color" { wad_wallpaper::layer(value).into_iter().collect() } else { wad_wallpaper::layers(value) };
+    let (w, h) = wad_wallpaper::SIZE;
+    let png = wad_wallpaper::png(&layers, w, h).ok_or("The wallpaper couldn't be drawn.")?;
+    Ok(json!({ "ext": "png", "data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png) }))
+}
+
+/// Launches `items` (the first on screen), as a focus session of
+/// `focus_minutes` if given. The ids wadd started.
+pub async fn launch(items: Vec<RunItem>, focus_minutes: Option<u32>) -> Result<Vec<String>, String> {
+    let (lib, wadspaces) = store().read_now(|s| {
+        (s.library.as_ref().map(|l| l.lib()), s.library.as_ref().map(|l| l.wadspaces.clone()).unwrap_or_default())
+    });
+    let lib = lib.ok_or("Your library isn't here yet.")?;
+    let ids: Vec<String> =
+        items.iter().filter_map(|i| if let RunItem::Wadspace(id) = i { Some(id.clone()) } else { None }).collect();
+    let tz = time_zone();
+    let body_items: Vec<Value> = items
+        .iter()
+        .enumerate()
+        .map(|(n, i)| match i {
+            RunItem::Wadspace(id) => json!({ "kind": "workspace", "workspace": id, "background": n > 0 }),
+            RunItem::Terminal => json!({ "kind": "terminal", "background": n > 0 }),
+        })
+        .collect();
+    let started = rt::run(async move {
+        let w = Wadd::here();
+        let images: HashMap<String, ImageRow> =
+            w.get::<Vec<ImageRow>>("/v1/images").await.unwrap_or_default().into_iter().map(|r| (r.layer.clone(), r)).collect();
+        for id in &ids {
+            let Some(ws) = wadspaces.iter().find(|x| s(x, "id") == id) else { continue };
+            if let Some(why) = not_ready(ws, &lib) {
+                return Err(format!("{}: {why}", s(&ws["customization"], "name")));
+            }
+            let r = core::resolve_stack(&lib, ws);
+            let install = json!({ "wadspace": ws, "template": r["template"], "extensions": r.get("extensions").cloned().unwrap_or(Value::Null), "tz": tz });
+            w.act(Method::PUT, &format!("/v1/wadspaces/{id}"), Some(&install)).await.map_err(|e| e.to_string())?;
+            let wall = wallpaper_upload(&ws["customization"]["wallpaper"])?;
+            w.act(Method::PUT, &format!("/v1/workspaces/{id}/wallpaper"), Some(&wall)).await.map_err(|e| e.to_string())?;
+            let key = core::stack_image_key(ws);
+            if !key.is_empty() && matches!(image_state(&key, &lib, &images), ImageState::Never | ImageState::Changed) {
+                w.act(Method::POST, "/v1/images/build", Some(&layer_request(&key, &lib)?)).await.map_err(|e| e.to_string())?;
+            }
+        }
+        w.post::<Vec<String>>("/v1/launches/batch", &json!({ "items": body_items, "focusMinutes": focus_minutes })).await.map_err(|e| e.to_string())
+    })
+    .await?;
+    // Jump back in: what ran, kept here.
+    let again: Vec<String> =
+        started.iter().filter(|id| !id.starts_with("run-") && !id.starts_with("browser-run-")).cloned().collect();
+    if !again.is_empty() {
+        save_last(&json!({
+            "kind": if focus_minutes.is_some() { "focus" } else { "wadspace" },
+            "wadspaceIds": again,
+            "machineId": "local",
+            "minutes": focus_minutes,
+            "at": now_iso(),
+        }));
+    }
+    Ok(started)
+}
+
+fn last_file() -> std::path::PathBuf {
+    wad_gtk::theme::file().with_file_name("last-session.json")
+}
+
+fn save_last(v: &Value) {
+    let _ = std::fs::write(last_file(), v.to_string());
+    store().update(|_| crate::store::Topic::LIBRARY);
+}
+
+/// What was last launched here (else the account's, from another machine).
+pub fn last_session() -> Option<Value> {
+    std::fs::read(last_file())
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .or_else(|| store().read_now(|s| s.profile().and_then(|p| p.last_session.clone())))
+}
+
+fn now_iso() -> String {
+    let secs =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    wad_firebase_time(secs)
+}
+
+/// RFC 3339 for Unix ms (what the web app keeps).
+fn wad_firebase_time(ms: i64) -> String {
+    wad_account::rfc3339(ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_gradient_wallpaper_is_a_png_and_a_picture_a_jpeg() {
+        let g = wallpaper_upload(&json!({"type": "gradient", "value": wad_wallpaper::BLANK})).unwrap();
+        assert_eq!(g["ext"], "png");
+        let png = wad_wallpaper::png(&wad_wallpaper::layers("#c6ff1f"), 4, 4).unwrap();
+        let data = format!(
+            "data:image/png;base64,{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png)
+        );
+        let p = wallpaper_upload(&json!({"type": "image", "value": data})).unwrap();
+        assert_eq!(p["ext"], "jpg");
+        assert!(wallpaper_upload(&json!({"type": "image", "value": "/wallpapers/x.png"})).is_err());
+    }
+
+    #[test]
+    fn images_need_building_when_never_made_or_changed() {
+        let t = json!({"id": "dev", "name": "Dev", "apps": ["wadbrowser"]});
+        let lib = json!({"templates": [t], "extensions": []});
+        let mut images = HashMap::new();
+        assert_eq!(image_state("template:dev", &lib, &images), ImageState::Never);
+        let sha = core::template_layer(&t, &Value::Null)["sha"].as_str().unwrap().to_string();
+        let row = |sha: &str| ImageRow {
+            layer: "template:dev".into(),
+            image_ref: String::new(),
+            id: "i1".into(),
+            dockerfile_sha: sha.into(),
+            built_at: 0.0,
+            size_mb: 0.0,
+            from: String::new(),
+        };
+        images.insert("template:dev".into(), row("old"));
+        assert_eq!(image_state("template:dev", &lib, &images), ImageState::Changed);
+        images.insert("template:dev".into(), row(&sha));
+        assert_eq!(image_state("template:dev", &lib, &images), ImageState::Built);
+    }
+
+    #[test]
+    fn a_stack_without_a_customization_isnt_ready() {
+        let lib = json!({"templates": [{"id": "dev", "apps": []}], "extensions": []});
+        assert_eq!(not_ready(&json!({"template": ""}), &lib), Some("It needs a template with apps."));
+        assert_eq!(not_ready(&json!({"template": "gone"}), &lib), Some("Its template is gone."));
+        assert_eq!(not_ready(&json!({"template": "dev"}), &lib), Some("It needs a customization."));
+        assert_eq!(
+            not_ready(&json!({"template": "dev", "customization": {"name": " "}}), &lib),
+            Some("Its customization needs a name.")
+        );
+        assert_eq!(not_ready(&json!({"template": "dev", "customization": {"name": "W"}}), &lib), None);
+    }
+}

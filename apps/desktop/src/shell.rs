@@ -66,6 +66,7 @@ struct Shell {
     theme_wide: gtk::Box,
     theme_narrow: gtk::Button,
     profile_text: gtk::Box,
+    sign_out: gtk::Button,
     collapse: gtk::Button,
     collapse_icon: Icon,
     launch_label: gtk::Label,
@@ -152,20 +153,32 @@ pub fn shell() -> gtk::Widget {
 
     let profile = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     profile.add_css_class("profile");
-    let avatar = gtk::Label::new(Some("·"));
+    let avatar = gtk::Label::new(Some("?"));
     avatar.add_css_class("avatar");
+    avatar.set_valign(gtk::Align::Center);
     profile.append(&avatar);
     let profile_text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     profile_text.set_hexpand(true);
+    profile_text.set_valign(gtk::Align::Center);
     let who = gtk::Label::new(Some("This machine"));
     who.add_css_class("who");
     who.set_xalign(0.0);
+    who.set_ellipsize(gtk::pango::EllipsizeMode::End);
     let sub = gtk::Label::new(None);
     sub.add_css_class("who-sub");
     sub.set_xalign(0.0);
+    sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
     profile_text.append(&who);
     profile_text.append(&sub);
     profile.append(&profile_text);
+    let out = gtk::Button::new();
+    out.add_css_class("icon-button");
+    out.add_css_class("small");
+    out.set_tooltip_text(Some("Sign out"));
+    out.set_child(Some(&Icon::new("log-out", 16)));
+    out.set_valign(gtk::Align::Center);
+    out.connect_clicked(|_| crate::account::sign_out());
+    profile.append(&out);
     bottom.append(&profile);
     side.append(&bottom);
 
@@ -179,7 +192,11 @@ pub fn shell() -> gtk::Widget {
     stack.set_transition_duration(120);
     stack.set_vexpand(true);
     for p in Page::ALL {
-        stack.add_named(&placeholder(p), Some(p.id()));
+        let page = match p {
+            Page::Home => crate::pages::home::page(),
+            other => placeholder(other),
+        };
+        stack.add_named(&page, Some(p.id()));
     }
     content.append(&stack);
     root.append(&content);
@@ -197,6 +214,7 @@ pub fn shell() -> gtk::Widget {
 
     let mut centred: Vec<gtk::Widget> = rows.iter().map(|r| r.clone().upcast()).collect();
     centred.push(profile.clone().upcast());
+    frame.add_overlay(&crate::toast::host());
     let sh = Rc::new(Shell {
         side: side.clone(),
         brand: brand.clone(),
@@ -208,6 +226,7 @@ pub fn shell() -> gtk::Widget {
         theme_wide,
         theme_narrow,
         profile_text,
+        sign_out: out.clone(),
         collapse: collapse.clone(),
         collapse_icon,
         launch_label,
@@ -233,14 +252,41 @@ pub fn shell() -> gtk::Widget {
         save_collapsed(s.collapsed.get());
         s.relayout();
     });
-    // Profile: wadd's link says whose machine it is, until accounts come in.
-    store().watch(&who, Topic::CLOUD | Topic::MACHINE | Topic::WADD, move |st| {
-        let name = st.machine.as_ref().map(|m| m.name.clone()).unwrap_or_default();
-        sub.set_text(if st.connected { &name } else { "wadd isn't answering" });
+    // Who's signed in: their avatar (initial on their colour), name, @username.
+    let colors = gtk::CssProvider::new();
+    #[allow(deprecated)]
+    avatar.style_context().add_provider(&colors, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
+    let (out2, side2, who2) = (out.clone(), side.clone(), who.clone());
+    store().watch(&who2, Topic::ACCOUNT | Topic::MACHINE | Topic::WADD, move |st| match st.profile() {
+        Some(p) => {
+            who.set_text(&p.display_name);
+            sub.set_text(&format!("@{}", p.username));
+            avatar.set_text(&p.display_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default());
+            colors.load_from_string(&format!("label.avatar {{ background: {}; }}", p.color));
+            out2.set_visible(!side2.has_css_class("narrow"));
+        }
+        None => {
+            who.set_text("This machine");
+            sub.set_text(&st.machine.as_ref().map(|m| m.name.clone()).unwrap_or_default());
+            avatar.set_text("·");
+            out2.set_visible(false);
+        }
     });
     sh.go(Page::Home);
     sh.relayout();
+    SHELL.with(|s| s.replace(Rc::downgrade(&sh)));
     frame.upcast()
+}
+
+thread_local! {
+    static SHELL: std::cell::RefCell<std::rc::Weak<Shell>> = const { std::cell::RefCell::new(std::rc::Weak::new()) };
+}
+
+/// Shows a page (the web app's navigate).
+pub fn go(p: Page) {
+    if let Some(s) = SHELL.with(|s| s.borrow().upgrade()) {
+        s.go(p);
+    }
 }
 
 fn s_width(s: &Shell, w: f64) {
@@ -281,6 +327,7 @@ impl Shell {
         self.theme_wide.set_visible(!narrow);
         self.theme_narrow.set_visible(narrow);
         self.profile_text.set_visible(!narrow);
+        self.sign_out.set_visible(!narrow && store().read_now(|s| s.profile().is_some()));
         self.launch_label.set_visible(!narrow);
         self.collapse_icon.set(if narrow { "chevrons-right" } else { "chevrons-left" });
         self.collapse.set_visible(self.page.get() != Page::Builder);

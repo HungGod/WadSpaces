@@ -148,3 +148,34 @@ async fn links_codes_and_the_github_token_go_to_the_account() {
     assert!(code.len() == 8 && code.chars().all(|c| "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".contains(c)), "{code}");
     a.save_github_token("gho_x").await.unwrap();
 }
+
+#[tokio::test]
+async fn the_library_is_read_as_them_and_kept() {
+    let s = MockServer::start().await;
+    signed_in(&s).await;
+    let doc = |name: &str, fields: serde_json::Value| json!({"name": format!("projects/wad-spaces/databases/(default)/documents/{name}"), "fields": fields});
+    Mock::given(method("GET"))
+        .and(path(format!("{DOCS}/users/u1/templates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"documents": [doc("users/u1/templates/dev", json!({"name": {"stringValue": "Dev"}}))]}),
+        ))
+        .mount(&s)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{DOCS}:runQuery")))
+        .and(body_partial_json(json!({"structuredQuery": {"where": {"fieldFilter": {"field": {"fieldPath": "owner"}, "value": {"stringValue": "u1"}}}}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{"document": doc("wadspaces/w1", json!({"version": {"integerValue": "3"}, "template": {"stringValue": "dev"}}))}])))
+        .mount(&s)
+        .await;
+    Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_json(json!({}))).mount(&s).await;
+    let d = tempfile::tempdir().unwrap();
+    // SAFETY: tests in this binary don't read XDG_DATA_HOME elsewhere.
+    unsafe { std::env::set_var("XDG_DATA_HOME", d.path()) };
+    let a = account(&s, None).await;
+    a.sign_in_github("t").await.unwrap();
+    let lib = a.library().await.unwrap();
+    assert_eq!(lib.templates, [json!({"name": "Dev", "id": "dev"})]);
+    assert_eq!(lib.wadspaces, [json!({"version": 3, "template": "dev", "id": "w1"})]);
+    assert_eq!(a.cached_library(), Some(lib.clone()));
+    assert_eq!(lib.lib()["templates"][0]["id"], "dev");
+}

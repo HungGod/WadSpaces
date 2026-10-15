@@ -1,0 +1,110 @@
+//! The person's library from their account, as the native client shows it:
+//! the Builder's documents (templates, Extensions layers, saved WadBrowser
+//! setups, and their wadspaces), and their machines' heartbeats. Read as
+//! them (the rules decide), kept on disk for the next start (offline too).
+//! Documents stay JSON: wad-core's layers code reads them as the web app's
+//! wasm does.
+
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use wad_firebase::values::{doc_id, from_fields};
+
+use crate::{Account, Error};
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Library {
+    pub templates: Vec<Value>,
+    pub extensions: Vec<Value>,
+    /// Extensions layers from before they had that name (read as Extensions).
+    pub customizations: Vec<Value>,
+    pub browsers: Vec<Value>,
+    pub wadspaces: Vec<Value>,
+    /// Each machine's last heartbeat (users/{uid}/machines).
+    pub machines: Vec<Value>,
+}
+
+impl Library {
+    /// The shape wad-core's layers functions take: `{templates, extensions}`
+    /// (the old customizations counted as Extensions).
+    pub fn lib(&self) -> Value {
+        let mut ext = self.extensions.clone();
+        ext.extend(self.customizations.iter().filter(|c| !self.extensions.iter().any(|e| e["id"] == c["id"])).cloned());
+        json!({ "templates": self.templates, "extensions": ext, "browsers": self.browsers })
+    }
+}
+
+/// A document as the web app has it: its fields, and its id.
+pub fn plain(doc: &Value) -> Value {
+    let mut v = from_fields(&doc["fields"]);
+    if let Value::Object(o) = &mut v {
+        o.insert("id".into(), doc_id(doc).into());
+    }
+    v
+}
+
+impl Account {
+    /// Everything, read now (and kept for next time).
+    pub async fn library(&self) -> Result<Library, Error> {
+        let uid = self.user().map(|u| u.uid).ok_or(Error::SignedOut)?;
+        let tok = self.id_token().await?;
+        let fs = self.firestore();
+        let list = |c: &'static str| {
+            let (tok, uid) = (tok.clone(), uid.clone());
+            async move { fs.list(&tok, &format!("users/{uid}/{c}")).await.map(|d| d.iter().map(plain).collect::<Vec<_>>()) }
+        };
+        let owned = json!({
+            "from": [{ "collectionId": "wadspaces" }],
+            "where": { "fieldFilter": { "field": { "fieldPath": "owner" }, "op": "EQUAL", "value": { "stringValue": uid } } },
+        });
+        let (templates, extensions, customizations, browsers, machines, wadspaces) = tokio_join(
+            list("templates"),
+            list("extensions"),
+            list("customizations"),
+            list("browsers"),
+            list("machines"),
+            async { fs.query_root(&tok, owned).await.map(|d| d.iter().map(plain).collect::<Vec<_>>()) },
+        )
+        .await;
+        let lib = Library {
+            templates: templates?,
+            extensions: extensions?,
+            customizations: customizations?,
+            browsers: browsers?,
+            wadspaces: wadspaces?,
+            machines: machines?,
+        };
+        if let Some(p) = self.library_file() {
+            let _ = crate::write_private(&p, &serde_json::to_vec(&lib).expect("JSON"));
+        }
+        Ok(lib)
+    }
+
+    /// The library as last read on this machine (for a quick start, or offline).
+    pub fn cached_library(&self) -> Option<Library> {
+        serde_json::from_slice(&std::fs::read(self.library_file()?).ok()?).ok()
+    }
+
+    /// ~/.local/share/io.wadspaces.client/account/<uid>/library.json
+    fn library_file(&self) -> Option<PathBuf> {
+        let uid = self.user()?.uid;
+        let data = std::env::var_os("XDG_DATA_HOME")
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
+        Some(data.join("io.wadspaces.client/account").join(uid).join("library.json"))
+    }
+}
+
+/// Six reads at once.
+async fn tokio_join<A, B, C, D, E, F>(
+    a: impl Future<Output = A>,
+    b: impl Future<Output = B>,
+    c: impl Future<Output = C>,
+    d: impl Future<Output = D>,
+    e: impl Future<Output = E>,
+    f: impl Future<Output = F>,
+) -> (A, B, C, D, E, F) {
+    futures_util::join!(a, b, c, d, e, f)
+}

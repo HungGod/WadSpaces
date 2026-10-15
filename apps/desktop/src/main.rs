@@ -9,10 +9,16 @@
 
 mod account;
 mod app;
+mod fake;
+mod images;
+mod launch;
+mod pages;
 mod rt;
 mod setup;
 mod shell;
 mod store;
+mod thumb;
+mod toast;
 mod ui;
 
 #[derive(Debug, Default, Clone)]

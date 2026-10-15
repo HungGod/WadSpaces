@@ -25,6 +25,8 @@ impl Topic {
     pub const WADD: Topic = Topic(1 << 7);
     /// Who's signed in, their profile, this machine's GitHub token.
     pub const ACCOUNT: Topic = Topic(1 << 8);
+    /// The account's library (templates, Extensions, wadspaces) and machines.
+    pub const LIBRARY: Topic = Topic(1 << 9);
     pub const NONE: Topic = Topic(0);
 
     pub fn any(self, other: Topic) -> bool {
@@ -51,6 +53,7 @@ pub struct AppState {
     pub network: Option<NetworkStatus>,
     pub cloud: Option<CloudLink>,
     pub account: AccountState,
+    pub library: Option<wad_account::Library>,
 }
 
 /// The person signed in, as far as the app knows.
@@ -78,6 +81,47 @@ pub enum ProfileState {
 }
 
 impl AppState {
+    /// The profile, once there is one.
+    pub fn profile(&self) -> Option<&wad_account::Profile> {
+        match &self.account.profile {
+            ProfileState::Have(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// The wadspaces that aren't deleted (the Builder's stacks), in the
+    /// board's order.
+    pub fn wadspaces(&self) -> Vec<&serde_json::Value> {
+        let mut ws: Vec<&serde_json::Value> = self
+            .library
+            .iter()
+            .flat_map(|l| l.wadspaces.iter())
+            .filter(|w| w.get("deletedAt").is_none_or(|d| d.is_null()))
+            .collect();
+        ws.sort_by(|a, b| {
+            let o = |w: &serde_json::Value| w.get("order").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            o(a).total_cmp(&o(b))
+        });
+        ws
+    }
+
+    /// A wadspace's name (the web app's wadspaceName).
+    pub fn wadspace_name(&self, w: &serde_json::Value) -> String {
+        let s = |v: &serde_json::Value, k: &str| {
+            v.get(k).and_then(serde_json::Value::as_str).map(str::trim).filter(|x| !x.is_empty()).map(String::from)
+        };
+        if let Some(n) = w.get("customization").and_then(|c| s(c, "name")) {
+            return n;
+        }
+        let lib = self.library.as_ref();
+        let find = |coll: &[serde_json::Value], id: Option<String>| {
+            id.and_then(|id| coll.iter().find(|d| s(d, "id").as_deref() == Some(&id)).and_then(|d| s(d, "name")))
+        };
+        lib.and_then(|l| find(&l.extensions, s(w, "extensions")))
+            .or_else(|| lib.and_then(|l| find(&l.templates, s(w, "template"))))
+            .unwrap_or_else(|| "Untitled".into())
+    }
+
     /// NetworkManager says the machine's online.
     pub fn online(&self) -> bool {
         self.network.as_ref().is_some_and(|n| n.connectivity == "full")

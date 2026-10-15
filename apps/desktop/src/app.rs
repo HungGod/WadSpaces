@@ -22,8 +22,14 @@ pub fn run(args: Args) -> std::process::ExitCode {
         wad_gtk::fonts::install();
         let display = gdk::Display::default().expect("a display");
         wad_gtk::theme::install(&display, CSS);
+        // Snapshots and trying things: a made-up machine and account.
+        if let Ok(path) = std::env::var("WADSPACES_FAKE") {
+            crate::fake::load(std::path::Path::new(&path));
+            return;
+        }
         follow_wadd();
         crate::account::start();
+        crate::account::follow_library();
     });
     let args = Rc::new(args);
     app.connect_activate(move |app| {

@@ -1,0 +1,42 @@
+{
+  "comment": "The native client's fake state (WADSPACES_FAKE=fixtures/desktop/sample.json): the web app's test sample (apps/client/src/test/sample.ts), signed in, with Cosmic running here.",
+  "user": { "uid": "me", "githubId": "4242", "login": "me", "displayName": "Me", "photoUrl": null },
+  "profile": { "username": "me", "displayName": "Me", "color": "#c6ff1f" },
+  "lastSession": { "kind": "wadspace", "wadspaceIds": ["vanua-academy"], "machineId": "local", "at": "2026-10-15T01:00:00.000Z" },
+  "machine": { "name": "surface", "version": "0.1.0", "profile": "system", "startedAt": 1792020000, "screen": { "width": 1368, "height": 912, "scale": 2.0 } },
+  "library": {
+    "templates": [
+      { "id": "writing", "owner": "me", "name": "Writing", "description": "Obsidian, for notes and long-form writing.", "apps": ["obsidian"], "starter": true, "createdAt": "2026-09-01T00:00:00.000Z", "updatedAt": "2026-09-01T00:00:00.000Z" },
+      { "id": "dev", "owner": "me", "name": "Dev", "description": "WadBrowser and VS Code, for building things.", "apps": ["wadbrowser", "vscode"], "starter": true, "createdAt": "2026-09-01T00:00:00.000Z", "updatedAt": "2026-09-01T00:00:00.000Z" }
+    ],
+    "extensions": [
+      { "id": "vanua-academy-dev", "owner": "me", "name": "VanuaAcademy Dev", "description": "Dev with Claude Code, the Firebase CLI and VanuaAcademy's web apps.", "templateId": "dev", "browserMode": "browser",
+        "webapps": [
+          { "id": "github", "name": "GitHub", "url": "https://github.com" },
+          { "id": "claude", "name": "Claude", "url": "https://claude.ai" },
+          { "id": "google-firebase", "name": "Google FireBase", "url": "https://firebase.google.com" },
+          { "id": "gmail", "name": "Gmail", "url": "https://mail.google.com" }
+        ],
+        "extensions": ["anthropic.claude-code"], "tools": ["firebase"], "autostart": [], "createdAt": "2026-09-19T00:00:00.000Z", "updatedAt": "2026-09-19T00:00:00.000Z" }
+    ],
+    "customizations": [],
+    "browsers": [],
+    "wadspaces": [
+      { "version": 3, "id": "cosmic-bodybuilding", "owner": "me", "order": 1, "template": "writing",
+        "customization": { "name": "Cosmic Bodybuilding", "description": "Writing Cosmic Bodybuilding.", "wallpaper": { "type": "image", "value": "/wallpapers/cosmic-bodybuilding.png" },
+          "projects": [{ "id": "writing", "kind": "github", "repo": "HungGod/Writing", "as": "Writing" }], "secrets": { "bySlot": {} } },
+        "createdAt": "2026-09-22T00:00:00.000Z", "updatedAt": "2026-09-22T00:00:00.000Z" },
+      { "version": 3, "id": "vanua-academy", "owner": "me", "order": 2, "template": "dev", "extensions": "vanua-academy-dev",
+        "customization": { "name": "VanuaAcademy", "description": "Building Vanua Academy.", "wallpaper": { "type": "image", "value": "/wallpapers/vanua-academy.png" },
+          "projects": [{ "id": "vanua-academy", "kind": "github", "repo": "HungGod/VanuaAcademy", "as": "VanuaAcademy", "setup": "npm ci" }], "secrets": { "bySlot": {} } },
+        "createdAt": "2026-09-26T00:00:00.000Z", "updatedAt": "2026-09-26T00:00:00.000Z" }
+    ],
+    "machines": []
+  },
+  "workspaces": [
+    { "id": "cosmic-bodybuilding", "name": "Cosmic Bodybuilding", "image": "localhost/wadspaces-template-writing:latest", "display": "host", "port": null, "hotkey": null, "icon": null, "enabled": true, "autostart": false, "containerName": "wad-cosmic-bodybuilding", "containerPort": 3000, "env": [], "secrets": [], "volumes": [], "devices": [], "shmSize": "1g", "projects": [] }
+  ],
+  "states": [
+    { "id": "cosmic-bodybuilding", "container": "running", "phase": "ready", "message": null, "error": null, "imagePresent": true, "since": 1792020000 }
+  ]
+}

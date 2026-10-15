@@ -8,6 +8,7 @@
 //! doesn't. Nothing of it goes to wadd.
 
 pub mod config;
+pub mod library;
 pub mod signin;
 
 use std::path::PathBuf;
@@ -19,6 +20,8 @@ use serde_json::{Map, Value, json};
 use wad_firebase::{Firestore, Identity, Write};
 
 pub use config::Config;
+pub use library::Library;
+pub use wad_firebase::values::rfc3339;
 
 /// Usernames: what the rules allow.
 pub fn username_ok(name: &str) -> bool {
@@ -87,6 +90,8 @@ pub struct Profile {
     pub photo_url: Option<String>,
     pub onboarded: bool,
     pub starters_created: bool,
+    /// What was last launched (the web app's LastSession): Jump back in.
+    pub last_session: Option<Value>,
 }
 
 impl Profile {
@@ -100,6 +105,7 @@ impl Profile {
             photo_url: s("photoURL"),
             onboarded: f.get("onboarded").and_then(Value::as_bool).unwrap_or(true),
             starters_created: f.get("startersCreated").and_then(Value::as_bool).unwrap_or(false),
+            last_session: f.get("lastSession").filter(|v| v.is_object()).cloned(),
         }
     }
 }
@@ -366,6 +372,7 @@ impl Account {
             photo_url: user.photo_url,
             onboarded: false,
             starters_created: false,
+            last_session: None,
         })
     }
 

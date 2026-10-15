@@ -65,10 +65,12 @@ pub fn start() {
     });
 }
 
-/// Looks up the profile again (it's Missing until there's a username).
+/// Looks up the profile again (it's Missing until there's a username), and
+/// with one, the library.
 pub async fn refresh_profile() {
     let Some(a) = account() else { return };
     let got = rt::run(async move { a.ensure_profile().await }).await;
+    let have = matches!(got, Ok(Some(_)));
     store().update(|s| {
         s.account.profile = match got {
             Ok(Some(p)) => ProfileState::Have(p),
@@ -80,6 +82,48 @@ pub async fn refresh_profile() {
             }
         };
         Topic::ACCOUNT
+    });
+    if have {
+        refresh_library().await;
+    }
+}
+
+/// The library: what this machine last read at once, then the account's.
+pub async fn refresh_library() {
+    let Some(a) = account() else { return };
+    if store().read_now(|s| s.library.is_none())
+        && let Some(cached) = a.cached_library()
+    {
+        store().update(|s| {
+            s.library = Some(cached);
+            Topic::LIBRARY
+        });
+    }
+    let got = rt::run(async move { a.library().await }).await;
+    match got {
+        Ok(lib) => store().update(|s| {
+            if s.library.as_ref() == Some(&lib) {
+                return Topic::NONE;
+            }
+            s.library = Some(lib);
+            Topic::LIBRARY
+        }),
+        Err(e) => tracing::warn!("library: {e}"),
+    }
+}
+
+/// Keeps the library current: read again every minute while the app is on
+/// screen (changes made elsewhere: the web app, another machine).
+pub fn follow_library() {
+    glib::timeout_add_seconds_local(60, || {
+        let (signed_in, on_screen) = store().read_now(|s| {
+            let home = s.view.as_ref().is_none_or(|v| v.view == wad_proto::v1::View::Home);
+            (s.profile().is_some(), home)
+        });
+        if signed_in && on_screen {
+            glib::spawn_future_local(refresh_library());
+        }
+        glib::ControlFlow::Continue
     });
 }
 
@@ -244,6 +288,7 @@ pub async fn link(machine_name: String) -> Result<(), String> {
 
 pub fn sign_out() {
     cancel_sign_in();
+    crate::toast::show("Signed out", None, crate::toast::Tone::Info);
     if let Some(a) = account() {
         a.sign_out();
     }
@@ -252,7 +297,8 @@ pub fn sign_out() {
         s.account.user = None;
         s.account.profile = ProfileState::Unknown;
         s.account.github = None;
-        Topic::ACCOUNT
+        s.library = None;
+        Topic::ACCOUNT | Topic::LIBRARY
     });
 }
 

@@ -405,3 +405,167 @@ button.network.unsupported { opacity: 0.5; }
 .password-form { padding: 8px 12px; }
 .bars .bar-on { background: var(--fg); border-radius: 1px; }
 .bars .bar-off { background: var(--line-strong); border-radius: 1px; }
+
+/* ---------------------------------------------------------------- home */
+.home-head { margin-bottom: 32px; }
+.greeting {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+}
+button.stat {
+  all: unset;
+  min-width: 112px;
+  padding: 10px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  transition: background-color 150ms, border-color 150ms;
+}
+button.stat:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.stat-value {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+.stat-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.6px;
+  color: var(--faint);
+}
+
+.section-head { margin-bottom: 12px; }
+.section-title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+button.cta {
+  all: unset;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 150ms;
+}
+button.cta:hover { color: var(--fg); }
+
+.empty-card {
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px dashed var(--line-strong);
+}
+.icon-tile {
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.icon-tile > wad-icon { margin: 12px; }
+.card-heading {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+}
+.small-muted-14 { font-size: 14px; color: var(--muted); }
+
+.jump-card {
+  padding: 12px 24px 12px 12px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.jump-preview { border-radius: 16px; }
+.jump-title {
+  margin-top: 8px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--surface-2);
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.badge.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.empty-row {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px dashed var(--line-strong);
+  font-size: 14px;
+  color: var(--muted);
+}
+.running-row {
+  padding: 8px 16px 8px 8px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.row-title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+}
+.live-dot {
+  min-width: 6px;
+  min-height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.thumb-blank { border-radius: 12px; background: var(--surface-2); }
+
+button.wadspace-card {
+  all: unset;
+}
+button.wadspace-card wad-desktop.card-thumb {
+  box-shadow: 0 20px 60px -20px var(--shadow), 0 0 0 1px var(--line-strong);
+  border-radius: 16px;
+  transition: transform 150ms;
+}
+button.wadspace-card:hover wad-desktop.card-thumb { transform: translateY(-2px); }
+
+button.first-wadspace {
+  all: unset;
+  border-radius: 16px;
+  border: 2px dashed var(--line-strong);
+  color: var(--muted);
+}
+button.first-wadspace:hover { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+
+/* -------------------------------------------------------------- toasts */
+.toaster { margin: 16px; }
+.toast {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  box-shadow: 0 20px 60px -20px var(--shadow);
+}
+.toast-title { font-size: 14px; font-weight: 500; }
+.toast-body { font-size: 13px; color: var(--muted); }
+wad-icon.toast-error { color: var(--accent); }
+wad-icon.toast-success { color: var(--accent); }
+window.theme-light wad-icon.toast-success { color: var(--fg); }
+wad-icon.toast-info { color: var(--muted); }
+button.toast-close {
+  all: unset;
+  color: var(--faint);
+}
+button.toast-close:hover { color: var(--fg); }
+/* The light theme is strictly grayscale: people's colours too. */
+window.theme-light label.avatar { filter: grayscale(1); }

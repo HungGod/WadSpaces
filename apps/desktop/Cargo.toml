@@ -13,6 +13,11 @@ wad-gtk = { path = "../../crates/wad-gtk" }
 wad-wadd-client = { path = "../../crates/wad-wadd-client" }
 wad-account = { path = "../../crates/wad-account" }
 wad-proto.workspace = true
+wad-core.workspace = true
+wad-icons.workspace = true
+wad-wallpaper = { path = "../../crates/wad-wallpaper" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+base64.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
