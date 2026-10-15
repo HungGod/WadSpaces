@@ -34,6 +34,10 @@
 #                                  image, even those the drive already has
 #                                  (when an update said a layer was missing)
 #
+# The image is rechunked after it's built (rpm-ostree: a layer per package
+# group, WadSpaces' own files in one of their own), so a drive update copies
+# only what changed. RECHUNK=0 skips it (quicker, for trying things).
+#
 # CLIENT_DIR (default apps/client): the WadSpaces Client, the kiosk's shell. Its
 # Tauri app (npm run build:app) goes into the image at /usr/bin/client. It
 # needs Rust (rustup), Node, the WebKitGTK dev packages, and the Firebase web
@@ -175,6 +179,38 @@ stage_assets() {
     done
     cp "${pub}"/brand/*-icon-*.svg "${out}/brand/"
     cp "${pub}/folder.svg" "${out}/"
+}
+
+# Where host/etc and host/usr's files land in the image: the Containerfile
+# marks them (and the binaries) as WadSpaces' own chunk.
+stage_ours() {
+    (cd "${ROOT}/host" && find etc usr -type f | sed 's|^|/|' | sort) > "${ROOT}/.build/ours.list"
+}
+
+# The built image in chunks by package (rpm-ostree), WadSpaces' own files in
+# one of their own: an update copies only the chunks that changed. Rootless:
+# the image is mounted into a fedora-bootc container that writes an OCI
+# directory, decompressed on its way into podman's storage so its layers
+# keep the digests a stick update names them by. RECHUNK=0: as built.
+rechunk() {
+    local raw="${IMAGE%:*}:unchunked" out="${ROOT}/.build/chunked"
+    if [[ "${RECHUNK:-1}" == "0" ]]; then
+        podman tag "${raw}" "${IMAGE}"
+        return
+    fi
+    echo ">> rechunking ${IMAGE} (a few minutes)"
+    rm -rf "${out}" && mkdir -p "${out}/oci/blobs/sha256"
+    echo '{"imageLayoutVersion":"1.0.0"}' > "${out}/oci/oci-layout"
+    echo '{"schemaVersion":2,"manifests":[]}' > "${out}/oci/index.json"
+    podman run --rm --privileged --security-opt label=disable \
+        --mount "type=image,source=${raw},destination=/rootfs" -v "${out}:/out" \
+        quay.io/fedora/fedora-bootc:43 \
+        rpm-ostree compose build-chunked-oci --bootc --format-version=1 --max-layers 64 \
+        --rootfs /rootfs --output oci:/out/oci:host > "${out}.log" 2>&1 \
+        || { tail -20 "${out}.log" >&2; exit 1; }
+    skopeo copy -q --dest-decompress "oci:${out}/oci:host" "dir:${out}/dir"
+    skopeo copy -q "dir:${out}/dir" "containers-storage:${IMAGE}"
+    rm -rf "${out}"
 }
 
 # admin's password hash or SSH key from bib-config.toml ("password" / "key").
@@ -401,9 +437,11 @@ stage_wadd
 stage_hud
 stage_wadbrowser
 stage_assets
+stage_ours
 stage_secrets
 echo ">> building ${IMAGE}"
-podman build -f "${ROOT}/host/Containerfile" -t "${IMAGE}" "${ROOT}"
+podman build -f "${ROOT}/host/Containerfile" -t "${IMAGE%:*}:unchunked" "${ROOT}"
+rechunk
 
 case "${TARGET}" in
     image) ;;

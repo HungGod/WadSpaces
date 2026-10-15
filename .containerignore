@@ -11,6 +11,7 @@
 !.build/hud
 !.build/wadbrowser
 !.build/assets
+!.build/ours.list
 !.build/secrets
 !.build/ssh
 **/__pycache__

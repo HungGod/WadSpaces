@@ -66,6 +66,8 @@ COPY .build/assets/ /usr/share/wadspaces/assets/
 # a machine gets its GitHub token by signing in, or from the account.)
 COPY .build/secrets/ /usr/lib/wadspaces/secrets/
 COPY .build/ssh/ /usr/share/wadspaces/ssh/
+# What's WadSpaces' own here (host/etc, host/usr, staged by host/build.sh).
+COPY .build/ours.list /usr/lib/wadspaces/ours.list
 
 RUN /usr/bin/client --version && \
     /usr/bin/wadbrowser --version && \
@@ -83,5 +85,20 @@ RUN /usr/bin/client --version && \
     systemctl mask bootc-fetch-apply-updates.timer bootc-fetch-apply-updates.service && \
     systemctl set-default graphical.target && \
     systemctl mask getty@tty1.service && \
-    rm -rf /var/log/dnf5.log* /var/lib/dnf /var/cache/libdnf5 /run/dnf && \
-    bootc container lint
+    rm -rf /var/log/dnf5.log* /var/lib/dnf /var/cache/libdnf5 /run/dnf
+
+# WadSpaces' own files go in a chunk of their own when host/build.sh
+# rechunks the image (rpm-ostree's user.component): an update that changes
+# them copies that chunk, not the initramfs and the rest no package owns.
+RUN python3 - <<'EOF'
+import os
+ours = [l.strip() for l in open("/usr/lib/wadspaces/ours.list") if l.strip()]
+ours += ["/usr/bin/client", "/usr/bin/wadd", "/usr/bin/wadbrowser"]
+for top in ["/usr/libexec/wadspaces", "/usr/share/wadspaces", "/usr/lib/wadspaces"]:
+    ours += [os.path.join(d, f) for d, _, fs in os.walk(top) for f in fs]
+for p in set(ours):
+    if os.path.isfile(p) and not os.path.islink(p):
+        os.setxattr(p, "user.component", b"wadspaces-apps")
+EOF
+
+RUN bootc container lint
