@@ -1,5 +1,5 @@
 :root {
-  /* WadSpaces' dark colours (apps/client/src/styles/globals.css): its
+  /* WadSpaces' dark colours (wad-gtk's theme, the web app's): its
      night, lime (primary) and pink (secondary). Light below: its greyscale.
      Which one: theme.rs, from WadSpaces' own setting. */
   --bg: #0a0614;

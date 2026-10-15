@@ -38,7 +38,7 @@
 # group, WadSpaces' own files in one of their own), so a drive update copies
 # only what changed. RECHUNK=0 skips it (quicker, for trying things).
 #
-# The WadSpaces Client (apps/desktop, GTK4: the kiosk's shell) goes into the
+# The WadSpaces Client (apps/client, GTK4: the kiosk's shell) goes into the
 # image at /usr/bin/client, its GitHub sign-in window (apps/signin) beside it.
 # wadd (apps/wadd, the machine daemon) and the HUD (apps/hud: the bar, power
 # and Wi-Fi menus and the switcher above every window) are built here too,
@@ -140,9 +140,9 @@ stage_client() {
         echo '  project_id = "..."' >&2
         exit 1
     }
-    echo ">> building WadSpaces Client (apps/desktop, apps/signin)"
-    (cd "${ROOT}" && cargo build --release --quiet -p wadspaces-desktop -p client-signin)
-    install_stripped "${ROOT}/target/release/wadspaces-desktop" "${out}/client"
+    echo ">> building WadSpaces Client (apps/client, apps/signin)"
+    (cd "${ROOT}" && cargo build --release --quiet -p client -p client-signin)
+    install_stripped "${ROOT}/target/release/client" "${out}/client"
     install_stripped "${ROOT}/target/release/client-signin" "${out}/client-signin"
     install -m 644 "${firebase}" "${out}/firebase.toml"
 }

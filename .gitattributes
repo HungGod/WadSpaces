@@ -1,3 +1,1 @@
-# Generated: cargo xtask wasm
-apps/client/src/gen/** linguist-generated=true
 *.wasm binary

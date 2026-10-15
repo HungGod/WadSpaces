@@ -1,4 +1,4 @@
-//! The site's colours (apps/client/src/styles/globals.css), dark or light:
+//! The site's colours (the web app's src/styles/globals.css), dark or light:
 //! as GTK CSS custom properties on every window, so a stylesheet says
 //! `var(--accent)`. The choice lives in ~/.config/wadspaces/theme, shared
 //! with the HUD; switching swaps the tokens, nothing else reloads.

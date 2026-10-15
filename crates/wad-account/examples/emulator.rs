@@ -1,5 +1,5 @@
 //! The account against the Firebase emulators, with the real firestore.rules
-//! (apps/desktop/dev/try-account.sh runs it): two people sign in, the
+//! (apps/client/dev/try-account.sh runs it): two people sign in, the
 //! first gets their GitHub login as username, the second can't take it,
 //! linking codes and the GitHub token go in as the rules allow, and a
 //! restarted app is still signed in.

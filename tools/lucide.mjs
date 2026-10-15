@@ -1,30 +1,26 @@
-// Writes the lucide icons the WadSpaces Client uses as plain SVGs
-// (assets/lucide/<name>.svg, stroke in currentColor), for the native app:
-//   node tools/lucide.mjs
-// Reads the names imported from lucide-react anywhere in apps/client/src,
-// resolves them (aliases too) with lucide-react's own export map, and takes
-// each icon's drawing from its module. Run again when the client uses more.
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+// Writes the lucide icons the WadSpaces Client (and the HUD) draw as plain
+// SVGs (assets/lucide/<name>.svg, stroke in currentColor), from lucide-react
+// as the web app has it (its repo beside this one: WADSPACES_CLIENT_DIR,
+// default ../wadspaces-client, after npm install):
+//   node tools/lucide.mjs [Name ...]
+// Takes the icons already listed in assets/lucide/NAMES and the React names
+// given, resolves them (aliases too) with lucide-react's own export map, and
+// takes each icon's drawing from its module. Run it with a new icon's name
+// when the client wants one.
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const client = join(root, "apps/client");
-const lucide = join(client, "node_modules/lucide-react");
+const web = process.env.WADSPACES_CLIENT_DIR ?? join(root, "../wadspaces-client");
+const lucide = join(web, "node_modules/lucide-react");
 const out = join(root, "assets/lucide");
 
-const files = (d) => readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? files(join(d, f)) : /\.tsx?$/.test(f) ? [join(d, f)] : []));
-const names = new Set();
-for (const f of files(join(client, "src"))) {
-  for (const m of readFileSync(f, "utf8").matchAll(/import\s*\{([^}]*)\}\s*from\s*"lucide-react"/g)) {
-    for (const n of m[1].split(",")) {
-      const name = n.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0];
-      if (/^[A-Z]/.test(name) && name !== "LucideIcon" && name !== "LucideProps") names.add(name);
-    }
-  }
+const names = new Set(process.argv.slice(2));
+const listed = join(out, "NAMES");
+if (existsSync(listed)) {
+  for (const line of readFileSync(listed, "utf8").split("\n")) if (line && !line.startsWith("#")) names.add(line.split(" ")[0]);
 }
-// Some the native app draws that the client gets elsewhere.
-for (const n of ["ChevronDown", "Search", "Settings"]) names.add(n);
 
 const map = new Map();
 for (const m of readFileSync(join(lucide, "dist/esm/lucide-react.mjs"), "utf8").matchAll(/export \{([^}]*)\} from '\.\/icons\/([^']+)\.mjs'/g)) {

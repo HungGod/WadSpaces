@@ -644,6 +644,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
+name = "client"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "base64 0.22.1",
+ "gdk4-wayland",
+ "gtk4",
+ "image",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "wad-account",
+ "wad-board",
+ "wad-core",
+ "wad-gtk",
+ "wad-icons",
+ "wad-proto",
+ "wad-wadd-client",
+ "wad-wallpaper",
+]
+
+[[package]]
 name = "client-signin"
 version = "0.1.0"
 dependencies = [
@@ -5861,30 +5885,6 @@ dependencies = [
  "wad-sway",
  "wad-systemd",
  "wiremock",
-]
-
-[[package]]
-name = "wadspaces-desktop"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "base64 0.22.1",
- "gdk4-wayland",
- "gtk4",
- "image",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "wad-account",
- "wad-board",
- "wad-core",
- "wad-gtk",
- "wad-icons",
- "wad-proto",
- "wad-wadd-client",
- "wad-wallpaper",
 ]
 
 [[package]]

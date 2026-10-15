@@ -1,9 +1,13 @@
 //! Repo tasks, run as `cargo xtask <task>`:
 //!
-//! - `ci`: everything CI checks (Rust fmt, clippy and tests; the wasm is
-//!   current and in budget; the UI's typecheck and tests).
-//! - `wasm`: build wad-core for the UI (`apps/client/src/gen/wasm/`):
-//!   wasm-bindgen (the same version as the crate) and wasm-opt (binaryen).
+//! - `ci`: everything CI checks (Rust fmt, clippy and tests; the wasm
+//!   builds and is in budget).
+//! - `wasm [--out <dir>]`: build wad-core for the web app (default
+//!   `target/wasm-pkg/`; the web app's `npm run wasm` builds it into its
+//!   `src/gen/wasm/`): wasm-bindgen (the same version as the crate) and
+//!   wasm-opt (binaryen).
+//! - `jscheck`: type-check WadBrowser's chrome (plain JS with JSDoc types)
+//!   with tsc, fetched by npx.
 //! - `layer <layers.json> <dir>`: the build folders wadd would build a
 //!   wadspace's layers from (`{template, customization}`, as in
 //!   images/examples/), written to `<dir>/template` and
@@ -27,16 +31,21 @@ fn run(dir: &str, cmd: &str, args: &[&str]) -> Result<(), String> {
     if status.success() { Ok(()) } else { Err(format!("{cmd} {} failed ({status})", args.join(" "))) }
 }
 
-/// The UI's wasm stays small: raw and gzipped bytes.
+/// The web app's wasm stays small: raw and gzipped bytes.
 const WASM_BUDGET: (u64, u64) = (400 * 1024, 150 * 1024);
 
-fn wasm() -> Result<(), String> {
+/// `out`: relative to where it's run from.
+fn wasm(out: Option<&str>) -> Result<(), String> {
     run(
         ".",
         "cargo",
         &["build", "--quiet", "-p", "wad-wasm", "--target", "wasm32-unknown-unknown", "--profile", "wasm"],
     )?;
-    let out = "apps/client/src/gen/wasm";
+    let out = match out {
+        Some(o) => std::env::current_dir().map_err(|e| e.to_string())?.join(o),
+        None => root().join("target/wasm-pkg"),
+    };
+    let out = out.to_str().ok_or("the output folder's path isn't UTF-8")?;
     run(
         ".",
         "wasm-bindgen",
@@ -44,10 +53,8 @@ fn wasm() -> Result<(), String> {
     )?;
     let file = format!("{out}/wad_wasm_bg.wasm");
     run(".", "wasm-opt", &["-Oz", "--all-features", "--strip-debug", &file, "-o", &file])?;
-    let raw = std::fs::metadata(root().join(&file)).map_err(|e| e.to_string())?.len();
-    let gz =
-        Command::new("gzip").args(["-9c", &file]).current_dir(root()).output().map_err(|e| e.to_string())?.stdout.len()
-            as u64;
+    let raw = std::fs::metadata(&file).map_err(|e| e.to_string())?.len();
+    let gz = Command::new("gzip").args(["-9c", &file]).output().map_err(|e| e.to_string())?.stdout.len() as u64;
     eprintln!("wasm: {} KB ({} KB gzipped)", raw / 1024, gz / 1024);
     if raw > WASM_BUDGET.0 || gz > WASM_BUDGET.1 {
         return Err(format!("the wasm is over budget ({} / {} KB)", WASM_BUDGET.0 / 1024, WASM_BUDGET.1 / 1024));
@@ -59,13 +66,16 @@ fn ci() -> Result<(), String> {
     run(".", "cargo", &["fmt", "--all", "--check"])?;
     run(".", "cargo", &["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])?;
     run(".", "cargo", &["test", "--workspace"])?;
-    // The committed wasm is what wad-core builds now.
-    wasm()?;
-    run(".", "git", &["diff", "--exit-code", "--stat", "apps/client/src/gen/"])?;
-    run("apps/client", "npm", &["run", "typecheck"])?;
-    // WadBrowser's chrome: plain JS with JSDoc types (WadSpaces Client's tsc).
-    run("apps/client", "npx", &["tsc", "-p", "../wadbrowser/ui"])?;
-    run("apps/client", "npm", &["test"])
+    // wad-core still builds for the web, in budget.
+    wasm(None)
+}
+
+/// The TypeScript the web app uses (wadspaces-client's package.json).
+const TSC: &str = "typescript@7.0.2";
+
+/// WadBrowser's chrome: plain JS with JSDoc types.
+fn jscheck() -> Result<(), String> {
+    run(".", "npx", &["--yes", "--package", TSC, "tsc", "-p", "apps/wadbrowser/ui"])
 }
 
 /// Writes a wadspace's layers' build folders (see the module's docs).
@@ -98,7 +108,12 @@ fn main() -> ExitCode {
     let task = std::env::args().nth(1).unwrap_or_default();
     let result = match task.as_str() {
         "ci" => ci(),
-        "wasm" => wasm(),
+        "wasm" => match std::env::args().skip(2).collect::<Vec<_>>().as_slice() {
+            [] => wasm(None),
+            [flag, dir] if flag == "--out" => wasm(Some(dir)),
+            _ => Err("usage: cargo xtask wasm [--out <dir>]".into()),
+        },
+        "jscheck" => jscheck(),
         "layer" => {
             let args: Vec<String> = std::env::args().skip(2).collect();
             match args.as_slice() {
@@ -106,7 +121,7 @@ fn main() -> ExitCode {
                 _ => Err("usage: cargo xtask layer <layers.json> <dir>".into()),
             }
         }
-        _ => Err("usage: cargo xtask <ci|wasm|layer>".into()),
+        _ => Err("usage: cargo xtask <ci|wasm|jscheck|layer>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

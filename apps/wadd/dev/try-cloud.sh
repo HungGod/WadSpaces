@@ -7,11 +7,13 @@
 #
 #   apps/wadd/dev/try-cloud.sh
 #
-# Needs Java (the Firestore emulator) and apps/client's npm packages.
+# Needs Java (the Firestore emulator) and the web app's repo beside this one
+# (WADSPACES_CLIENT_DIR, default ../wadspaces-client) with its npm packages:
+# its firebase.json, firestore.rules and functions.
 set -euo pipefail
 ulimit -c 0
 root=$(cd "$(dirname "$0")/../../.." && pwd)
-app=$root/apps/client
+app=$(cd "${WADSPACES_CLIENT_DIR:-$root/../wadspaces-client}" && pwd)
 
 if [ -z "${TRY_CLOUD_INSIDE:-}" ]; then
   # The function's WEB_API_KEY, for the emulator only.

@@ -49,7 +49,7 @@ RUN kver="$(ls /usr/lib/modules)" \
 
 COPY host/etc/ /etc/
 COPY host/usr/ /usr/
-# The WadSpaces Client (apps/desktop, GTK4), built by host/build.sh. It's the
+# The WadSpaces Client (apps/client, GTK4), built by host/build.sh. It's the
 # shell: wadd keeps its window (app_id "client") on screen. With it, its
 # GitHub sign-in window (apps/signin) and the account's Firebase project.
 COPY --chmod=755 .build/client/client /usr/bin/client

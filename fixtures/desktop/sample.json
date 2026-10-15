@@ -1,5 +1,5 @@
 {
-  "comment": "The native client's fake state (WADSPACES_FAKE=fixtures/desktop/sample.json): the web app's test sample (apps/client/src/test/sample.ts), signed in, with Cosmic running here, linked as m-surface beside an offline Desk; \"wadd\" is the made-up wadd's answers by path (Machines' storage, files, history, diagnostics).",
+  "comment": "The native client's fake state (WADSPACES_FAKE=fixtures/desktop/sample.json): the web app's test sample (wadspaces-client's src/test/sample.ts), signed in, with Cosmic running here, linked as m-surface beside an offline Desk; \"wadd\" is the made-up wadd's answers by path (Machines' storage, files, history, diagnostics).",
   "user": { "uid": "me", "githubId": "4242", "login": "me", "displayName": "Me", "photoUrl": null },
   "profile": { "username": "me", "displayName": "Me", "color": "#c6ff1f" },
   "lastSession": { "kind": "wadspace", "wadspaceIds": ["vanua-academy"], "machineId": "local", "at": "2026-10-15T01:00:00.000Z" },

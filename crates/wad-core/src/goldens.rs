@@ -1,12 +1,14 @@
-//! Every case in fixtures/core/goldens.json (what the TypeScript core
-//! returned) gives the same result here.
+//! Every case in fixtures/core/goldens.json gives the same result here. The
+//! cases came from the TypeScript core the Rust one replaced; the web app
+//! (wadspaces-client) checks its copy of the file (`npm run wasm` takes it)
+//! through its TypeScript wrappers.
 
 use serde_json::Value;
 
 const GOLDENS: &str = include_str!("../../../fixtures/core/goldens.json");
 
 #[test]
-fn all_cases_match_the_typescript_core() {
+fn all_cases_match() {
     let cases: Vec<Value> = serde_json::from_str(GOLDENS).unwrap();
     assert!(cases.len() >= 400, "only {} cases", cases.len());
     let mut failures = Vec::new();

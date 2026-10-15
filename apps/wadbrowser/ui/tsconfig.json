@@ -1,5 +1,5 @@
 {
-  "//": "WadBrowser's chrome is plain JS, checked by tsc (cargo xtask ci) from its JSDoc types.",
+  "//": "WadBrowser's chrome is plain JS, checked by tsc (cargo xtask jscheck) from its JSDoc types.",
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
