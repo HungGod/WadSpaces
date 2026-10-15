@@ -62,7 +62,7 @@ if [[ -f "${IN}/host.id" ]] && [[ "$(cat "${IN}/host.id")" != "$(cat "${APPLIED}
             bootc upgrade
         else
             bootc switch --transport oci "${IN}:host"
-        fi
+        fi || say "bootc could not read the copy: if it misses a layer, copy it again with host/build.sh update --full"
         read -r _ _ _ staged <<< "$(bootc_state)"
         if [[ -n "${want}" && "${staged}" == "${want}" ]]; then
             cp "${IN}/host.id" "${APPLIED}"

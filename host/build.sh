@@ -30,6 +30,9 @@
 #                                  --no-bases
 #   --stage-only DIR               with update: write what would go onto the
 #                                  drive into DIR instead (for testing)
+#   --full                         with update: copy every layer of the system
+#                                  image, even those the drive already has
+#                                  (when an update said a layer was missing)
 #
 # CLIENT_DIR (default apps/client): the WadSpaces Client, the kiosk's shell. Its
 # Tauri app (npm run build:app) goes into the image at /usr/bin/client. It
@@ -61,6 +64,7 @@ DISK=""
 LAYERS=""
 BASES=""
 STAGE_ONLY=""
+FULL=""
 # The background job keeping sudo fresh, and a drive mounted for a copy:
 # cleanup() undoes both however the script ends.
 SUDO_KEEPALIVE=""
@@ -75,6 +79,7 @@ while [[ $# -gt 0 ]]; do
         --bases) BASES=1; shift ;;
         --no-bases) BASES=0; shift ;;
         --stage-only) STAGE_ONLY="$2"; shift 2 ;;
+        --full) FULL=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -278,7 +283,9 @@ check_update_target() {
 # Builder layers' images ("layer-<kind>-<id>") and base images ("base-<name>"), with layers left
 # uncompressed, so a file name is its content digest and stays the same in every
 # build that didn't change it.
-# rsync then writes only new layers. On the drive, wadspaces-import.service
+# The system image's layers the drive's system already holds aren't copied
+# at all: bootc reads only the layers it lacks (the drive's ostree repo names
+# each one it has, by digest). On the drive, wadspaces-import.service
 # (host/usr/libexec/wadspaces/import-updates) imports them at the next boot.
 
 # A Builder layer's image name, as wadd builds it: template:<id> or custom:<id>.
@@ -320,6 +327,31 @@ stage_stick() {
     du -sh "${STICK_OCI}" | awk '{print ">> staged " $1}'
 }
 
+# The staged system image's layers the drive (its root mounted at $1)
+# already holds, as rsync excludes: ostree keeps a ref per layer it imported,
+# ostree/container/blob/sha256_3A_<hex>. A layer another staged image needs
+# too is copied all the same (podman reads those whole).
+held_layers() {
+    local refs="$1/ostree/repo/refs/heads/ostree/container/blob"
+    sudo test -d "${refs}" || return 0
+    sudo ls "${refs}" | python3 -c '
+import json, os, sys
+oci = sys.argv[1]
+have = {n.strip().removeprefix("sha256_3A_") for n in sys.stdin}
+def read(d):
+    return json.load(open(os.path.join(oci, "blobs", *d.split(":", 1))))
+host, others = set(), set()
+for m in json.load(open(os.path.join(oci, "index.json")))["manifests"]:
+    layers = {l["digest"] for l in read(m["digest"])["layers"]}
+    is_host = m.get("annotations", {}).get("org.opencontainers.image.ref.name") == "host"
+    (host if is_host else others).update(layers)
+held = sorted(d.split(":", 1)[1] for d in host - others if d.split(":", 1)[1] in have)
+print(f">> {len(held)} of {len(host)} system layers already on the drive", file=sys.stderr)
+for h in held:
+    print(f"/blobs/sha256/{h}")
+' "${STICK_OCI}"
+}
+
 # Mount the drive's root, mirror the staged directory into its /var, mark it.
 push_to_drive() {
     local part var
@@ -328,9 +360,15 @@ push_to_drive() {
     sudo mount "${part}" "${MNT}"
     var="$(sudo sh -c "ls -d '${MNT}'/ostree/deploy/*/var" | head -n1)"
     [[ -n "${var}" ]] || { echo "no ostree deployment on ${part}" >&2; exit 1; }
+    local skip
+    skip="$(mktemp)"
+    if [[ -z "${FULL}" ]]; then
+        held_layers "${MNT}" > "${skip}"
+    fi
     echo ">> copying changed layers to ${DISK}"
     sudo mkdir -p "${var}/lib/wadspaces/incoming"
-    sudo rsync -rt --delete --info=progress2 "${STICK_OCI}/" "${var}/lib/wadspaces/incoming/"
+    sudo rsync -rt --delete --exclude-from="${skip}" --info=progress2 "${STICK_OCI}/" "${var}/lib/wadspaces/incoming/"
+    rm -f "${skip}"
     sudo touch "${var}/lib/wadspaces/incoming/pending"
     echo ">> flushing to the drive"
     sync
@@ -355,7 +393,7 @@ case "${TARGET}" in
             check_update_target; sudo_once "updating ${DISK}"; unmount_disk
         fi
         ;;
-    *) echo "usage: host/build.sh [image|qcow2|iso|raw|install [/dev/sdX]|update [/dev/sdX]] [--layers template:a,custom:b] [--bases|--no-bases]" >&2; exit 2 ;;
+    *) echo "usage: host/build.sh [image|qcow2|iso|raw|install [/dev/sdX]|update [/dev/sdX]] [--layers template:a,custom:b] [--bases|--no-bases] [--full]" >&2; exit 2 ;;
 esac
 
 stage_client
