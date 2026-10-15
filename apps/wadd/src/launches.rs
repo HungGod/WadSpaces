@@ -373,6 +373,7 @@ impl Launches {
             projects: vec![],
             signins: ws_signins,
             ephemeral: saved.is_none(),
+            desktop: vec![],
         };
         self.registry.put_workspace(ws).await?;
         Ok(id)

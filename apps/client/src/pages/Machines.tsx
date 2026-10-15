@@ -12,6 +12,7 @@ import {
   Cpu,
   FolderOpen,
   Hammer,
+  HardDrive,
   History,
   Keyboard,
   Laptop,
@@ -45,7 +46,7 @@ import type { Machine } from "@/lib/types";
 import { useUi } from "@/lib/ui";
 import { hasAccount, isThisMachine } from "@/lib/machine";
 
-type Tab = "wadspaces" | "files" | "diagnostics";
+type Tab = "wadspaces" | "history" | "storage" | "files" | "diagnostics";
 
 /** Machines: the list, and the picked one's detail (the launch machine to start with). */
 export default function MachinesPage() {
@@ -55,13 +56,6 @@ export default function MachinesPage() {
   const picked = params.get("machine") ?? launchTarget;
   const m = machines.find((x) => x.id === picked) ?? machines.find((x) => x.id === launchTarget) ?? machines[0] ?? null;
   const select = (id: string) => setParams({ machine: id }, { replace: true });
-
-  // Keep the load meters moving (wadd's events only fire on changes).
-  const loadMachines = useApp((s) => s.loadMachines);
-  useEffect(() => {
-    const t = setInterval(() => loadMachines().catch(() => {}), 4000);
-    return () => clearInterval(t);
-  }, [loadMachines]);
 
   return (
     <Page>
@@ -131,13 +125,15 @@ function ListItem({ on, onClick, icon, live, title, sub }: { on: boolean; onClic
   );
 }
 
-function Tabs({ tab, setTab, files }: { tab: Tab; setTab: (t: Tab) => void; files: boolean }) {
+function Tabs({ tab, setTab, history, storage, files }: { tab: Tab; setTab: (t: Tab) => void; history: boolean; storage: boolean; files: boolean }) {
   return (
     <Segmented
       value={tab}
       onChange={setTab}
       options={[
         { value: "wadspaces" as Tab, label: <><Activity className="size-3.5" /> Wadspaces</> },
+        ...(history ? [{ value: "history" as Tab, label: <><History className="size-3.5" /> History</> }] : []),
+        ...(storage ? [{ value: "storage" as Tab, label: <><HardDrive className="size-3.5" /> Storage</> }] : []),
         ...(files ? [{ value: "files" as Tab, label: <><FolderOpen className="size-3.5" /> Files</> }] : []),
         { value: "diagnostics" as Tab, label: <><Stethoscope className="size-3.5" /> Diagnostics</> },
       ]}
@@ -164,6 +160,16 @@ function MachineDetail({ m }: { m: Machine }) {
   const here = isThisMachine(m.id);
   const up = m.status === "online";
   const Icon = m.id === THIS_MACHINE ? Laptop : Server;
+  const history = backend.caps.history;
+  const storage = here && !!backend.storage && up;
+
+  // Keep the load meters moving while they show (wadd's events only fire on changes).
+  const loadMachines = useApp((s) => s.loadMachines);
+  useEffect(() => {
+    if (tab !== "diagnostics") return;
+    const t = setInterval(() => loadMachines().catch(() => {}), 4000);
+    return () => clearInterval(t);
+  }, [tab, loadMachines]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="min-w-0 space-y-5">
@@ -213,7 +219,7 @@ function MachineDetail({ m }: { m: Machine }) {
         {here && backend.caps.tailnet && <TailnetCard m={m} />}
       </div>
 
-      <Tabs tab={tab} setTab={setTab} files={here && !!backend.files && up} />
+      <Tabs tab={tab} setTab={setTab} history={history} storage={storage} files={here && !!backend.files && up} />
 
       {tab === "files" && here ? (
         <MachineFiles />
@@ -224,24 +230,22 @@ function MachineDetail({ m }: { m: Machine }) {
           </div>
           {here && <MachineDiagnostics />}
         </>
+      ) : tab === "storage" && storage ? (
+        <MachineStorage m={m} />
+      ) : tab === "history" && history ? (
+        <div className="overflow-hidden rounded-3xl border border-line bg-surface">
+          <div className="border-b border-line px-5 py-4">
+            <h3 className="flex items-center gap-2 font-display text-lg font-semibold">
+              <History className="size-4 text-accent" /> History
+            </h3>
+            <p className="mt-0.5 text-xs text-muted">What ran on {m.label}, who started it, and for how long.</p>
+          </div>
+          <div className="px-3 pb-3">
+            <RunHistory machineId={m.id} limit={30} />
+          </div>
+        </div>
       ) : (
-        <>
-          {here && backend.storage && up && <MachineStorage m={m} />}
-          <Containers m={m} here={here} />
-          {backend.caps.history && (
-            <div className="overflow-hidden rounded-3xl border border-line bg-surface">
-              <div className="border-b border-line px-5 py-4">
-                <h3 className="flex items-center gap-2 font-display text-lg font-semibold">
-                  <History className="size-4 text-accent" /> History
-                </h3>
-                <p className="mt-0.5 text-xs text-muted">What ran on {m.label}, who started it, and for how long.</p>
-              </div>
-              <div className="max-h-[560px] overflow-y-auto px-3 pb-3">
-                <RunHistory machineId={m.id} limit={15} />
-              </div>
-            </div>
-          )}
-        </>
+        <Containers m={m} here={here} />
       )}
 
     </motion.div>

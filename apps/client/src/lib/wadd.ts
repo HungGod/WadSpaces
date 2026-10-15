@@ -517,6 +517,8 @@ export interface Storage {
   /** Everything else on the disk, part by part. */
   other: OtherPart[];
   measuredAt: number;
+  /** A newer count is on its way (wadd's `storage` event says when it's ready). */
+  measuring?: boolean;
 }
 
 /** A part of the disk that isn't the wadspaces' layers, homes or copies (wad-proto's OtherPart). */

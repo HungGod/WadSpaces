@@ -47,10 +47,6 @@ RUN kver="$(ls /usr/lib/modules)" \
        done \
     && rm /tmp/initrd.txt
 
-# grim: the HUD's switcher (Super+Tab) shows each wadspace as it last looked,
-# a small screenshot taken as it opens. Its own layer, so those above stay cached.
-RUN dnf -y install --setopt=install_weak_deps=False --setopt=tsflags=nodocs grim && dnf clean all
-
 COPY host/etc/ /etc/
 COPY host/usr/ /usr/
 # The WadSpaces Client, the Tauri app (built by host/build.sh from apps/client).
@@ -62,6 +58,9 @@ COPY --chmod=755 .build/wadd/wadd /usr/bin/wadd
 COPY --chmod=755 .build/hud/hud /usr/libexec/wadspaces/hud
 # WadBrowser, the machine's own browser app (wadd runs it), built by host/build.sh.
 COPY --chmod=755 .build/wadbrowser/wadbrowser /usr/bin/wadbrowser
+# WadSpaces' own pictures (apps' icons, the brand): wadd draws wadspaces'
+# desktop icons from them for the HUD's switcher (GET /v1/desktop-icon).
+COPY .build/assets/ /usr/share/wadspaces/assets/
 # Staged by host/build.sh from host/secrets/: the admin password hash, which
 # wadspaces-admin-password.service applies. (No podman secrets are baked in:
 # a machine gets its GitHub token by signing in, or from the account.)

@@ -85,6 +85,29 @@ fn runs_newest_first_with_unfinished_ones_closed() {
 }
 
 #[test]
+fn runs_read_what_was_appended_and_start_over_on_a_new_file() {
+    use std::io::Write;
+    let (d, st) = state();
+    let path = d.path().join("runs.jsonl");
+    let line = |v: serde_json::Value| v.to_string() + "\n";
+    std::fs::write(&path, line(json!({"event": "start", "id": "r1", "wadspaceId": "a", "startedAt": 10.0}))).unwrap();
+    assert_eq!(st.runs(None, 10).len(), 1);
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    // Its end, and half of the next line (still being written).
+    let half = r#"{"event": "start", "id""#;
+    write!(f, "{}{half}", line(json!({"event": "end", "id": "r1", "endedAt": 15.0}))).unwrap();
+    let runs = st.runs(None, 10);
+    assert_eq!((runs.len(), runs[0].ended_at), (1, Some(15.0)));
+    writeln!(f, r#": "r2", "wadspaceId": "b", "startedAt": 20.0}}"#).unwrap();
+    assert_eq!(st.runs(None, 10).iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["r2", "r1"]);
+    // Replaced by a shorter file: read again from the top.
+    std::fs::write(&path, line(json!({"event": "start", "id": "r9", "wadspaceId": "c", "startedAt": 1.0}))).unwrap();
+    assert_eq!(st.runs(None, 10).iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["r9"]);
+    std::fs::remove_file(&path).unwrap();
+    assert!(st.runs(None, 10).is_empty());
+}
+
+#[test]
 fn session_link_library_and_secrets() {
     let (d, st) = state();
     let dir = d.path();

@@ -61,6 +61,18 @@ pub struct Space {
     pub kind: Option<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// A wadspace's desktop icons (fetched ahead, for the switcher).
+    #[serde(default)]
+    pub desktop: Vec<DesktopIcon>,
+}
+
+/// One icon on a wadspace's desktop (wadd's Workspace.desktop).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct DesktopIcon {
+    #[serde(default)]
+    pub label: String,
+    /// What GET /v1/desktop-icon draws.
+    pub icon: String,
 }
 
 impl Space {
@@ -163,6 +175,9 @@ pub struct CarouselItem {
     /// Its Super+number, while it runs.
     #[serde(default)]
     pub number: Option<u8>,
+    /// A wadspace's desktop icons, drawn on its wallpaper.
+    #[serde(default)]
+    pub desktop: Vec<DesktopIcon>,
 }
 
 impl CarouselItem {
@@ -377,6 +392,7 @@ mod tests {
             name: name.into(),
             kind: kind.map(String::from),
             enabled,
+            desktop: vec![],
         };
         let spaces = [
             space("writing", "Writing", None, true),

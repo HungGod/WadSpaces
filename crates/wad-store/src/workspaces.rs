@@ -31,6 +31,7 @@ const WORKSPACE_KEYS: &[&str] = &[
     "exec",
     "signins",
     "ephemeral",
+    "desktop",
 ];
 fn err(msg: impl Into<String>) -> Error {
     Error::Config(msg.into())
@@ -211,6 +212,8 @@ pub fn check_workspaces(list: Vec<Value>) -> Result<Vec<Workspace>, Error> {
             projects,
             signins,
             ephemeral: raw.get("ephemeral").and_then(Value::as_bool).unwrap_or(false),
+            // Only for the switcher's picture: one that doesn't read is left out.
+            desktop: raw.get("desktop").and_then(|d| serde_json::from_value(d.clone()).ok()).unwrap_or_default(),
         });
     }
     Ok(workspaces)
@@ -403,6 +406,9 @@ pub fn to_yaml(w: &Workspace) -> Value {
     }
     if w.ephemeral {
         o.insert("ephemeral".into(), true.into());
+    }
+    if !w.desktop.is_empty() {
+        o.insert("desktop".into(), serde_json::to_value(&w.desktop).expect("icons are JSON"));
     }
     Value::Object(o)
 }

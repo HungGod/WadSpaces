@@ -319,6 +319,13 @@ impl Server {
                 },
             )
         });
+        let storage = storage::Storage::new(
+            &config.daemon.state_dir,
+            profile == Profile::System,
+            registry_backend.clone(),
+            registry.clone(),
+            bus.clone(),
+        );
         let state = Arc::new(AppState {
             registry_backend,
             meter: metrics::Meter::default(),
@@ -341,7 +348,8 @@ impl Server {
             logs,
             policy,
             store: wad_store::State::new(&config.daemon.state_dir),
-            storage: storage::Storage::with(&config.daemon.state_dir, profile == Profile::System),
+            storage,
+            graph_root: Default::default(),
             files: files::Files::new(&config.daemon.state_dir, &config.daemon.signins_dir, profile == Profile::System),
         });
         Ok(Self {
@@ -407,6 +415,7 @@ impl Server {
             sweep.sweep_ephemeral().await;
             sweep.sweep_old().await;
         });
+        self.state.storage.start();
         let watcher = self.sway.clone().map(|d| tokio::spawn(d.run(self.state.view.clone() as Arc<dyn WindowSink>)));
         *self.state.keys.lock().unwrap() = self.start_keys();
         // A build can add a workspace (its hotkey, the secrets it names).

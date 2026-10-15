@@ -30,6 +30,82 @@ pub const COLLECTIONS: &[&str] = &["wadspaces", "templates", "extensions", "cust
 #[derive(Debug, Clone)]
 pub struct State {
     pub dir: PathBuf,
+    /// runs.jsonl as read so far: only what's appended is read again.
+    runs: std::sync::Arc<std::sync::Mutex<RunsSeen>>,
+}
+
+/// The run history read so far, and how far into which file.
+#[derive(Debug, Default)]
+struct RunsSeen {
+    ino: u64,
+    read: u64,
+    order: Vec<String>,
+    runs: std::collections::HashMap<String, Run>,
+}
+
+impl RunsSeen {
+    fn take(&mut self, line: &str) {
+        let Ok(rec) = serde_json::from_str::<Value>(line) else { return };
+        match rec.get("event").and_then(Value::as_str) {
+            Some("start") => {
+                let id = s(&rec, "id");
+                if !self.runs.contains_key(&id) {
+                    self.order.push(id.clone());
+                }
+                self.runs.insert(
+                    id.clone(),
+                    Run {
+                        id,
+                        wadspace_id: s(&rec, "wadspaceId"),
+                        wadspace_name: s(&rec, "wadspaceName"),
+                        mode: s(&rec, "mode"),
+                        user: s(&rec, "user"),
+                        projects: rec
+                            .get("projects")
+                            .and_then(Value::as_array)
+                            .map(|a| a.iter().filter_map(|p| p.as_str().map(String::from)).collect())
+                            .unwrap_or_default(),
+                        started_at: rec.get("startedAt").and_then(Value::as_f64).unwrap_or(0.0),
+                        ended_at: rec.get("endedAt").and_then(Value::as_f64),
+                    },
+                );
+            }
+            Some("end") => {
+                if let Some(r) = self.runs.get_mut(&s(&rec, "id")) {
+                    r.ended_at = rec.get("endedAt").and_then(Value::as_f64);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Reads what was appended since last time (all of it when the file is
+    /// another one, or shorter than what was read).
+    fn catch_up(&mut self, path: &Path) {
+        use std::io::{Read, Seek, SeekFrom};
+        use std::os::unix::fs::MetadataExt;
+        let Ok(mut f) = std::fs::File::open(path) else {
+            *self = Self::default();
+            return;
+        };
+        let Ok(m) = f.metadata() else { return };
+        if m.ino() != self.ino || m.len() < self.read {
+            *self = Self { ino: m.ino(), ..Self::default() };
+        }
+        if m.len() == self.read || f.seek(SeekFrom::Start(self.read)).is_err() {
+            return;
+        }
+        let mut more = Vec::new();
+        if f.read_to_end(&mut more).is_err() {
+            return;
+        }
+        // Whole lines only: one being written is read next time.
+        let Some(end) = more.iter().rposition(|b| *b == b'\n') else { return };
+        for line in String::from_utf8_lossy(&more[..end]).lines() {
+            self.take(line);
+        }
+        self.read += end as u64 + 1;
+    }
 }
 
 fn read_json(path: &Path) -> Option<Value> {
@@ -75,7 +151,7 @@ pub fn project_of(id: &str, d: &Value) -> Project {
 
 impl State {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self { dir: dir.into(), runs: Default::default() }
     }
 
     /// The account link. The refresh token stays in the file: only whether
@@ -115,55 +191,16 @@ impl State {
     /// Runs, newest first (runs.py list): a run whose end was never written
     /// ends when it started (wadd went away mid-run).
     pub fn runs(&self, workspace: Option<&str>, limit: usize) -> Vec<Run> {
-        let text = std::fs::read_to_string(self.dir.join("runs.jsonl")).unwrap_or_default();
-        let mut order: Vec<String> = Vec::new();
-        let mut runs: std::collections::HashMap<String, Run> = std::collections::HashMap::new();
-        for line in text.lines() {
-            let Ok(rec) = serde_json::from_str::<Value>(line) else { continue };
-            match rec.get("event").and_then(Value::as_str) {
-                Some("start") => {
-                    let id = s(&rec, "id");
-                    if !runs.contains_key(&id) {
-                        order.push(id.clone());
-                    }
-                    runs.insert(
-                        id.clone(),
-                        Run {
-                            id,
-                            wadspace_id: s(&rec, "wadspaceId"),
-                            wadspace_name: s(&rec, "wadspaceName"),
-                            mode: s(&rec, "mode"),
-                            user: s(&rec, "user"),
-                            projects: rec
-                                .get("projects")
-                                .and_then(Value::as_array)
-                                .map(|a| a.iter().filter_map(|p| p.as_str().map(String::from)).collect())
-                                .unwrap_or_default(),
-                            started_at: rec.get("startedAt").and_then(Value::as_f64).unwrap_or(0.0),
-                            ended_at: rec.get("endedAt").and_then(Value::as_f64),
-                        },
-                    );
-                }
-                Some("end") => {
-                    if let Some(r) = runs.get_mut(&s(&rec, "id")) {
-                        r.ended_at = rec.get("endedAt").and_then(Value::as_f64);
-                    }
-                }
-                _ => {}
-            }
-        }
-        let mut out: Vec<Run> = order
-            .into_iter()
-            .filter_map(|id| runs.remove(&id))
+        let mut seen = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        seen.catch_up(&self.dir.join("runs.jsonl"));
+        let mut out: Vec<&Run> = seen
+            .order
+            .iter()
+            .filter_map(|id| seen.runs.get(id))
             .filter(|r| workspace.is_none_or(|w| r.wadspace_id == w))
-            .map(|mut r| {
-                r.ended_at = r.ended_at.or(Some(r.started_at));
-                r
-            })
             .collect();
         out.sort_by(|a, b| b.started_at.total_cmp(&a.started_at));
-        out.truncate(limit);
-        out
+        out.into_iter().take(limit).map(|r| Run { ended_at: r.ended_at.or(Some(r.started_at)), ..r.clone() }).collect()
     }
 
     /// The session in progress (session.json), if any. `known`: the

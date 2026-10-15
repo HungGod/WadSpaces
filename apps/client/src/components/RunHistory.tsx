@@ -43,8 +43,15 @@ export function RunHistory({ wadspaceId, machineId, limit = 12 }: { wadspaceId?:
   const [shown, setShown] = useState(limit);
   const [, tick] = useState(0);
   const query = wadspaceId ? `wadspace:${wadspaceId}` : `machine:${machineId}`;
+  // What runs where: a run starts or ends only when this changes.
+  const running = useApp((s) =>
+    s.machines
+      .flatMap((m) => m.containers.filter((c) => c.status === "running").map((c) => `${m.id}/${c.wadspaceId}`))
+      .sort()
+      .join(" "),
+  );
 
-  // Refresh alongside the machine list (it polls on the Manager) and keep live durations ticking.
+  // Read again when something starts or stops, and keep live durations ticking.
   useEffect(() => {
     let off = false;
     backend
@@ -54,7 +61,7 @@ export function RunHistory({ wadspaceId, machineId, limit = 12 }: { wadspaceId?:
     return () => {
       off = true;
     };
-  }, [query, machines]);
+  }, [query, running]);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 30_000);
     return () => clearInterval(t);

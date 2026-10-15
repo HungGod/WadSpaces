@@ -356,6 +356,7 @@ pub fn ws(id: &str, image: &str, display: Display, port: Option<u16>) -> Workspa
         projects: vec![],
         signins: vec![],
         ephemeral: false,
+        desktop: vec![],
     }
 }
 

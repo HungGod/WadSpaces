@@ -42,6 +42,7 @@ fn workspace(id: &str, display: Display, port: Option<u16>, hotkey: u8) -> Works
         projects: vec![],
         signins: vec![],
         ephemeral: false,
+        desktop: vec![],
     }
 }
 
@@ -220,6 +221,12 @@ async fn the_snapshot_has_the_python_shape() {
         ("build", &json!(true), &json!(3), &json!(["x"]))
     );
     assert!(e.rs.translate("carousel", &json!({})).is_empty()); // the HUD's
+    // A heartbeat that changes nothing shown sends no snapshot; a new disk count passes on.
+    let beat = json!({"linked": true, "owner": "u", "lastHeartbeat": 5.0});
+    let first = e.rs.translate("cloud", &beat);
+    assert_eq!(first.len(), 1);
+    assert!(e.rs.translate("cloud", &beat).is_empty());
+    assert_eq!(e.rs.translate("storage", &json!({"measuredAt": 9.0}))[0].0, "storage");
 }
 
 #[tokio::test]

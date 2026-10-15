@@ -10,6 +10,7 @@
 !.build/client-app
 !.build/hud
 !.build/wadbrowser
+!.build/assets
 !.build/secrets
 !.build/ssh
 **/__pycache__

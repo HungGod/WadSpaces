@@ -61,6 +61,8 @@ pub struct AppState {
     pub store: wad_store::State,
     /// What WadSpaces takes on the disk (GET /v1/storage).
     pub storage: crate::storage::Storage,
+    /// Where podman keeps its images (asked once: it doesn't move).
+    pub graph_root: std::sync::OnceLock<String>,
     /// What's saved on the disk outside the images (/v1/files).
     pub files: crate::files::Files,
 }
@@ -129,6 +131,7 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/v1/workspaces/{id}/state", get(workspace_state))
         .route("/v1/workspaces/{id}/icon", get(workspace_icon))
         .route("/v1/webapp-icon", get(webapp_icon))
+        .route("/v1/desktop-icon", get(desktop_icon))
         .route(
             "/v1/workspaces/{id}/wallpaper",
             get(workspace_wallpaper_get)
@@ -275,6 +278,110 @@ async fn webapp_icon(
         .await
         .ok_or_else(|| Failure(ApiError::new(ErrorCode::NotFound, format!("{} has no icon to show", q.site))))?;
     Ok(Json(serde_json::json!({ "png": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png) })))
+}
+
+/// WadSpaces' own pictures (apps' icons, its brand, the folder), as the
+/// image installs them; `WADD_ASSETS` names another folder (a laptop's).
+pub const ASSETS: &str = "/usr/share/wadspaces/assets";
+
+#[derive(Deserialize)]
+struct DesktopIconQuery {
+    /// A desktop icon's picture (Workspace.desktop): an asset path or a
+    /// web app's favicon address.
+    src: String,
+    #[serde(default)]
+    size: Option<u32>,
+}
+
+/// A desktop icon's picture as a square PNG (`size` px, 96 by default).
+async fn desktop_icon(
+    State(app): State<Arc<AppState>>,
+    Query(q): Query<DesktopIconQuery>,
+) -> Result<Response, Failure> {
+    let none = || Failure(ApiError::new(ErrorCode::NotFound, format!("no picture for {:?}", q.src)));
+    let px = q.size.unwrap_or(96).clamp(16, 256);
+    let bytes = if let Some(domain) = q.src.strip_prefix(FAVICON) {
+        let domain = percent_decoded(domain.split('&').next().unwrap_or_default());
+        app.builds.icons().favicon(&format!("https://{domain}")).await.ok_or_else(none)?
+    } else {
+        let dir = std::env::var_os("WADD_ASSETS").map(std::path::PathBuf::from).unwrap_or_else(|| ASSETS.into());
+        let path = asset_path(&dir, &q.src).ok_or_else(none)?;
+        tokio::fs::read(path).await.map_err(|_| none())?
+    };
+    let png = tokio::task::spawn_blocking(move || {
+        wad_icons::decode::decode(&bytes).map(|img| wad_icons::png(&wad_icons::style::fit(&img, px)))
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or_else(none)?;
+    Ok(([(axum::http::header::CONTENT_TYPE, "image/png"), (axum::http::header::CACHE_CONTROL, "max-age=86400")], png)
+        .into_response())
+}
+
+/// How wad-core names a web app's icon (layers::favicon): its domain, encoded.
+const FAVICON: &str = "https://www.google.com/s2/favicons?domain=";
+
+fn percent_decoded(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = (b[i] == b'%' && i + 2 < b.len())
+            .then(|| std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()))
+            .flatten();
+        match hex {
+            Some(c) => {
+                out.push(c);
+                i += 3;
+            }
+            None => {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// An asset's file in `dir`, if `src` names one ("/apps/vscode/icon.png";
+/// nothing outside it, links included).
+fn asset_path(dir: &std::path::Path, src: &str) -> Option<std::path::PathBuf> {
+    let rel = src.strip_prefix('/')?;
+    if rel.is_empty() || !rel.split('/').all(|c| !c.is_empty() && c != "." && c != "..") {
+        return None;
+    }
+    let real = std::fs::canonicalize(dir.join(rel)).ok()?;
+    (real.starts_with(std::fs::canonicalize(dir).ok()?) && real.is_file()).then_some(real)
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::asset_path;
+
+    #[test]
+    fn assets_come_from_their_folder_only() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("assets");
+        std::fs::create_dir_all(dir.join("apps/vscode")).unwrap();
+        std::fs::write(dir.join("apps/vscode/icon.png"), b"png").unwrap();
+        std::fs::write(d.path().join("secret"), b"no").unwrap();
+        std::os::unix::fs::symlink(d.path().join("secret"), dir.join("link")).unwrap();
+        assert!(asset_path(&dir, "/apps/vscode/icon.png").is_some());
+        assert_eq!(super::percent_decoded("xn--bcher-kva.example%2Ecom%"), "xn--bcher-kva.example.com%");
+        for bad in [
+            "apps/vscode/icon.png",
+            "/",
+            "/apps",
+            "/../secret",
+            "/apps/../../secret",
+            "/link",
+            "//etc/passwd",
+            "/nope.png",
+        ] {
+            assert!(asset_path(&dir, bad).is_none(), "{bad}");
+        }
+    }
 }
 
 /// `dir/name-<theme>.ext` for `dir/name.ext`.
@@ -591,9 +698,10 @@ struct StorageQuery {
     fresh: bool,
 }
 
-/// What WadSpaces takes on this machine's disk (`?fresh=true` counts again now).
+/// What WadSpaces takes on this machine's disk: the last count at once
+/// (`?fresh=true` counts again now and waits).
 async fn storage(State(app): State<Arc<AppState>>, Query(q): Query<StorageQuery>) -> Json<wad_proto::v1::Storage> {
-    Json(app.storage.report(&app.registry_backend, &app.registry, q.fresh).await)
+    Json(app.storage.report(q.fresh).await)
 }
 
 /// Builds a layer's image (what it builds on first, when needed).
@@ -650,7 +758,7 @@ async fn file_text_put(State(app): State<Arc<AppState>>, Json(t): Json<FileText>
 
 async fn file_delete(State(app): State<Arc<AppState>>, Query(q): Query<FileQuery>) -> Result<StatusCode, Failure> {
     app.files.delete(&q.root, &q.path, &app.registry, app.registry_backend.as_ref()).await?;
-    app.storage.forget().await;
+    app.storage.forget();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -662,14 +770,14 @@ async fn storage_delete(
     let backend = app.registry_backend.as_ref();
     let freed =
         crate::images::delete_selected(&app.registry, &app.builds, &app.copies, backend, &app.store.dir, &pick).await?;
-    app.storage.forget().await;
+    app.storage.forget();
     Ok(Json(freed))
 }
 
 /// Older builds of layers that nothing needs, removed.
 async fn storage_prune(State(app): State<Arc<AppState>>) -> Result<Json<wad_proto::v1::Freed>, Failure> {
     let freed = crate::images::prune(app.registry_backend.as_ref()).await?;
-    app.storage.forget().await;
+    app.storage.forget();
     Ok(Json(freed))
 }
 
@@ -755,7 +863,10 @@ struct RunsQuery {
 }
 
 async fn runs(State(app): State<Arc<AppState>>, Query(q): Query<RunsQuery>) -> Json<Vec<Run>> {
-    Json(app.store.runs(q.workspace.as_deref(), q.limit.unwrap_or(200).clamp(1, 2000)))
+    // Off the async threads: the first read of a long history takes a moment.
+    let store = app.store.clone();
+    let limit = q.limit.unwrap_or(200).clamp(1, 2000);
+    Json(tokio::task::spawn_blocking(move || store.runs(q.workspace.as_deref(), limit)).await.unwrap_or_default())
 }
 
 async fn view(State(app): State<Arc<AppState>>) -> Json<ViewState> {
@@ -1016,12 +1127,18 @@ async fn library_delete(
 }
 
 async fn metrics(State(app): State<Arc<AppState>>) -> Json<wad_proto::v1::Metrics> {
-    let root = app
-        .registry_backend
-        .podman_info()
-        .await
-        .ok()
-        .and_then(|i| i.pointer("/store/graphRoot").and_then(|v| v.as_str()).map(String::from));
+    let root = match app.graph_root.get() {
+        Some(r) => Some(r.clone()),
+        None => {
+            let r = app
+                .registry_backend
+                .podman_info()
+                .await
+                .ok()
+                .and_then(|i| i.pointer("/store/graphRoot").and_then(|v| v.as_str()).map(String::from));
+            r.inspect(|r| _ = app.graph_root.set(r.clone()))
+        }
+    };
     Json(app.meter.snapshot(std::path::Path::new(root.as_deref().unwrap_or("/"))).await)
 }
 

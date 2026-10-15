@@ -382,7 +382,26 @@ pub async fn workspace_of(backend: &dyn Backend, id: &str, req: &Install) -> Res
         backend.secret_names().await.unwrap_or_default().into_iter().filter(|n| n == "github_token").collect();
     let tz = req.tz.as_deref().filter(|t| !t.is_empty() && t.len() < 64 && !t.contains(char::is_control));
     let opts = json!({ "tz": tz.unwrap_or("Etc/UTC"), "secrets": secrets });
-    Ok(wad_core::layers::workspace_for(w, &req.template, &setup, &opts))
+    let mut ws = wad_core::layers::workspace_for(w, &req.template, &setup, &opts);
+    ws["desktop"] = desktop_of(w, &req.template, &setup);
+    Ok(ws)
+}
+
+/// Its desktop's icons as the image draws them (what the switcher shows):
+/// `[{label, icon}]`.
+fn desktop_of(w: &Value, template: &Value, setup: &Value) -> Value {
+    // Version 3 keeps its projects (with their folder names) in its customization.
+    let projects: Vec<Value> = w["customization"]["projects"]
+        .as_array()
+        .filter(|_| w.get("version").and_then(Value::as_u64) == Some(3))
+        .into_iter()
+        .flatten()
+        .map(|p| json!({ "id": p["id"], "name": p["as"] }))
+        .collect();
+    wad_core::layers::desktop_for(template, setup, &projects)
+        .iter()
+        .map(|i| json!({ "label": i["label"], "icon": i["iconUrl"] }))
+        .collect()
 }
 
 /// A stack's setup: its Extensions' (made on its template), or its

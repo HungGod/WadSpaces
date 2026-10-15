@@ -98,6 +98,11 @@ pub enum Event {
     Shortcut {
         name: String,
     },
+    /// A new count of the disk (GET /v1/storage has it).
+    Storage {
+        #[serde(rename = "measuredAt")]
+        measured_at: f64,
+    },
 }
 
 impl Event {
@@ -118,6 +123,7 @@ impl Event {
             Event::Workspaces(_) => "workspaces",
             Event::Notice { .. } => "notice",
             Event::Shortcut { .. } => "shortcut",
+            Event::Storage { .. } => "storage",
         }
     }
 }
@@ -173,6 +179,9 @@ pub struct CarouselItem {
     /// Its Super+number: its place among what runs (spaces, then apps).
     #[serde(default)]
     pub number: Option<u8>,
+    /// A wadspace's desktop icons, drawn on its preview.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub desktop: Vec<DesktopIcon>,
 }
 
 /// POST /v1/session
@@ -343,6 +352,20 @@ pub struct Workspace {
     /// anywhere, and removed, with its extra folder, once it stops.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ephemeral: bool,
+    /// A wadspace's desktop icons, in selkies-desktop's order (wad-core's
+    /// desktop_for, kept at install): what the Super+Tab switcher draws.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub desktop: Vec<DesktopIcon>,
+}
+
+/// One icon on a wadspace's desktop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopIcon {
+    pub label: String,
+    /// The picture: a WadSpaces asset path ("/apps/vscode/icon.png") or a web
+    /// address (a web app's favicon); GET /v1/desktop-icon draws either.
+    pub icon: String,
 }
 
 /// A saved sign-in a workspace mounts, for one of its apps.
@@ -1121,6 +1144,9 @@ pub struct Storage {
     pub other: Vec<OtherPart>,
     /// Unix seconds.
     pub measured_at: f64,
+    /// A newer count is on its way (a `storage` event says when it's ready).
+    #[serde(default)]
+    pub measuring: bool,
 }
 
 /// POST /v1/storage/delete: what to take off this machine's disk.

@@ -86,23 +86,53 @@ fn square_image(texture: &gdk::Texture, px: i32, class: &str) -> gtk::Widget {
 const PREVIEW_W: i32 = 144;
 const PREVIEW_H: i32 = 96;
 
-/// Drawn at the preview's size, whatever the picture's (it's made twice as
-/// big, to stay sharp on a 2× screen: a gtk::Picture would take that size).
-fn desktop_image(texture: &gdk::Texture) -> gtk::Widget {
+/// The desktop as selkies-desktop lays it out (apps/selkies-desktop,
+/// desktop.h; the client's components/desktop/geometry.ts), in its pixels.
+const PANEL_H: f64 = 56.0;
+const START_W: f64 = 60.0;
+const CELL_W: f64 = 96.0;
+const CELL_H: f64 = 104.0;
+const GRID_PAD: f64 = 10.0;
+const DESKTOP_ICON: f64 = 48.0;
+/// The preview draws that desktop this much smaller, so its icons show.
+const DESKTOP_SCALE: f64 = 0.25;
+/// Desktop icons are fetched this big (sharp at 2×).
+const DESKTOP_ICON_PX: u32 = 32;
+
+/// A texture as a cairo surface (GDK's default download format is cairo's
+/// ARGB32, premultiplied BGRA).
+fn surface_of(texture: &gdk::Texture) -> Option<gtk::cairo::ImageSurface> {
     let (tw, th) = (texture.width(), texture.height());
     let stride = tw as usize * 4;
     let mut pixels = vec![0u8; stride * th as usize];
-    // GDK's default memory format is cairo's ARGB32 (premultiplied BGRA).
     texture.download(&mut pixels, stride);
-    let surface =
-        gtk::cairo::ImageSurface::create_for_data(pixels, gtk::cairo::Format::ARgb32, tw, th, stride as i32).ok();
+    gtk::cairo::ImageSurface::create_for_data(pixels, gtk::cairo::Format::ARgb32, tw, th, stride as i32).ok()
+}
+
+/// Straight RGBA as a texture (no PNG on the way).
+fn rgba_texture((w, h, pixels): thumb::Rgba) -> gdk::Texture {
+    gdk::MemoryTexture::new(
+        w as i32,
+        h as i32,
+        gdk::MemoryFormat::R8g8b8a8,
+        &glib::Bytes::from_owned(pixels),
+        w as usize * 4,
+    )
+    .upcast()
+}
+
+/// A wadspace's desktop, small: its wallpaper (else the image's dark blue)
+/// with its icons in selkies-desktop's columns and the panel along the
+/// bottom. An icon still on its way is a faint square.
+fn desktop_card(wallpaper: Option<&gdk::Texture>, icons: &[Option<gdk::Texture>]) -> gtk::Widget {
+    let wall = wallpaper.and_then(surface_of);
+    let icons: Vec<Option<gtk::cairo::ImageSurface>> = icons.iter().map(|t| t.as_ref().and_then(surface_of)).collect();
     let area = gtk::DrawingArea::new();
     area.set_content_width(PREVIEW_W);
     area.set_content_height(PREVIEW_H);
     area.set_halign(gtk::Align::Center);
     area.add_css_class("preview");
     area.set_draw_func(move |_, cr, w, h| {
-        let Some(s) = &surface else { return };
         let (w, h) = (w as f64, h as f64);
         // Rounded like the switcher's icons.
         let r = 12.0;
@@ -113,19 +143,81 @@ fn desktop_image(texture: &gdk::Texture) -> gtk::Widget {
         cr.arc(r, r, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
         cr.close_path();
         cr.clip();
-        cr.scale(w / tw as f64, h / th as f64);
-        let _ = cr.set_source_surface(s, 0.0, 0.0);
-        let _ = cr.paint();
+        match &wall {
+            Some(s) => {
+                let _ = cr.save();
+                cr.scale(w / s.width() as f64, h / s.height() as f64);
+                let _ = cr.set_source_surface(s, 0.0, 0.0);
+                let _ = cr.paint();
+                let _ = cr.restore();
+            }
+            None => {
+                cr.set_source_rgb(11.0 / 255.0, 11.0 / 255.0, 20.0 / 255.0);
+                let _ = cr.paint();
+            }
+        }
+        let k = DESKTOP_SCALE;
+        let rows = (((h / k - PANEL_H) / CELL_H).floor() as usize).max(1);
+        let px = DESKTOP_ICON * k;
+        for (n, icon) in icons.iter().enumerate() {
+            let x = ((n / rows) as f64 * CELL_W + GRID_PAD + (CELL_W - DESKTOP_ICON) / 2.0) * k;
+            let y = ((n % rows) as f64 * CELL_H + GRID_PAD + 5.0) * k;
+            if x + px > w {
+                break;
+            }
+            match icon {
+                Some(s) => {
+                    let _ = cr.save();
+                    let side = s.width().max(s.height()) as f64;
+                    let (iw, ih) = (s.width() as f64 * px / side, s.height() as f64 * px / side);
+                    cr.translate(x + (px - iw) / 2.0, y + (px - ih) / 2.0);
+                    cr.scale(px / side, px / side);
+                    let _ = cr.set_source_surface(s, 0.0, 0.0);
+                    let _ = cr.paint();
+                    let _ = cr.restore();
+                }
+                None => {
+                    cr.rectangle(x, y, px, px);
+                    cr.set_source_rgba(1.0, 1.0, 1.0, 0.3);
+                    let _ = cr.fill_preserve();
+                    cr.set_source_rgba(0.0, 0.0, 0.0, 0.35);
+                    cr.set_line_width(1.0);
+                    let _ = cr.stroke();
+                }
+            }
+        }
+        // The panel, and its Start button.
+        let panel = PANEL_H * k;
+        cr.set_source_rgb(26.0 / 255.0, 26.0 / 255.0, 26.0 / 255.0);
+        cr.rectangle(0.0, h - panel, w, panel);
+        let _ = cr.fill();
+        cr.set_source_rgb(64.0 / 255.0, 64.0 / 255.0, 64.0 / 255.0);
+        cr.rectangle(4.0 * k, h - panel + 4.0 * k, (START_W - 8.0) * k, panel - 8.0 * k);
+        let _ = cr.fill();
     });
     area.upcast()
 }
 
-/// The screen now, small (grim, on the machine's own display): None without it.
-fn screenshot() -> Option<Vec<u8>> {
-    let out = std::process::Command::new("grim").args(["-s", "0.25", "-t", "png", "-"]).output().ok()?;
-    (out.status.success() && !out.stdout.is_empty())
-        .then_some(out.stdout)
-        .and_then(|b| thumb::cover(&b, PREVIEW_W as u32 * 2, PREVIEW_H as u32 * 2))
+/// What the HUD has of a picture it fetches from wadd.
+#[derive(Clone)]
+enum Cached {
+    Loading,
+    /// Not there (or not a picture): asked again after a while.
+    Failed(std::time::Instant),
+    Ready(gdk::Texture),
+}
+
+/// How long a picture wadd didn't give is left alone.
+const RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A query value, percent-encoded.
+fn query_value(v: &str) -> String {
+    v.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// The bar sits in the middle of a wadspace's tray (selkies-desktop's
@@ -470,10 +562,12 @@ struct Hud {
     switcher: gtk::Window,
     switcher_box: gtk::Box,
     carousel: RefCell<Carousel>,
-    icons: RefCell<HashMap<String, Option<gdk::Texture>>>,
-    /// Each wadspace as it last looked on screen (by view), taken when the
-    /// switcher opens over it: its preview there.
-    shots: RefCell<HashMap<String, gdk::Texture>>,
+    icons: RefCell<HashMap<String, Cached>>,
+    /// The switcher's cells, for the items they were built for.
+    cells: RefCell<Vec<gtk::Box>>,
+    built: RefCell<Vec<model::CarouselItem>>,
+    /// A picture arrived: the cells are built again.
+    cells_stale: Cell<bool>,
     /// The site's colours, dark or light as WadSpaces Client is.
     theme: Cell<Theme>,
     css: gtk::CssProvider,
@@ -839,7 +933,9 @@ impl Hud {
             switcher_box,
             carousel: RefCell::default(),
             icons: RefCell::default(),
-            shots: RefCell::default(),
+            cells: RefCell::default(),
+            built: RefCell::default(),
+            cells_stale: Cell::default(),
             theme: Cell::new(theme),
             css,
             logo: RefCell::default(),
@@ -1778,17 +1874,35 @@ impl Hud {
     }
 
     // ------------------------------------------------------------ switcher
+    /// Shows the switcher at once with what's here; a Tab only moves the
+    /// highlight (the cells are built again when the list changes, or a
+    /// picture arrives).
     fn show_switcher(self: &Rc<Self>) {
         let c = self.carousel.borrow().clone();
         if !c.open || c.items.is_empty() {
             self.switcher.set_visible(false);
             return;
         }
+        if self.cells_stale.replace(false) || *self.built.borrow() != c.items {
+            self.build_cells(&c.items);
+        }
+        for (i, cell) in self.cells.borrow().iter().enumerate() {
+            if i == c.index {
+                cell.add_css_class("selected");
+            } else {
+                cell.remove_css_class("selected");
+            }
+        }
+        self.switcher.present();
+    }
+
+    fn build_cells(self: &Rc<Self>, items: &[model::CarouselItem]) {
         while let Some(child) = self.switcher_box.first_child() {
             self.switcher_box.remove(&child);
         }
-        let divider = model::divider_at(&c.items);
-        for (i, item) in c.items.iter().enumerate() {
+        let mut cells = Vec::with_capacity(items.len());
+        let divider = model::divider_at(items);
+        for (i, item) in items.iter().enumerate() {
             // The spaces, then what runs on the machine itself.
             if divider == Some(i) {
                 let line = gtk::Separator::new(gtk::Orientation::Vertical);
@@ -1797,36 +1911,26 @@ impl Hud {
             }
             let cell = gtk::Box::new(gtk::Orientation::Vertical, 0);
             cell.add_css_class("item");
-            if i == c.index {
-                cell.add_css_class("selected");
-            }
-            // A wadspace is its desktop: as it last looked, else its wallpaper.
-            let preview = if item.kind == "space" {
-                self.shots
-                    .borrow()
-                    .get(&item.view)
-                    .cloned()
-                    .or_else(|| item.preview.as_ref().and_then(|p| self.wallpaper(p)))
-            } else {
-                None
-            };
+            // A wadspace is its desktop: its wallpaper with its icons.
+            let wallpaper =
+                if item.kind == "space" { item.preview.as_ref().and_then(|p| self.wallpaper(p)) } else { None };
             // WadSpaces Client (wadd's "home" view) is the WadSpaces logo.
             let texture = if item.view == "home" {
                 self.logo.borrow().clone()
             } else {
                 item.icon.as_ref().and_then(|p| self.icon(p))
             };
-            let face: gtk::Widget = match (preview, texture) {
-                (Some(p), _) => desktop_image(&p),
-                (None, Some(t)) => square_image(&t, 64, "icon"),
-                (None, None) => {
-                    let initial = label(
-                        &item.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(),
-                        "icon",
-                    );
-                    initial.set_halign(gtk::Align::Center);
-                    initial.upcast()
-                }
+            let face: gtk::Widget = if item.kind == "space" && (wallpaper.is_some() || !item.desktop.is_empty()) {
+                let icons: Vec<Option<gdk::Texture>> =
+                    item.desktop.iter().map(|d| self.desktop_icon(&d.icon)).collect();
+                desktop_card(wallpaper.as_ref(), &icons)
+            } else if let Some(t) = texture {
+                square_image(&t, 64, "icon")
+            } else {
+                let initial =
+                    label(&item.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(), "icon");
+                initial.set_halign(gtk::Align::Center);
+                initial.upcast()
             };
             cell.append(&face);
             let name = label(&item.name, "name");
@@ -1839,69 +1943,83 @@ impl Hud {
                 cell.append(&label(&keys, "state"));
             }
             self.switcher_box.append(&cell);
+            cells.push(cell);
         }
-        self.switcher.present();
+        self.cells.replace(cells);
+        self.built.replace(items.to_vec());
     }
 
-    /// A wadspace's wallpaper, made a small desktop-shaped picture: from the
-    /// cache, else fetched (the switcher redraws when it arrives).
-    fn wallpaper(self: &Rc<Self>, path: &str) -> Option<gdk::Texture> {
-        let key = format!("desktop {path}");
-        if let Some(t) = self.icons.borrow().get(&key) {
-            return t.clone();
+    /// A picture from wadd, made off the GTK loop: from the cache, else
+    /// fetched (the switcher redraws when it arrives). One wadd didn't give
+    /// is asked for again after a while.
+    fn fetched(
+        self: &Rc<Self>,
+        key: String,
+        work: impl FnOnce() -> Option<thumb::Rgba> + Send + 'static,
+    ) -> Option<gdk::Texture> {
+        match self.icons.borrow().get(&key) {
+            Some(Cached::Ready(t)) => return Some(t.clone()),
+            Some(Cached::Loading) => return None,
+            Some(Cached::Failed(at)) if at.elapsed() < RETRY => return None,
+            _ => {}
         }
-        self.icons.borrow_mut().insert(key.clone(), None);
-        let w = self.wadd.clone();
+        self.icons.borrow_mut().insert(key.clone(), Cached::Loading);
         let h = self.clone();
-        let p = path.to_string();
-        background(
-            move || w.bytes(&p).and_then(|b| thumb::cover(&b, PREVIEW_W as u32 * 2, PREVIEW_H as u32 * 2)),
-            move |r| {
-                if let Some(bytes) = r
-                    && let Ok(t) = gdk::Texture::from_bytes(&glib::Bytes::from(&bytes))
-                {
-                    h.icons.borrow_mut().insert(key, Some(t));
-                    if h.switcher.is_visible() {
-                        h.show_switcher();
-                    }
-                }
-            },
-        );
+        background(work, move |r| {
+            let got = match r {
+                Some(px) => Cached::Ready(rgba_texture(px)),
+                None => Cached::Failed(std::time::Instant::now()),
+            };
+            let ready = matches!(got, Cached::Ready(_));
+            h.icons.borrow_mut().insert(key, got);
+            if ready && h.switcher.is_visible() {
+                h.cells_stale.set(true);
+                h.show_switcher();
+            }
+        });
         None
+    }
+
+    /// A wadspace's wallpaper, made a small desktop-shaped picture.
+    fn wallpaper(self: &Rc<Self>, path: &str) -> Option<gdk::Texture> {
+        let w = self.wadd.clone();
+        let p = path.to_string();
+        self.fetched(format!("desktop {path}"), move || {
+            w.bytes(&p).and_then(|b| thumb::cover_rgba(&b, PREVIEW_W as u32 * 2, PREVIEW_H as u32 * 2))
+        })
+    }
+
+    /// One of a wadspace's desktop icons (GET /v1/desktop-icon draws it).
+    fn desktop_icon(self: &Rc<Self>, src: &str) -> Option<gdk::Texture> {
+        let w = self.wadd.clone();
+        let path = format!("/v1/desktop-icon?size={DESKTOP_ICON_PX}&src={}", query_value(src));
+        self.fetched(format!("desk {src}"), move || w.bytes(&path).and_then(|b| thumb::rgba(&b, DESKTOP_ICON_PX)))
     }
 
     /// A workspace's icon, in the theme's variant when it has one (WadBrowser
-    /// does): from the cache, else fetched (the switcher redraws when it arrives).
+    /// does). Icons are often whole wallpapers: shrunk off the GTK loop.
     fn icon(self: &Rc<Self>, path: &str) -> Option<gdk::Texture> {
-        let theme = if self.theme.get() == Theme::Light { "light" } else { "dark" };
-        let themed = format!("{path}?theme={theme}");
-        if let Some(t) = self.icons.borrow().get(&themed) {
-            return t.clone();
-        }
         // One put in the cache by hand (the snapshots).
-        if let Some(Some(t)) = self.icons.borrow().get(path) {
+        if let Some(Cached::Ready(t)) = self.icons.borrow().get(path) {
             return Some(t.clone());
         }
-        let path = themed.as_str();
-        self.icons.borrow_mut().insert(path.into(), None);
+        let theme = if self.theme.get() == Theme::Light { "light" } else { "dark" };
+        let themed = format!("{path}?theme={theme}");
         let w = self.wadd.clone();
-        let h = self.clone();
-        let p = path.to_string();
-        // Fetched and shrunk off the GTK loop: icons are often whole wallpapers.
-        background(
-            move || w.bytes(&p).and_then(|b| thumb::thumbnail(&b, 128)).map(|b| (p, b)),
-            move |r| {
-                if let Some((p, bytes)) = r
-                    && let Ok(t) = gdk::Texture::from_bytes(&glib::Bytes::from(&bytes))
-                {
-                    h.icons.borrow_mut().insert(p, Some(t));
-                    if h.switcher.is_visible() {
-                        h.show_switcher();
-                    }
-                }
-            },
-        );
-        None
+        let p = themed.clone();
+        self.fetched(themed, move || w.bytes(&p).and_then(|b| thumb::cover_rgba(&b, 128, 128)))
+    }
+
+    /// Fetches what the switcher will show for each wadspace, so it opens
+    /// with its pictures.
+    fn prefetch(self: &Rc<Self>) {
+        let spaces = self.state.borrow().workspaces.clone();
+        for s in spaces.iter().filter(|s| !s.is_app() && s.enabled) {
+            self.wallpaper(&format!("/v1/workspaces/{}/wallpaper", s.id));
+            for d in &s.desktop {
+                self.desktop_icon(&d.icon);
+            }
+        }
     }
 
     // -------------------------------------------------------------- events
@@ -1937,26 +2055,12 @@ impl Hud {
                 if let Ok(list) = serde_json::from_value::<Vec<model::Space>>(data) {
                     self.state.borrow_mut().workspaces = list;
                     self.follow_view();
+                    self.prefetch();
                 }
             }
             Incoming::Event(name, data) if name == "carousel" => {
-                let was_open = self.carousel.borrow().open;
                 self.carousel.replace(serde_json::from_value(data).unwrap_or_default());
-                let on_screen = self.state.borrow().view.clone();
-                // Opening over a wadspace: what it looks like now is its preview,
-                // taken before the switcher covers it.
-                match on_screen {
-                    Some(view) if !was_open && self.carousel.borrow().open && view != "home" => {
-                        let h = self.clone();
-                        background(screenshot, move |png| {
-                            if let Some(t) = png.and_then(|b| gdk::Texture::from_bytes(&glib::Bytes::from(&b)).ok()) {
-                                h.shots.borrow_mut().insert(view, t);
-                            }
-                            h.show_switcher();
-                        });
-                    }
-                    _ => self.show_switcher(),
-                }
+                self.show_switcher();
             }
             // The old way the bar opened WadSpaces Client's menus: only power
             // and Wi-Fi asked, and both are here now.
@@ -2042,14 +2146,14 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
         && let Some(t) =
             thumb::thumbnail(&bytes, 128).and_then(|b| gdk::Texture::from_bytes(&glib::Bytes::from(&b)).ok())
     {
-        hud.icons.borrow_mut().insert("/v1/workspaces/writing/icon".into(), Some(t));
+        hud.icons.borrow_mut().insert("/v1/workspaces/writing/icon".into(), Cached::Ready(t));
     }
     // WADSPACES_HUD_SNAPSHOT_WALLPAPER: a picture to show as Writing's desktop (its preview).
     if let Some(bytes) = std::env::var_os("WADSPACES_HUD_SNAPSHOT_WALLPAPER").and_then(|p| std::fs::read(p).ok())
         && let Some(t) = thumb::cover(&bytes, PREVIEW_W as u32 * 2, PREVIEW_H as u32 * 2)
             .and_then(|b| gdk::Texture::from_bytes(&glib::Bytes::from(&b)).ok())
     {
-        hud.icons.borrow_mut().insert("desktop /v1/workspaces/writing/wallpaper".into(), Some(t));
+        hud.icons.borrow_mut().insert("desktop /v1/workspaces/writing/wallpaper".into(), Cached::Ready(t));
     }
     hud.state.replace(State {
         session: None,
@@ -2124,6 +2228,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
                 running: true,
                 kind: "home".into(),
                 number: None,
+                desktop: vec![],
             },
             model::CarouselItem {
                 view: "workspace:writing".into(),
@@ -2133,6 +2238,10 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
                 running: true,
                 kind: "space".into(),
                 number: Some(1),
+                desktop: ["VS Code", "WadBrowser", "Obsidian", "GitHub", "Docs", "Notes"]
+                    .iter()
+                    .map(|l| model::DesktopIcon { label: l.to_string(), icon: format!("/apps/{l}.png") })
+                    .collect(),
             },
             model::CarouselItem {
                 view: "workspace:iq-dev".into(),
@@ -2142,6 +2251,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
                 running: true,
                 kind: "space".into(),
                 number: Some(2),
+                desktop: vec![],
             },
             model::CarouselItem {
                 view: "workspace:terminal".into(),
@@ -2151,6 +2261,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
                 running: true,
                 kind: "app".into(),
                 number: Some(3),
+                desktop: vec![],
             },
         ],
     });
@@ -2196,6 +2307,7 @@ fn snapshot(hud: Rc<Hud>, app: gtk::Application, dir: std::path::PathBuf) {
         name: name.into(),
         kind: kind.map(String::from),
         enabled: true,
+        desktop: vec![],
     })
     .collect();
     hud.follow_view();

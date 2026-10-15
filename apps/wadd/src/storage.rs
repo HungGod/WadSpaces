@@ -7,95 +7,161 @@
 //! other image (older bases, images from before layers, build steps), what
 //! older images share, running containers' changes, volumes no wadspace has,
 //! logs, wadd's own files, people's files, and what's left over. Counting
-//! files takes a moment, so a report is kept for a minute.
+//! files takes a while, so wadd keeps the last report and hands it out at
+//! once: it measures again in the background when that's over a minute old
+//! (or after something was deleted), one measure at a time, and says so
+//! with a `storage` event when the new one is ready.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 
 use serde_json::Value;
-use wad_proto::v1::{CopyBytes, DiagDisk, HomeBytes, ImageBytes, LayerBytes, OtherItem, OtherPart, Storage as Report};
+use wad_proto::v1::{
+    CopyBytes, DiagDisk, Event, HomeBytes, ImageBytes, LayerBytes, OtherItem, OtherPart, Storage as Report,
+};
 
-use crate::backend::Backend;
+use crate::backend::{Backend, ImageInfo};
+use crate::events::Bus;
 use crate::registry::Registry;
 
 const FRESH: Duration = Duration::from_secs(60);
+/// The first measure, once wadd has settled after starting.
+const FIRST: Duration = Duration::from_secs(20);
 
-pub struct Storage {
+/// Cheap to clone: one report and one measure shared by all.
+#[derive(Clone)]
+pub struct Storage(Arc<Inner>);
+
+struct Inner {
     state: PathBuf,
     copies: PathBuf,
     /// The machine's own wadd (not one on a laptop): the system, the logs
     /// and people's files are its to count.
     machine: bool,
-    last: tokio::sync::Mutex<Option<(Instant, Report)>>,
+    backend: Arc<dyn Backend>,
+    registry: Arc<Registry>,
+    bus: Bus,
+    last: Mutex<Option<(Instant, Report)>>,
+    /// Something changed on the disk since the last report.
+    stale: AtomicBool,
+    /// Held while measuring: one at a time.
+    measuring: tokio::sync::Mutex<()>,
+    /// The system's size (it only changes with an update), by the versions
+    /// deployed when it was counted.
+    system: Mutex<Option<(Vec<String>, u64)>>,
 }
 
 /// The copy a stick update leaves (host/build.sh, import-updates).
 pub const UPDATE_COPY: &str = "incoming";
 
 impl Storage {
-    pub fn new(state_dir: &Path) -> Self {
-        Self::with(state_dir, false)
-    }
-
     /// `machine`: the machine's own wadd, which counts the whole disk.
-    pub fn with(state_dir: &Path, machine: bool) -> Self {
-        Self { state: state_dir.into(), copies: state_dir.join("copies"), machine, last: tokio::sync::Mutex::default() }
+    pub fn new(state_dir: &Path, machine: bool, backend: Arc<dyn Backend>, registry: Arc<Registry>, bus: Bus) -> Self {
+        Self(Arc::new(Inner {
+            state: state_dir.into(),
+            copies: state_dir.join("copies"),
+            machine,
+            backend,
+            registry,
+            bus,
+            last: Mutex::default(),
+            stale: AtomicBool::new(false),
+            measuring: tokio::sync::Mutex::default(),
+            system: Mutex::default(),
+        }))
     }
 
-    /// The report: the last one if it's under a minute old (`fresh` measures again).
-    pub async fn report(&self, backend: &Arc<dyn Backend>, registry: &Registry, fresh: bool) -> Report {
-        let mut last = self.last.lock().await;
-        if !fresh
-            && let Some((at, r)) = last.as_ref()
-            && at.elapsed() < FRESH
-        {
-            return r.clone();
+    /// The first report, measured a little after wadd starts (so the Storage
+    /// tab opens on one).
+    pub fn start(&self) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(FIRST).await;
+            me.refresh();
+        });
+    }
+
+    /// The last report, at once (`measuring` when a newer one is on its way);
+    /// measured now when there's none yet, or `fresh`.
+    pub async fn report(&self, fresh: bool) -> Report {
+        if !fresh && let Some((at, r)) = self.0.last.lock().unwrap().clone() {
+            let old = at.elapsed() >= FRESH || self.0.stale.load(Ordering::Relaxed);
+            if old {
+                self.refresh();
+            }
+            return Report { measuring: old || self.0.measuring.try_lock().is_err(), ..r };
         }
-        let r = self.measure(backend, registry).await;
-        *last = Some((Instant::now(), r.clone()));
+        self.measure_now().await
+    }
+
+    /// What changed on the disk (images removed): measured again, in the background.
+    pub fn forget(&self) {
+        self.0.stale.store(true, Ordering::Relaxed);
+        self.refresh();
+    }
+
+    /// Measures in the background, unless that's happening already.
+    fn refresh(&self) {
+        if self.0.measuring.try_lock().is_err() {
+            return;
+        }
+        let me = self.clone();
+        tokio::spawn(async move {
+            me.measure_now().await;
+        });
+    }
+
+    /// A new report: this one, or the one a measure under way gives.
+    async fn measure_now(&self) -> Report {
+        let asked = Instant::now();
+        let _one = self.0.measuring.lock().await;
+        if let Some((at, r)) = self.0.last.lock().unwrap().clone()
+            && at > asked
+        {
+            return r;
+        }
+        self.0.stale.store(false, Ordering::Relaxed);
+        let r = self.measure().await;
+        *self.0.last.lock().unwrap() = Some((Instant::now(), r.clone()));
+        self.0.bus.publish(Event::Storage { measured_at: r.measured_at });
         r
     }
 
-    /// What changed on the disk (images removed): measured again next time.
-    pub async fn forget(&self) {
-        *self.last.lock().await = None;
-    }
-
-    async fn measure(&self, backend: &Arc<dyn Backend>, registry: &Registry) -> Report {
-        let base_ref = wad_core::spec::DEFAULT_BASE_IMAGE;
-        let base = match backend.image_info(base_ref).await {
-            Ok(Some(i)) => Some(ImageBytes { image_ref: base_ref.into(), id: i.id, bytes: i.size }),
-            _ => None,
+    async fn measure(&self) -> Report {
+        let backend = &self.0.backend;
+        // Every image's size from one list; podman is asked about the rest.
+        let all = backend.images_all().await.unwrap_or_default();
+        let sizes = Sizes::of(&all);
+        let size_of = async |r: &str| match sizes.get(r) {
+            Some(i) => Some(i.clone()),
+            None => backend.image_info(r).await.ok().flatten().map(|i| (i.id, i.size)),
         };
+        let base_ref = wad_core::spec::DEFAULT_BASE_IMAGE;
+        let base = size_of(base_ref).await.map(|(id, bytes)| ImageBytes { image_ref: base_ref.into(), id, bytes });
         let mut layers = Vec::new();
         for row in
             crate::images::list(backend.as_ref()).await.unwrap_or_default().into_iter().filter(|r| r.layer != "base")
         {
-            let Ok(Some(me)) = backend.image_info(&row.image_ref).await else { continue };
+            let Some((id, bytes)) = size_of(&row.image_ref).await else { continue };
             // What it adds to the image it's built on (that one as it was then).
-            let under = match backend.image_info(&row.from).await {
-                Ok(Some(u)) => u.size,
-                _ => 0,
-            };
+            let under = size_of(&row.from).await.map(|(_, b)| b).unwrap_or(0);
             layers.push(LayerBytes {
                 layer: row.layer,
-                id: me.id,
+                id,
                 from: row.from,
-                bytes: me.size,
-                own_bytes: me.size.saturating_sub(under),
+                bytes,
+                own_bytes: bytes.saturating_sub(under),
             });
         }
         let mut leftovers = Vec::new();
         for (layer, i) in crate::images::leftovers(backend.as_ref()).await.unwrap_or_default() {
             let from = i.labels.get(crate::builds::FROM_LABEL).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let under = match backend.image_info(&from).await {
-                Ok(Some(u)) => u.size,
-                _ => 0,
-            };
+            let under = size_of(&from).await.map(|(_, b)| b).unwrap_or(0);
             leftovers.push(LayerBytes {
                 layer,
                 id: i.id,
@@ -105,37 +171,80 @@ impl Storage {
             });
         }
         let df = backend.system_df().await.ok();
-        let sizes: Vec<(String, u64)> =
+        let vols: Vec<(String, u64)> =
             df.as_ref().map(|d| d.volumes.iter().map(|v| (v.name.clone(), v.size)).collect()).unwrap_or_default();
-        let homes: Vec<HomeBytes> = registry
+        let homes: Vec<HomeBytes> = self
+            .0
+            .registry
             .workspaces()
             .iter()
             .filter_map(|w| {
                 let volume = format!("wad-{}-config", w.id);
-                let (_, bytes) = sizes.iter().find(|(name, _)| *name == volume)?;
+                let (_, bytes) = vols.iter().find(|(name, _)| *name == volume)?;
                 Some(HomeBytes { workspace_id: w.id.clone(), volume, bytes: *bytes })
             })
             .collect();
-        let copies: Vec<CopyBytes> = std::fs::read_dir(&self.copies)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| Some(CopyBytes { id: e.file_name().into_string().ok()?, bytes: dir_bytes(&e.path()) }))
-            .collect();
         let disk = disk_of(backend).await;
-        let all = backend.images_all().await.unwrap_or_default();
-        let mut r = Report { disk, base, layers, leftovers, homes, copies, other: vec![], measured_at: now() };
-        r.other = self.other(&r, df.as_ref(), &all).await;
+        let folders = self.folders().await;
+        let mut r = Report {
+            disk,
+            base,
+            layers,
+            leftovers,
+            homes,
+            copies: folders.copies.clone(),
+            other: vec![],
+            measured_at: now(),
+            measuring: false,
+        };
+        r.other = self.other(&r, df.as_ref(), &all, &folders);
         r
     }
 
+    /// The folders, counted on a thread of their own at idle priority (some
+    /// hold many files; the machine's work comes first).
+    async fn folders(&self) -> Folders {
+        let (state, copies, machine) = (self.0.state.clone(), self.0.copies.clone(), self.0.machine);
+        // The system only changes with an update: counted again when the
+        // versions deployed change.
+        let deployed = if machine { deployments() } else { vec![] };
+        let known = self.0.system.lock().unwrap().clone().filter(|(d, _)| *d == deployed).map(|(_, b)| b);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            idle_priority();
+            let copies: Vec<CopyBytes> = std::fs::read_dir(&copies)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| Some(CopyBytes { id: e.file_name().into_string().ok()?, bytes: dir_bytes(&e.path()) }))
+                .collect();
+            let update = disk_bytes(&state.join(UPDATE_COPY), &mut HashSet::new());
+            let mut seen = HashSet::new();
+            let wadd = disk_bytes(&state, &mut seen)
+                .saturating_sub(update)
+                .saturating_sub(disk_bytes(&state.join("copies"), &mut HashSet::new()));
+            let at = |p: &str| if machine { disk_bytes(Path::new(p), &mut HashSet::new()) } else { 0 };
+            let system = known.unwrap_or_else(|| at("/sysroot/ostree"));
+            let _ = tx.send(Folders {
+                copies,
+                system,
+                update,
+                wadd,
+                logs: at("/var/log"),
+                people: at("/var/home"),
+                versions: 0,
+            });
+        });
+        let mut f = rx.await.unwrap_or_default();
+        f.versions = deployed.len();
+        if machine {
+            *self.0.system.lock().unwrap() = Some((deployed, f.system));
+        }
+        f
+    }
+
     /// Everything else, part by part.
-    async fn other(
-        &self,
-        r: &Report,
-        df: Option<&crate::backend::Df>,
-        all: &[crate::backend::ImageInfo],
-    ) -> Vec<OtherPart> {
+    fn other(&self, r: &Report, df: Option<&crate::backend::Df>, all: &[ImageInfo], f: &Folders) -> Vec<OtherPart> {
         let mut parts = vec![];
         let part = |key: &str, label: &str, detail: &str, bytes: u64| OtherPart {
             key: key.into(),
@@ -146,38 +255,13 @@ impl Storage {
             deletable: false,
         };
         let short = |id: &str| id.trim_start_matches("sha256:").to_string();
-        // Folders, counted off the async threads (some hold many files).
-        let state = self.state.clone();
-        let machine = self.machine;
-        let (system, update, wadd, logs, people) = tokio::task::spawn_blocking(move || {
-            let update = disk_bytes(&state.join(UPDATE_COPY), &mut HashSet::new());
-            let mut seen = HashSet::new();
-            let wadd = disk_bytes(&state, &mut seen)
-                .saturating_sub(update)
-                .saturating_sub(disk_bytes(&state.join("copies"), &mut HashSet::new()));
-            let at = |p: &str| if machine { disk_bytes(Path::new(p), &mut HashSet::new()) } else { 0 };
-            (at("/sysroot/ostree"), update, wadd, at("/var/log"), at("/var/home"))
-        })
-        .await
-        .unwrap_or_default();
+        let (system, update, wadd, logs, people) = (f.system, f.update, f.wadd, f.logs, f.people);
         if system > 0 {
-            let versions = std::fs::read_dir("/sysroot/ostree/deploy")
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|d| {
-                    std::fs::read_dir(d.path().join("deploy"))
-                        .into_iter()
-                        .flatten()
-                        .flatten()
-                        .filter(|e| e.path().is_dir())
-                        .count()
-                })
-                .sum::<usize>();
+            let versions = f.versions;
             parts.push(part("system", "The WadSpaces system", &format!("The system itself: {versions} version{} kept, this one and the one before it (to go back to). It stays.", if versions == 1 { "" } else { "s" }), system));
         }
         if update > 0 {
-            let waiting = self.state.join(UPDATE_COPY).join("pending").exists();
+            let waiting = self.0.state.join(UPDATE_COPY).join("pending").exists();
             parts.push(OtherPart {
                 deletable: !waiting,
                 ..part(
@@ -285,7 +369,7 @@ impl Storage {
             + r.copies.iter().map(|c| c.bytes).sum::<u64>()
             + parts.iter().filter(|p| !matches!(p.key.as_str(), "images" | "shared")).map(|p| p.bytes).sum::<u64>();
         let rest = used.saturating_sub(listed);
-        if self.machine && rest > 0 {
+        if self.0.machine && rest > 0 {
             parts.push(part(
                 "unaccounted",
                 "Not listed above",
@@ -334,6 +418,73 @@ fn classify(
         return (i.name.clone(), "An image podman fetched, to build or run something.".into(), true);
     }
     ("A build step".into(), "Left by a build; nothing names it.".into(), true)
+}
+
+/// What the folder walk found.
+#[derive(Default)]
+struct Folders {
+    copies: Vec<CopyBytes>,
+    system: u64,
+    update: u64,
+    wadd: u64,
+    logs: u64,
+    people: u64,
+    /// The system's versions deployed.
+    versions: usize,
+}
+
+/// Images' ids and sizes, by tag and by id.
+struct Sizes(HashMap<String, (String, u64)>);
+
+impl Sizes {
+    fn of(all: &[ImageInfo]) -> Self {
+        let mut m = HashMap::new();
+        for i in all {
+            let v = (i.id.clone(), i.size);
+            m.insert(i.id.trim_start_matches("sha256:").to_string(), v.clone());
+            for t in &i.tags {
+                m.insert(t.clone(), v.clone());
+            }
+        }
+        Self(m)
+    }
+
+    fn get(&self, r: &str) -> Option<&(String, u64)> {
+        if r.is_empty() {
+            return None;
+        }
+        self.0.get(r).or_else(|| self.0.get(r.trim_start_matches("sha256:")))
+    }
+}
+
+/// The system's versions deployed (ostree), by name.
+fn deployments() -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir("/sysroot/ostree/deploy")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .flat_map(|d| {
+            std::fs::read_dir(d.path().join("deploy"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().into_string().ok())
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// This thread reads the disk only when nothing else does, and yields the CPU.
+fn idle_priority() {
+    const IOPRIO_WHO_PROCESS: libc::c_int = 1;
+    const IOPRIO_CLASS_IDLE: libc::c_int = 3;
+    // SAFETY: plain syscalls on this thread (tid 0 / who 0: the caller).
+    unsafe {
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0, IOPRIO_CLASS_IDLE << 13);
+        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
+    }
 }
 
 /// The disk podman keeps its images on (else /).

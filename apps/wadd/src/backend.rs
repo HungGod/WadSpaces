@@ -459,6 +459,7 @@ mod tests {
             projects: vec![],
             signins: vec![],
             ephemeral: false,
+            desktop: vec![],
         };
         let session = wad_sway::Session {
             uid: 1000,

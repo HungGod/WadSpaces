@@ -324,6 +324,7 @@ impl View {
                 running: true,
                 kind: "home".into(),
                 number: None,
+                desktop: vec![],
             });
         }
         for (n, ws) in self.running_items().into_iter().enumerate() {
@@ -335,6 +336,7 @@ impl View {
                 running: true,
                 kind: if ws.kind == Kind::App { "app" } else { "space" }.into(),
                 number: (n < 9).then_some(n as u8 + 1),
+                desktop: ws.desktop.clone(),
             });
         }
         items

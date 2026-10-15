@@ -30,6 +30,7 @@ struct Env {
     fake: Fake,
     reg: Arc<Registry>,
     builds: Arc<Builds>,
+    bus: Bus,
 }
 
 async fn env() -> Env {
@@ -66,10 +67,10 @@ async fn env_with(icons: Option<Arc<Icons>>) -> Env {
     );
     reg.load(vec![]).await.unwrap();
     let builds = match icons {
-        Some(i) => Builds::with_icons(Arc::new(fake.clone()), bus, &state, 8, i),
-        None => Builds::new(Arc::new(fake.clone()), bus, &state, 8),
+        Some(i) => Builds::with_icons(Arc::new(fake.clone()), bus.clone(), &state, 8, i),
+        None => Builds::new(Arc::new(fake.clone()), bus.clone(), &state, 8),
     };
-    Env { _d: d, state, fake, reg, builds }
+    Env { _d: d, state, fake, reg, builds, bus }
 }
 
 fn dev() -> Value {
@@ -508,8 +509,12 @@ async fn the_disk_report_counts_each_layers_own_share_and_each_home() {
     std::fs::create_dir_all(e.state.join("copies/c1/files/a")).unwrap();
     std::fs::write(e.state.join("copies/c1/files/a/f"), vec![0u8; 42]).unwrap();
 
+    // Its desktop, kept for the switcher: the template's apps, then the web apps.
+    let desktop: Vec<String> = e.reg.workspace("academy").unwrap().desktop.iter().map(|d| d.label.clone()).collect();
+    assert_eq!(desktop, ["WadBrowser Focus", "VS Code", "GitHub"]);
+
     let backend: Arc<dyn wadd::backend::Backend> = Arc::new(e.fake.clone());
-    let r = wadd::storage::Storage::new(&e.state).report(&backend, &e.reg, true).await;
+    let r = wadd::storage::Storage::new(&e.state, false, backend, e.reg.clone(), e.bus.clone()).report(true).await;
     assert_eq!(r.base.as_ref().map(|b| b.bytes), Some(3_000));
     let own: Vec<(String, u64)> = r.layers.iter().map(|l| (l.layer.clone(), l.own_bytes)).collect();
     // Each layer: what it adds to the one under it.
@@ -519,6 +524,31 @@ async fn the_disk_report_counts_each_layers_own_share_and_each_home() {
     // And the base in the images list, so a template on an older one shows an update.
     let rows = images::list(&e.fake).await.unwrap();
     assert!(rows.iter().any(|r| r.layer == "base" && r.image_ref == BASE), "{rows:?}");
+}
+
+#[tokio::test]
+async fn storage_hands_out_its_last_count_and_counts_again_behind() {
+    let e = env().await;
+    let backend: Arc<dyn wadd::backend::Backend> = Arc::new(e.fake.clone());
+    let s = wadd::storage::Storage::new(&e.state, false, backend, e.reg.clone(), e.bus.clone());
+    let (_, mut rx) = e.bus.subscribe();
+    let counted = async |rx: &mut tokio::sync::broadcast::Receiver<wad_proto::v1::Event>| loop {
+        if let wad_proto::v1::Event::Storage { measured_at } = rx.recv().await.unwrap() {
+            return measured_at;
+        }
+    };
+    // None yet: counted now.
+    let first = s.report(false).await;
+    assert!(!first.measuring);
+    assert_eq!(counted(&mut rx).await, first.measured_at);
+    // Something went: the last count at once, a new one on its way.
+    s.forget();
+    let old = s.report(false).await;
+    assert_eq!((old.measured_at, old.measuring), (first.measured_at, true));
+    let next = tokio::time::timeout(Duration::from_secs(5), counted(&mut rx)).await.unwrap();
+    assert!(next > first.measured_at);
+    let now = s.report(false).await;
+    assert_eq!((now.measured_at, now.measuring), (next, false));
 }
 
 #[tokio::test]
@@ -618,7 +648,7 @@ async fn everything_else_on_the_disk_is_named_and_what_can_go_goes() {
     std::fs::write(e.state.join("incoming/blobs/a"), vec![0u8; 8192]).unwrap();
 
     let backend: Arc<dyn wadd::backend::Backend> = Arc::new(e.fake.clone());
-    let r = wadd::storage::Storage::new(&e.state).report(&backend, &e.reg, true).await;
+    let r = wadd::storage::Storage::new(&e.state, false, backend, e.reg.clone(), e.bus.clone()).report(true).await;
     let part = |k: &str| r.other.iter().find(|p| p.key == k).unwrap_or_else(|| panic!("no {k} in {:?}", r.other));
     let images = part("images");
     assert_eq!(images.bytes, 940);

@@ -47,6 +47,9 @@ struct Mirror {
     cloud: Value,
     network: Value,
     keyboards: usize,
+    /// The last snapshot sent: one the same as it isn't sent again (each
+    /// heartbeat is a `cloud` event that changes nothing the UI shows).
+    sent: Option<Value>,
 }
 
 fn now() -> f64 {
@@ -473,13 +476,18 @@ impl RsWadd {
     pub fn translate(&self, event: &str, data: &Value) -> Vec<(String, Value)> {
         let mut m = self.mirror.lock().unwrap();
         if m.take(event, data) {
-            return vec![("state".into(), m.snapshot())];
+            let snap = m.snapshot();
+            if m.sent.as_ref() == Some(&snap) {
+                return vec![];
+            }
+            m.sent = Some(snap.clone());
+            return vec![("state".into(), snap)];
         }
         drop(m);
         match event {
             "build" => vec![("build".into(), flatten(build_py(s(data, "build")), data))],
             "launch" => vec![("launch".into(), flatten(launch_py(s(data, "launch")), data))],
-            "projects" | "signins" | "notice" => vec![(event.into(), data.clone())],
+            "projects" | "signins" | "notice" | "storage" => vec![(event.into(), data.clone())],
             _ => vec![],
         }
     }
@@ -488,7 +496,9 @@ impl RsWadd {
     /// events, a snapshot first.
     pub async fn stream_once(&self, mut emit: impl FnMut(String, Value)) -> Result<(), String> {
         self.prime().await;
-        emit("state".into(), self.snapshot());
+        let snap = self.snapshot();
+        self.mirror.lock().unwrap().sent = Some(snap.clone());
+        emit("state".into(), snap);
         let mut res = self
             .http
             .get("http://wadd/v1/events")

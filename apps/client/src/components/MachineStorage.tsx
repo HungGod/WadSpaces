@@ -17,6 +17,7 @@ import { backend } from "@/data";
 import { wadspaceName } from "@/data/layers";
 import { chainOf, type LayerKey, type Wadspace } from "@core/layers";
 import { alive, useApp } from "@/lib/store";
+import { useWaddEvent } from "@/components/machine/useWadd";
 import type { Machine } from "@/lib/types";
 import { formatBytes, type Freed, type Storage } from "@/lib/wadd";
 import { Button, IconButton, Modal } from "./ui";
@@ -62,7 +63,7 @@ const MIN_COL_W = NODE_W + 28;
 const ROW_H = 62;
 const NODE_H = 50;
 
-/** The storage card: the disk bar, then the tree. Refreshed every minute (wadd measures at most that often). */
+/** The storage card: the disk bar, then the tree. wadd hands out its last count at once and counts again in the background; its `storage` event says when a new one is ready. */
 export function MachineStorage({ m }: { m: Machine }) {
   const [s, setS] = useState<Storage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,11 +80,8 @@ export function MachineStorage({ m }: { m: Machine }) {
       setBusy(false);
     }
   }, []);
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => void load(), 60_000);
-    return () => clearInterval(t);
-  }, [load]);
+  useEffect(() => void load(), [load]);
+  useWaddEvent(useCallback((event: string) => event === "storage" && void load(), [load]));
 
   // The tree's nodes, and what's picked in it.
   const nodes = useStorageNodes(s, m);
@@ -114,7 +112,7 @@ export function MachineStorage({ m }: { m: Machine }) {
           </p>
         </div>
         <IconButton label="Measure again" onClick={() => void load(true)} disabled={busy}>
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          {busy || s?.measuring ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
         </IconButton>
       </div>
       {error ? (

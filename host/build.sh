@@ -158,6 +158,20 @@ stage_wadbrowser() {
     install -m 755 "${ROOT}/target/wadbrowser/wadbrowser" "${out}/wadbrowser"
 }
 
+# The pictures wadspaces' desktops show (wad-core's catalog icons, the brand,
+# the folder), from the client's public folder: just those, not the shots.
+stage_assets() {
+    local out="${ROOT}/.build/assets" pub="${ROOT}/apps/client/public"
+    rm -rf "${out}" && mkdir -p "${out}/apps" "${out}/brand"
+    local f app
+    for f in "${pub}"/apps/*/icon.*; do
+        app="$(basename "$(dirname "${f}")")"
+        mkdir -p "${out}/apps/${app}" && cp "${f}" "${out}/apps/${app}/"
+    done
+    cp "${pub}"/brand/*-icon-*.svg "${out}/brand/"
+    cp "${pub}/folder.svg" "${out}/"
+}
+
 # admin's password hash or SSH key from bib-config.toml ("password" / "key").
 bib_admin() {
     python3 - "${BIB_CONFIG}" "$1" <<'EOF'
@@ -348,6 +362,7 @@ stage_client
 stage_wadd
 stage_hud
 stage_wadbrowser
+stage_assets
 stage_secrets
 echo ">> building ${IMAGE}"
 podman build -f "${ROOT}/host/Containerfile" -t "${IMAGE}" "${ROOT}"

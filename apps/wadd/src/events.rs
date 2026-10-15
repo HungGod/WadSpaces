@@ -59,7 +59,8 @@ impl Bus {
                 | Event::Projects { .. }
                 | Event::SignIns { .. }
                 | Event::Launch(_)
-                | Event::Build(_) => {}
+                | Event::Build(_)
+                | Event::Storage { .. } => {}
             }
         }
         let _ = self.tx.send(e);
