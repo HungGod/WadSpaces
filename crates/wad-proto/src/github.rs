@@ -2,10 +2,9 @@
 //! token itself never appears in these types.
 
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 /// The GitHub account a token belongs to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubAccount {
     pub login: String,
@@ -15,7 +14,7 @@ pub struct GithubAccount {
 
 /// A GitHub repository, as WadSpaces Client lists them (and the account keeps at
 /// users/{uid}/github/repos for the online app).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Repo {
     /// owner/name
@@ -30,7 +29,7 @@ pub struct Repo {
 }
 
 /// GET /v1/github/repos
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Repos {
     pub login: String,
@@ -38,7 +37,7 @@ pub struct Repos {
 }
 
 /// GET /v1/github: is there a token here, and whose.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubStatus {
     pub token: bool,
@@ -48,7 +47,7 @@ pub struct GithubStatus {
 }
 
 /// POST /v1/github/repos: a new repo, and a project for it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewRepo {
     pub name: String,

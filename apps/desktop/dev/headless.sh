@@ -4,9 +4,8 @@
 # there is touched. wadd: WADD_SOCKET's, else none.
 #
 #   apps/desktop/dev/headless.sh snapshot [OUT_DIR]   every page, dark and light, to PNGs
-#   apps/desktop/dev/headless.sh measure [--tauri]    its memory (PSS of all its
-#                                                     processes) once it's settled;
-#                                                     --tauri: the Tauri client's too
+#   apps/desktop/dev/headless.sh measure              its memory (PSS of all its
+#                                                     processes) once it's settled
 #
 # The screen is 1280×800 at scale 1; WIDTH, HEIGHT (its pixels) and SCALE
 # change it (the Surface Book 2: WIDTH=3000 HEIGHT=2000 SCALE=2).
@@ -22,14 +21,12 @@ mkdir -p "${WORK}"
 case "${MODE}" in
     snapshot) (cd "${ROOT}" && cargo build -q -p wadspaces-desktop); BIN="${ROOT}/target/debug/wadspaces-desktop" ;;
     measure) (cd "${ROOT}" && cargo build -q --release -p wadspaces-desktop); BIN="${ROOT}/target/release/wadspaces-desktop" ;;
-    *) echo "usage: $0 snapshot [OUT_DIR] | measure [--tauri]" >&2; exit 2 ;;
+    *) echo "usage: $0 snapshot [OUT_DIR] | measure" >&2; exit 2 ;;
 esac
-TAURI=""
-[[ "${MODE}" == "measure" && "${2:-}" == "--tauri" ]] && TAURI="${ROOT}/target/release/client"
 
 # Inside its own D-Bus session, with no display of yours.
 env -u WAYLAND_DISPLAY -u DISPLAY WADD_SOCKET="${WADD_SOCKET:-/nonexistent/wadd.sock}" \
-    MODE="${MODE}" OUT="${OUT}" WORK="${WORK}" BIN="${BIN}" TAURI="${TAURI}" \
+    MODE="${MODE}" OUT="${OUT}" WORK="${WORK}" BIN="${BIN}" \
     dbus-run-session -- bash -c '
 set -u
 SOCK="wad-desktop-$$"
@@ -78,15 +75,8 @@ case "${MODE}" in
         "${BIN}" --kiosk > "${WORK}/app.log" 2>&1 &
         APP=$!
         sleep 6
-        echo "native:"; pss "${APP}"
+        pss "${APP}"
         kill "${APP}"; wait "${APP}" 2>/dev/null || true
-        if [[ -n "${TAURI}" ]]; then
-            "${TAURI}" --kiosk > "${WORK}/tauri.log" 2>&1 &
-            APP=$!
-            sleep 12
-            echo "tauri:"; pss "${APP}"
-            kill "${APP}"; wait "${APP}" 2>/dev/null || true
-        fi
         ;;
 esac
 '

@@ -2,10 +2,9 @@
 //! endpoints and events carry. More arrive with each milestone.
 
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 /// GET /v1/health
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Health {
     pub ok: bool,
@@ -13,7 +12,7 @@ pub struct Health {
 }
 
 /// How wadd runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Profile {
     /// A WadSpaces machine.
@@ -23,7 +22,7 @@ pub enum Profile {
 }
 
 /// GET /v1/machine
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineInfo {
     pub name: String,
@@ -38,7 +37,7 @@ pub struct MachineInfo {
 }
 
 /// A screen's logical size, and its scale.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Screen {
     pub width: u32,
@@ -47,7 +46,7 @@ pub struct Screen {
 }
 
 /// GET /v1/logs: one line of wadd's own log (redacted).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogLine {
     /// Unix milliseconds.
@@ -59,7 +58,7 @@ pub struct LogLine {
 
 /// GET /v1/events: server-sent events, named by `type`, with `data` as JSON.
 /// The stream starts with the current state of each kind.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum Event {
     Machine(MachineInfo),
@@ -130,7 +129,7 @@ impl Event {
 
 /// What the machine shows: WadSpaces Client (the app's own window, "home"), or a
 /// workspace.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "camelCase")]
 pub enum View {
     Home,
@@ -138,7 +137,7 @@ pub enum View {
 }
 
 /// GET /v1/view
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewState {
     pub view: View,
@@ -151,7 +150,7 @@ pub struct ViewState {
 
 /// The Super+Tab switcher: WadSpaces, then the spaces running, then what runs
 /// on the machine, each in the order it started (Super+N's order).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Carousel {
     pub open: bool,
@@ -160,7 +159,7 @@ pub struct Carousel {
     pub index: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CarouselItem {
     pub view: View,
@@ -185,7 +184,7 @@ pub struct CarouselItem {
 }
 
 /// POST /v1/session
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRequest {
     pub workspaces: Vec<String>,
@@ -198,7 +197,7 @@ pub struct SessionRequest {
 }
 
 /// GET /v1/keys: the keyboard proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeysStatus {
     pub enabled: bool,
@@ -209,7 +208,7 @@ pub struct KeysStatus {
 }
 
 /// How a workspace is shown on its machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Display {
     /// A lean image whose desktop is a window on the machine's own screen.
@@ -219,7 +218,7 @@ pub enum Display {
 }
 
 /// What runs a workspace.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {
     /// An image, run as a podman container (a quadlet).
@@ -238,7 +237,7 @@ impl Kind {
 
 /// How a project gets into a wadspace. Nothing is mounted: its files live
 /// inside the wadspace (its /config), at ~/Desktop/<mount>.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProjectKind {
     /// A GitHub repo the wadspace clones, then fast-forwards at each start
@@ -249,7 +248,7 @@ pub enum ProjectKind {
 }
 
 /// A drive a copy came from (a drive project from before copies).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DriveRef {
     pub uuid: String,
@@ -263,7 +262,7 @@ pub struct DriveRef {
 /// copies them here the first time the wadspace starts when it hasn't the
 /// copy yet (one made before copies were made ahead: a folder or drive
 /// project's).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyFrom {
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -274,7 +273,7 @@ pub struct CopyFrom {
 }
 
 /// A project in a workspace (from its design).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceProject {
     pub id: String,
@@ -297,14 +296,14 @@ pub struct WorkspaceProject {
 
 /// POST /v1/copies: files on this machine to copy into wadspaces. One
 /// folder's contents, or each path (files or folders) by its name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyRequest {
     pub paths: Vec<String>,
 }
 
 /// A copy made on this machine, ready for any wadspace here to take in.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyMade {
     pub id: String,
@@ -313,7 +312,7 @@ pub struct CopyMade {
 }
 
 /// GET /v1/workspaces: a workspace on this machine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     pub id: String,
@@ -359,7 +358,7 @@ pub struct Workspace {
 }
 
 /// One icon on a wadspace's desktop.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopIcon {
     pub label: String,
@@ -369,7 +368,7 @@ pub struct DesktopIcon {
 }
 
 /// A saved sign-in a workspace mounts, for one of its apps.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSignIn {
     /// The sign-in's id.
@@ -398,7 +397,7 @@ pub const SIGNIN_WEB: &str = "web";
 
 /// GET /v1/signins: a sign-in kept on this machine, mounted into each
 /// workspace that uses it, so signing in once covers all of them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignIn {
     pub id: String,
@@ -422,7 +421,7 @@ pub struct SignIn {
 }
 
 /// POST /v1/signins
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignInRequest {
     pub name: String,
@@ -433,7 +432,7 @@ pub struct SignInRequest {
 }
 
 /// PUT /v1/signins/{id}: what changes.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignInPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -443,7 +442,7 @@ pub struct SignInPatch {
 }
 
 /// Where a project's files are.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ProjectSource {
     /// A GitHub repository, cloned on each machine that opens it.
@@ -459,7 +458,7 @@ pub enum ProjectSource {
 }
 
 /// GET /v1/projects
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     pub id: String,
@@ -480,7 +479,7 @@ pub struct Project {
 }
 
 /// GET /v1/runs: when a workspace ran.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
     pub id: String,
@@ -495,7 +494,7 @@ pub struct Run {
     pub ended_at: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SessionMode {
     /// Locked to its workspaces until the time is up.
@@ -505,7 +504,7 @@ pub enum SessionMode {
 }
 
 /// GET /v1/session: the session in progress, if any.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub mode: SessionMode,
@@ -519,7 +518,7 @@ pub struct Session {
 }
 
 /// GET /v1/cloud: whether (and to whom) this machine is linked. No tokens.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudLink {
     pub linked: bool,
@@ -536,7 +535,7 @@ pub struct CloudLink {
 }
 
 /// Where a workspace is in its life.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
     /// Not running (or unknown); nothing in progress.
@@ -558,7 +557,7 @@ impl Phase {
 }
 
 /// A workspace's state on this machine (GET /v1/states, `workspaceState` events).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceState {
     pub id: String,
@@ -574,7 +573,7 @@ pub struct WorkspaceState {
 }
 
 /// GET /v1/browse: the folders in a folder (folder projects' picker).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Browse {
     /// None: the list is the roots themselves. Inside a drive, relative to
@@ -590,7 +589,7 @@ pub struct Browse {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Dir {
     pub name: String,
@@ -598,7 +597,7 @@ pub struct Dir {
 }
 
 /// A project folder's git state, from the refs already there (no fetch).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitStatus {
     /// None: a detached HEAD.
@@ -613,7 +612,7 @@ pub struct GitStatus {
 
 /// GET /v1/drives: a filesystem a drive project could be on (not the
 /// system's own disk).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Drive {
     pub uuid: String,
@@ -628,7 +627,7 @@ pub struct Drive {
 
 /// GET /v1/projects/{id}/status: where its folder is, whether a launch can
 /// have it, who mounts it, and its git state (no fetch, no mounting).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectStatus {
     pub exists_on_disk: bool,
@@ -643,7 +642,7 @@ pub struct ProjectStatus {
 }
 
 /// DELETE /v1/projects/{id}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDeleted {
     pub project: Project,
@@ -654,7 +653,7 @@ pub struct ProjectDeleted {
 /// POST /v1/launches: what to launch. A workspace, a throwaway run of one, a
 /// WadBrowser setup, or the terminal. A body with no
 /// `kind` is the older shape: a workspace ([`LaunchRequest`]).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LaunchItem {
     Workspace {
@@ -688,7 +687,7 @@ pub enum LaunchItem {
 }
 
 /// POST /v1/launches takes either shape.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum LaunchBody {
     Item(LaunchItem),
@@ -707,7 +706,7 @@ impl LaunchBody {
 }
 
 /// What a throwaway run has instead of its wadspace's own.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunOverrides {
     /// The wallpaper (none: the wadspace's own).
@@ -720,7 +719,7 @@ pub struct RunOverrides {
 
 /// PUT /v1/workspaces/{id}/wallpaper: a picture (WadSpaces draws gradients
 /// and colours to a PNG), mounted in at /run/wadspaces-extra/wallpaper.<ext>.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WallpaperUpload {
     /// "png" or "jpg".
@@ -731,7 +730,7 @@ pub struct WallpaperUpload {
 
 /// A WadBrowser setup: WadBrowser or Focus, and web apps, each in a window of
 /// its own with its saved sign-in (or none: nothing kept).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserSetup {
     pub name: String,
@@ -744,7 +743,7 @@ pub struct BrowserSetup {
     pub signins: Vec<WorkspaceSignIn>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupWebApp {
     pub id: String,
@@ -753,7 +752,7 @@ pub struct SetupWebApp {
 }
 
 /// The older POST /v1/launches body: open a workspace with these projects.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchRequest {
     pub workspace: String,
@@ -766,7 +765,7 @@ pub struct LaunchRequest {
     pub background: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LaunchStatus {
     Queued,
@@ -782,7 +781,7 @@ impl LaunchStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PartState {
     Waiting,
@@ -793,7 +792,7 @@ pub enum PartState {
 
 /// What a launch's first step is getting: the image, or a copy this
 /// machine hasn't made yet.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchPart {
     /// "image", or the project's id.
@@ -809,7 +808,7 @@ pub struct LaunchPart {
 
 /// A launch: step 1 checks the image and makes any copy the wadspace takes
 /// in that isn't here yet, step 2 brings it up.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Launch {
     pub id: String,
@@ -832,7 +831,7 @@ pub struct Launch {
 
 /// GET /v1/launches/{id}?since=n, and launch events: the job, and its log
 /// from line `from`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchLog {
     pub launch: Launch,
@@ -840,7 +839,7 @@ pub struct LaunchLog {
     pub lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BuildStatus {
     Queued,
@@ -858,9 +857,9 @@ impl BuildStatus {
 
 /// POST /v1/images/build: build a layer's image here: a template's (on the
 /// templates it builds on), or an Extensions layer's (on its template). What
-/// it's built on is built first when it's missing or out of date. Not in
-/// the TypeScript bindings: the documents are the UI's own
-/// (src/core/layers.ts), which wadd reads with wad-core.
+/// it's built on is built first when it's missing or out of date. The
+/// documents are the account's (wad-core's layers), which wadd reads with
+/// wad-core.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LayerBuildRequest {
@@ -878,7 +877,7 @@ pub struct LayerBuildRequest {
 }
 
 /// GET /v1/images: a layer's image here, from its labels.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageRow {
     /// "template:<id>" or "custom:<id>".
@@ -898,7 +897,7 @@ pub struct ImageRow {
 }
 
 /// Something in the design the build leaves out, and why.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Skipped {
     pub label: String,
@@ -906,7 +905,7 @@ pub struct Skipped {
 }
 
 /// A build: the design's image, made here, then added as a workspace.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Build {
     pub id: String,
@@ -936,7 +935,7 @@ pub struct Build {
 
 /// GET /v1/builds/{id}?since=n, and build events: the job, and its log from
 /// line `from`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildLog {
     pub build: Build,
@@ -945,7 +944,7 @@ pub struct BuildLog {
 }
 
 /// Where a secret on the machine came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SecretOrigin {
     /// The owner's account (synced).
@@ -957,7 +956,7 @@ pub enum SecretOrigin {
 }
 
 /// GET /v1/secrets: the names (never the values).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretInfo {
     pub name: String,
@@ -965,7 +964,7 @@ pub struct SecretInfo {
 }
 
 /// What a sync of the account's secrets did.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretsSynced {
     pub added: Vec<String>,
@@ -975,7 +974,7 @@ pub struct SecretsSynced {
 }
 
 /// GET /v1/network
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkStatus {
     /// NetworkManager answers.
@@ -992,7 +991,7 @@ pub struct NetworkStatus {
 }
 
 /// GET /v1/network/wifi: a network in range.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiNetwork {
     pub ssid: String,
@@ -1008,7 +1007,7 @@ pub struct WifiNetwork {
 }
 
 /// POST /v1/network/wifi/connect
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiJoin {
     pub ssid: String,
@@ -1017,7 +1016,7 @@ pub struct WifiJoin {
     pub password: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PowerAction {
     Poweroff,
@@ -1025,14 +1024,14 @@ pub enum PowerAction {
 }
 
 /// POST /v1/power
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PowerRequest {
     pub action: PowerAction,
 }
 
 /// GET and PUT /v1/screen/brightness: the screen's backlight.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Brightness {
     /// False: no backlight wadd can set (an external monitor, a VM).
@@ -1042,14 +1041,14 @@ pub struct Brightness {
 }
 
 /// PUT /v1/screen/brightness
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrightnessRequest {
     pub percent: u8,
 }
 
 /// GET /v1/metrics: how busy the machine is.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Metrics {
     /// Percent busy since the last look.
@@ -1067,7 +1066,7 @@ pub struct Metrics {
 }
 
 /// PUT /v1/workspaces/{id}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSaved {
     pub workspace: Workspace,
@@ -1076,7 +1075,7 @@ pub struct WorkspaceSaved {
 }
 
 /// GET /v1/diagnostics: enough to see what's wrong without a shell. Redacted.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostics {
     pub wadd: DiagWadd,
@@ -1093,7 +1092,7 @@ pub struct Diagnostics {
     pub recent_problems: Vec<LogLine>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagWadd {
     pub version: String,
@@ -1102,7 +1101,7 @@ pub struct DiagWadd {
     pub profile: Profile,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagPodman {
     pub connected: bool,
@@ -1113,7 +1112,7 @@ pub struct DiagPodman {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagDisk {
     pub path: String,
@@ -1123,7 +1122,7 @@ pub struct DiagDisk {
 
 /// GET /v1/storage: what WadSpaces takes on this machine's disk, measured
 /// at most once a minute (a wadspace's files take a while to count).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Storage {
     /// The disk the images are on.
@@ -1150,7 +1149,7 @@ pub struct Storage {
 }
 
 /// POST /v1/storage/delete: what to take off this machine's disk.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageDelete {
     /// Layers ("template:<id>", "custom:<id>"): each one's image and its
@@ -1174,7 +1173,7 @@ pub struct StorageDelete {
 }
 
 /// POST /v1/storage/delete and /v1/storage/prune: what went.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Freed {
     /// The images removed: a layer's ("template:<id>"), or an old build's id.
@@ -1191,7 +1190,7 @@ pub struct Freed {
     pub bytes: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageBytes {
     #[serde(rename = "ref")]
@@ -1200,7 +1199,7 @@ pub struct ImageBytes {
     pub bytes: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LayerBytes {
     /// "template:<id>" or "custom:<id>".
@@ -1212,7 +1211,7 @@ pub struct LayerBytes {
     pub own_bytes: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeBytes {
     pub workspace_id: String,
@@ -1221,7 +1220,7 @@ pub struct HomeBytes {
 }
 
 /// A part of the disk that isn't the wadspaces' layers, homes or copies.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OtherPart {
     /// "system", "update-copy", "images", "shared", "containers", "volumes",
@@ -1237,7 +1236,7 @@ pub struct OtherPart {
     pub deletable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OtherItem {
     /// An image's id, or a volume's name.
@@ -1248,7 +1247,7 @@ pub struct OtherItem {
     pub deletable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyBytes {
     pub id: String,
@@ -1256,7 +1255,7 @@ pub struct CopyBytes {
 }
 
 /// GET /v1/logs/unit/{unit} and /v1/logs/workspace/{id}: redacted text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogText {
     pub text: String,

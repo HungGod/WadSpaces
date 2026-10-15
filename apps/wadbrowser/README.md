@@ -103,9 +103,9 @@ The same program, built twice:
 - **Inside wadspaces** (`images/build.sh`, no features): dark in WadSpaces'
   colours, always, with no logo; its own look, nothing of the machine's. Its
   icon is the light WadSpaces mark (`icons/`, from
-  `apps/client/public/brand/wadspaces-icon-light-transparent.svg`).
+  `assets/public/brand/wadspaces-icon-light-transparent.svg`).
 - **On the machine** (`host/build.sh`, `--features host`): WadBrowser's own
-  logo (`apps/client/public/brand/wadbrowser-logo-{dark,light}.svg`) on its
+  logo (`assets/public/brand/wadbrowser-logo-{dark,light}.svg`) on its
   home page, and light or dark as WadSpaces is: it follows the WadSpaces
   Client's `~/.config/wadspaces/theme` (src/theme.rs). The pages carry it as
   `data-theme` (WebKit's `prefers-color-scheme` follows the desktop's

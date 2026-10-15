@@ -49,11 +49,11 @@ use theme::Theme;
 use wad_clip::{Change, Content};
 use wadd::{Incoming, Wadd};
 
-/// The WadSpaces logo mark for each theme (apps/client/public/brand), 128 px.
+/// The WadSpaces logo mark for each theme (assets/public/brand), 128 px.
 const LOGO_DARK: &[u8] = include_bytes!("../assets/logo-dark.png");
 const LOGO_LIGHT: &[u8] = include_bytes!("../assets/logo-light.png");
 /// WadNotes' icon (64 px) and logo (96 px tall), each theme's
-/// (apps/client/public/brand/wadnotes-*.svg).
+/// (assets/public/brand/wadnotes-*.svg).
 const NOTES_LOGO_DARK: &[u8] = include_bytes!("../assets/wadnotes-logo-dark.png");
 const NOTES_LOGO_LIGHT: &[u8] = include_bytes!("../assets/wadnotes-logo-light.png");
 

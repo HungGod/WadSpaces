@@ -1,7 +1,7 @@
-//! The HUD in the site's colours (apps/client/src/styles/globals.css),
-//! dark or light as WadSpaces Client is: the app writes its choice to
-//! ~/.config/wadspaces/theme (src-tauri/src/theme.rs), and the HUD follows
-//! that file.
+//! The HUD in the site's colours (wad-gtk's theme), dark or light as
+//! WadSpaces Client is: the client writes its choice to
+//! ~/.config/wadspaces/theme (wad_gtk::theme), and the HUD follows that
+//! file.
 
 use std::path::PathBuf;
 

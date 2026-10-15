@@ -388,8 +388,11 @@ fn used_in(s: &AppState, users: &[KeyUser], running: &[String]) -> gtk::Widget {
                 let b = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 b.add_css_class("mini-browser");
                 b.set_size_request(48, 27);
-                let svg =
-                    wad_gtk::Svg::new(include_bytes!("../../../client/public/brand/wadbrowser-icon-dark.svg"), 16, 16);
+                let svg = wad_gtk::Svg::new(
+                    include_bytes!("../../../../assets/public/brand/wadbrowser-icon-dark.svg"),
+                    16,
+                    16,
+                );
                 svg.set_halign(gtk::Align::Center);
                 svg.set_valign(gtk::Align::Center);
                 svg.set_vexpand(true);

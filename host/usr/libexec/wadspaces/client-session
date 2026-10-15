@@ -3,20 +3,17 @@
 # ever exits, after a pause so a crash can't spin. Its output goes to the
 # journal: journalctl -b -t client.
 #
-# Until the switch there are two: the Tauri app (/usr/bin/client) and the
-# native one (/usr/bin/client-native, apps/desktop). A line "native" in
-# ~/.config/wadspaces/client (the kiosk user wad's) runs the native one.
-# It's read each time the client starts: reboot, or end the running one
-# (pkill -x client, or pkill -x client-native) and it starts again.
-#
-# The native one runs with two malloc arenas: its few threads (decoding
-# pictures) otherwise keep memory they've freed.
-pick="${XDG_CONFIG_HOME:-${HOME}/.config}/wadspaces/client"
+# It runs with two malloc arenas: its few threads (decoding pictures)
+# otherwise keep memory they've freed.
+
+# What the Tauri client left: WebKit's storage and caches, and the switch
+# that picked between it and the native one. The native client's own
+# account/ folder stays. Nothing's there after the first start.
+data="${XDG_DATA_HOME:-${HOME}/.local/share}/io.wadspaces.client"
+rm -rf "${data}"/{CacheStorage,databases,hsts-storage.sqlite,localstorage,mediakeys,storage,WebKitCache}
+rm -f "${XDG_CONFIG_HOME:-${HOME}/.config}/wadspaces/client"
+
 while true; do
-    bin=/usr/bin/client env=()
-    if [[ -x /usr/bin/client-native ]] && grep -qx native "${pick}" 2> /dev/null; then
-        bin=/usr/bin/client-native env=(MALLOC_ARENA_MAX=2)
-    fi
-    env "${env[@]}" systemd-cat -t client "${bin}" --kiosk
+    MALLOC_ARENA_MAX=2 systemd-cat -t client /usr/bin/client --kiosk
     sleep 2
 done

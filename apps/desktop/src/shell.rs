@@ -392,8 +392,8 @@ impl Shell {
 fn brand_mark() -> gtk::Widget {
     let svg = |t: Theme| -> &'static [u8] {
         match t {
-            Theme::Dark => include_bytes!("../../../apps/client/public/brand/wadspaces-icon-dark-transparent.svg"),
-            Theme::Light => include_bytes!("../../../apps/client/public/brand/wadspaces-icon-light-transparent.svg"),
+            Theme::Dark => include_bytes!("../../../assets/public/brand/wadspaces-icon-dark-transparent.svg"),
+            Theme::Light => include_bytes!("../../../assets/public/brand/wadspaces-icon-light-transparent.svg"),
         }
     };
     let mark = wad_gtk::Svg::new(svg(wad_gtk::theme::shown()), 44, 44);

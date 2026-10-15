@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/client/src-tauri", "apps/wadd", "apps/hud", "apps/wadbrowser", "apps/desktop", "apps/signin", "xtask"]
+members = ["crates/*", "apps/wadd", "apps/hud", "apps/wadbrowser", "apps/desktop", "apps/signin", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -40,16 +40,9 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "for
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Release candidates: pinned exactly, they break between rcs.
-specta = { version = "=2.0.0-rc.25", features = ["derive"] }
-specta-typescript = "=0.0.12"
-tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
-
+# WadBrowser's chrome is a Tauri window.
 tauri = "2.12"
 tauri-build = "2.7"
-tauri-plugin-single-instance = "2.5"
-tauri-plugin-dialog = "2.8"
-tauri-plugin-fs = "2.6"
 # WadBrowser drives WebKitGTK itself, beside Tauri: these must be the versions
 # wry uses, or the widgets Tauri hands back are of another type.
 gtk = "0.18"

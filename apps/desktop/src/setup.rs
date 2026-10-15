@@ -85,8 +85,8 @@ fn frame() -> Frame {
     column.set_valign(gtk::Align::Center);
     let logo_svg = |t: Theme| -> &'static [u8] {
         match t {
-            Theme::Dark => include_bytes!("../../../apps/client/public/brand/wadspaces-logo-dark.svg"),
-            Theme::Light => include_bytes!("../../../apps/client/public/brand/wadspaces-logo-light.svg"),
+            Theme::Dark => include_bytes!("../../../assets/public/brand/wadspaces-logo-dark.svg"),
+            Theme::Light => include_bytes!("../../../assets/public/brand/wadspaces-logo-light.svg"),
         }
     };
     // The lockup, as wide as the web app's (its SVG is 880×560 at 144 tall),

@@ -2,8 +2,6 @@
 //!
 //! - `ci`: everything CI checks (Rust fmt, clippy and tests; the wasm is
 //!   current and in budget; the UI's typecheck and tests).
-//! - `bindings`: regenerate the UI's TypeScript bindings
-//!   (`apps/client/src/gen/bindings.ts`) from the Tauri commands.
 //! - `wasm`: build wad-core for the UI (`apps/client/src/gen/wasm/`):
 //!   wasm-bindgen (the same version as the crate) and wasm-opt (binaryen).
 //! - `layer <layers.json> <dir>`: the build folders wadd would build a
@@ -27,10 +25,6 @@ fn run(dir: &str, cmd: &str, args: &[&str]) -> Result<(), String> {
     eprintln!("$ (cd {}) {cmd} {}", dir.display(), args.join(" "));
     let status = Command::new(cmd).args(args).current_dir(&dir).status().map_err(|e| format!("{cmd}: {e}"))?;
     if status.success() { Ok(()) } else { Err(format!("{cmd} {} failed ({status})", args.join(" "))) }
-}
-
-fn bindings() -> Result<(), String> {
-    run(".", "cargo", &["run", "--quiet", "-p", "client", "--", "--export-bindings"])
 }
 
 /// The UI's wasm stays small: raw and gzipped bytes.
@@ -104,7 +98,6 @@ fn main() -> ExitCode {
     let task = std::env::args().nth(1).unwrap_or_default();
     let result = match task.as_str() {
         "ci" => ci(),
-        "bindings" => bindings(),
         "wasm" => wasm(),
         "layer" => {
             let args: Vec<String> = std::env::args().skip(2).collect();
@@ -113,7 +106,7 @@ fn main() -> ExitCode {
                 _ => Err("usage: cargo xtask layer <layers.json> <dir>".into()),
             }
         }
-        _ => Err("usage: cargo xtask <ci|bindings|wasm|layer>".into()),
+        _ => Err("usage: cargo xtask <ci|wasm|layer>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

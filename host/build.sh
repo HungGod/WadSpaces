@@ -38,20 +38,19 @@
 # group, WadSpaces' own files in one of their own), so a drive update copies
 # only what changed. RECHUNK=0 skips it (quicker, for trying things).
 #
-# CLIENT_DIR (default apps/client): the WadSpaces Client, the kiosk's shell. Its
-# Tauri app (npm run build:app) goes into the image at /usr/bin/client. It
-# needs Rust (rustup), Node, the WebKitGTK dev packages, and the Firebase web
-# config in CLIENT_DIR/.env.local.
-#
+# The WadSpaces Client (apps/desktop, GTK4: the kiosk's shell) goes into the
+# image at /usr/bin/client, its GitHub sign-in window (apps/signin) beside it.
 # wadd (apps/wadd, the machine daemon) and the HUD (apps/hud: the bar, power
 # and Wi-Fi menus and the switcher above every window) are built here too,
-# into /usr/bin/wadd and /usr/libexec/wadspaces/hud. The HUD needs gtk4-devel
-# and gtk4-layer-shell-devel. So is WadBrowser (apps/wadbrowser), the machine's
-# own browser app, into /usr/bin/wadbrowser (the same WebKitGTK dev packages as
-# the client).
+# into /usr/bin/wadd and /usr/libexec/wadspaces/hud. So is WadBrowser
+# (apps/wadbrowser), the machine's own browser app, into /usr/bin/wadbrowser.
+# They need Rust (rustup), gtk4-devel, gtk4-layer-shell-devel and the
+# WebKitGTK dev packages.
 #
-# Baked-in secrets come from host/secrets/ (gitignored, never in the build
-# context directly):
+# Baked-in settings and secrets come from host/secrets/ (gitignored, never in
+# the build context directly):
+#   firebase.toml          the account's Firebase project, the web app's config
+#                          (api_key, project_id; required)
 #   admin_password_hash    crypt hash for `admin` (default: the one in bib-config.toml)
 # No GitHub token is baked in any more: a machine gets its token when you sign
 # in to WadSpaces Client with GitHub, or from the account.
@@ -60,7 +59,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="${IMAGE:-localhost/wadspaces-host:latest}"
-CLIENT_DIR="${CLIENT_DIR:-${ROOT}/apps/client}"
 SECRETS_DIR="${ROOT}/host/secrets"
 BIB_CONFIG="${ROOT}/host/bib-config.toml"
 TARGET="${1:-image}"
@@ -124,45 +122,29 @@ install_stripped() {
 }
 
 # Built here rather than in a container: this laptop runs Fedora 43 like the
-# image, so the app links against the same WebKitGTK. The image build runs
-# `client --version` to check that it loads.
+# image, so the apps link against the same GTK and WebKitGTK. The image build
+# runs `client --version` to check that it loads. The account's settings are
+# the web app's (public) Firebase config, from host/secrets/firebase.toml.
 stage_client() {
-    local out="${ROOT}/.build/client-app"
+    local out="${ROOT}/.build/client" firebase="${SECRETS_DIR}/firebase.toml"
     rm -rf "${out}" && mkdir -p "${out}"
     if ! command -v cargo > /dev/null && [[ -f "${HOME}/.cargo/env" ]]; then
         # shellcheck disable=SC1091
         source "${HOME}/.cargo/env"
     fi
     command -v cargo > /dev/null || { echo "cargo not found: install Rust with rustup" >&2; exit 1; }
-    [[ -f "${CLIENT_DIR}/.env.local" ]] || { echo "no ${CLIENT_DIR}/.env.local: WadSpaces Client needs the Firebase web config (see .env.example)" >&2; exit 1; }
-    echo ">> building WadSpaces Client (Tauri) in ${CLIENT_DIR}"
-    (cd "${CLIENT_DIR}" && npm ci --no-audit --no-fund && npm run build:app)
-    install_stripped "${ROOT}/target/release/client" "${out}/client"
-}
-
-# The native WadSpaces Client (apps/desktop, GTK4) and its sign-in window
-# (apps/signin), beside the Tauri one until the switch: client-session runs
-# it when ~/.config/wadspaces/client says "native". Its account settings
-# are the web app's (public) Firebase config, in firebase.toml.
-stage_desktop() {
-    local out="${ROOT}/.build/desktop" env="${CLIENT_DIR}/.env.local"
-    rm -rf "${out}" && mkdir -p "${out}"
-    [[ -f "${env}" ]] || { echo "no ${env}: the native client needs the Firebase web config (see .env.example)" >&2; exit 1; }
-    echo ">> building the native WadSpaces Client (apps/desktop, apps/signin)"
+    grep -q '^api_key = ".\+"' "${firebase}" 2> /dev/null || {
+        echo "no ${firebase} with an api_key: WadSpaces Client needs the account's Firebase" >&2
+        echo "web config (Firebase console > Project settings > Your apps > Web app):" >&2
+        echo '  api_key = "..."' >&2
+        echo '  project_id = "..."' >&2
+        exit 1
+    }
+    echo ">> building WadSpaces Client (apps/desktop, apps/signin)"
     (cd "${ROOT}" && cargo build --release --quiet -p wadspaces-desktop -p client-signin)
-    install_stripped "${ROOT}/target/release/wadspaces-desktop" "${out}/client-native"
+    install_stripped "${ROOT}/target/release/wadspaces-desktop" "${out}/client"
     install_stripped "${ROOT}/target/release/client-signin" "${out}/client-signin"
-    local key value
-    {
-        echo "# The account's Firebase project (host/build.sh, from apps/client/.env.local)."
-        for key in api_key:API_KEY project_id:PROJECT_ID auth_domain:AUTH_DOMAIN; do
-            value="$(sed -n "s/^VITE_FIREBASE_${key#*:}=//p" "${env}" | tail -n 1 | tr -d '"')"
-            echo "${key%%:*} = \"${value}\""
-        done
-        value="$(sed -n "s/^VITE_FUNCTIONS_REGION=//p" "${env}" | tail -n 1 | tr -d '"')"
-        if [[ -n "${value}" ]]; then echo "functions_region = \"${value}\""; fi
-    } > "${out}/firebase.toml"
-    grep -q '^api_key = ".\+"' "${out}/firebase.toml" || { echo "no VITE_FIREBASE_API_KEY in ${env}" >&2; exit 1; }
+    install -m 644 "${firebase}" "${out}/firebase.toml"
 }
 
 stage_wadd() {
@@ -193,20 +175,11 @@ stage_wadbrowser() {
 }
 
 # The pictures wadspaces' desktops show (wad-core's catalog icons, the brand,
-# the folder), from the client's public folder: just those, not the shots.
-# The native client reads them too, with the wallpapers and the fonts.
+# the folder) and the client's wallpapers, from assets/public, and the fonts.
 stage_assets() {
-    local out="${ROOT}/.build/assets" pub="${ROOT}/apps/client/public"
-    rm -rf "${out}" && mkdir -p "${out}/apps" "${out}/brand"
-    local f app
-    for f in "${pub}"/apps/*/icon.*; do
-        app="$(basename "$(dirname "${f}")")"
-        mkdir -p "${out}/apps/${app}" && cp "${f}" "${out}/apps/${app}/"
-    done
-    cp "${pub}"/brand/*-icon-*.svg "${out}/brand/"
-    mkdir -p "${out}/icons" && cp "${pub}"/icons/* "${out}/icons/"
-    cp "${pub}/folder.svg" "${out}/"
-    mkdir -p "${out}/wallpapers" && cp "${pub}"/wallpapers/* "${out}/wallpapers/"
+    local out="${ROOT}/.build/assets"
+    rm -rf "${out}" && mkdir -p "${out}"
+    cp -r "${ROOT}"/assets/public/. "${out}/"
     mkdir -p "${out}/fonts" && cp "${ROOT}"/assets/fonts/* "${out}/fonts/"
 }
 
@@ -462,7 +435,6 @@ case "${TARGET}" in
 esac
 
 stage_client
-stage_desktop
 stage_wadd
 stage_hud
 stage_wadbrowser

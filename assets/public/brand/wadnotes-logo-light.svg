@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 560" width="880" height="560" role="img" aria-label="wadnotes logo">
+<svg x="15" y="80" width="400" height="400" viewBox="0 0 100 100">
+<g transform="rotate(5 50 52)">
+<path d="M18 18 h54 l14 14 v56 a4 4 0 0 1 -4 4 h-64 a4 4 0 0 1 -4 -4 v-66 a4 4 0 0 1 4 -4z" transform="translate(4 5)" fill="#9a9a9a"/>
+<path d="M18 18 h54 l14 14 v56 a4 4 0 0 1 -4 4 h-64 a4 4 0 0 1 -4 -4 v-66 a4 4 0 0 1 4 -4z" fill="#d9d9d9" stroke="#0a0614" stroke-width="4.5" stroke-linejoin="round"/>
+<path d="M72 18 v14 h14z" fill="#bdbdbd" stroke="#0a0614" stroke-width="4.5" stroke-linejoin="round"/>
+<g stroke="#0a0614" stroke-width="3" stroke-linecap="round" opacity="0.55"><line x1="26" y1="76" x2="52" y2="76"/><line x1="26" y1="84" x2="66" y2="84"/></g>
+<rect x="26" y="9" width="5" height="18" rx="2.5" fill="#ffffff" stroke="#0a0614" stroke-width="3"/><rect x="38" y="9" width="5" height="18" rx="2.5" fill="#ffffff" stroke="#0a0614" stroke-width="3"/><rect x="50" y="9" width="5" height="18" rx="2.5" fill="#ffffff" stroke="#0a0614" stroke-width="3"/><rect x="62" y="9" width="5" height="18" rx="2.5" fill="#ffffff" stroke="#0a0614" stroke-width="3"/>
+<g transform="translate(50 54) scale(0.9) translate(-48 -49)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<polyline points="22,31 36,67 50,31" stroke="#0a0614" stroke-width="14"/>
+<polyline points="46,31 60,67 74,31" stroke="#0a0614" stroke-width="14"/>
+<polyline points="22,31 36,67 50,31" stroke="#ffffff" stroke-width="9"/>
+<polyline points="46,31 60,67 74,31" stroke="#ffffff" stroke-width="9"/>
+</g>
+</g>
+</svg>
+<g font-family="'Noto Sans', 'DejaVu Sans', 'Liberation Sans', sans-serif" font-weight="900">
+<text x="455" y="284" font-size="150" textLength="410" lengthAdjust="spacing" fill="#0a0614">WAD</text>
+<rect x="455" y="295" width="410" height="22" fill="#0a0614"/>
+<text x="455" y="380" font-size="66" textLength="410" lengthAdjust="spacing" fill="#0a0614">NOTES</text>
+</g>
+</svg>

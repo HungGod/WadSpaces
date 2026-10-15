@@ -1,32 +1,15 @@
-# Native client: parity and the switch
+# Native client: parity with the Tauri one
 
-The native WadSpaces Client (`apps/desktop`, GTK4) replaces the Tauri one
-(`apps/client/src-tauri`) on the machine once it does everything the Tauri
-one does. Until then the image carries both.
+The native WadSpaces Client (`apps/desktop`, GTK4) replaced the Tauri one
+(React in WebKitGTK) on the machine on 2026-10-16, after a soak on the
+Surface. It's `/usr/bin/client`, and its log is in the journal:
+`journalctl -b -t client`.
 
-## Trying it on a machine
-
-The image has `/usr/bin/client-native` beside `/usr/bin/client`.
-`client-session` runs the native one when the kiosk user's
-`~/.config/wadspaces/client` holds the line `native`. On the machine,
-open the terminal (it runs as that user, `wad`):
-
-```sh
-echo native > ~/.config/wadspaces/client
-pkill -x client           # or reboot: client-session starts it again, native
-```
-
-Back to the Tauri app:
-
-```sh
-rm ~/.config/wadspaces/client
-pkill -x client-native    # or reboot
-```
-
-The file is read each time the client starts. Signing out of the account
-doesn't restart it.
-
-Its log is in the journal: `journalctl -b -t client`.
+On its first start, `client-session` removes what the Tauri app left in
+`~/.local/share/io.wadspaces.client/` (WebKit's storage and caches; the
+native client's `account/` folder stays). Board edits the Tauri app hadn't
+saved were in that storage, and aren't carried over. `bootc rollback` goes
+back to the image before.
 
 ## What matches the web app
 
@@ -72,41 +55,15 @@ the made-up machine in `fixtures/desktop/`:
 - **Sign-out:** signing out, then in as someone else (the board, tour and
   notices start afresh).
 
-## The soak (1–2 days on the Surface)
+## Still to watch on the Surface
 
-Use it as the machine's shell for normal work. Then check:
-
-- Super+Tab and the HUD over it; the HUD's bar out and tucked.
-- A wadspace started from Home, from the launcher, and from a notice's Open.
-- A build from the Builder's bucket; a template edited and saved.
-- A focus session, and a restart in the middle of one.
-- Memory: about 60 MB idle (80 MB with the Builder open), against the
-  Tauri app's. In the headless harness on the laptop (KWin, nothing else
-  sharing GTK), it's 62 MB for an empty account and 86 MB for the sample's
-  two wadspaces, each with a picture wallpaper. On the Surface:
-  `grep Pss /proc/$(pidof client-native)/smaps_rollup`. On a laptop:
-  `dev/headless.sh measure [--tauri]`.
+- Memory: about 60 MB idle (80 MB with the Builder open). In the headless
+  harness on the laptop (KWin, nothing else sharing GTK), it's 62 MB for an
+  empty account and 86 MB for the sample's two wadspaces, each with a
+  picture wallpaper. On the Surface:
+  `grep Pss /proc/$(pidof client)/smaps_rollup`. On a laptop:
+  `dev/headless.sh measure`.
 - 0% CPU while a wadspace is on screen.
-- The renderer: `GSK_RENDERER=ngl`, `vulkan` and `cairo`, timed and watched
-  for glitches.
-
-## The switch
-
-Once the soak is clean:
-
-1. `client-session`: run the native client by default, and drop the switch.
-2. `host/build.sh`: `stage_client` builds the native client (no npm, no
-   Tauri); `stage_desktop` folds into it.
-3. Containerfile: `/usr/bin/client` becomes the native binary; drop
-   `client-native`; set `GSK_RENDERER` in `client-session` if the soak picked
-   one.
-4. Remove the Tauri app's WebKit data once. It lives in
-   `~/.local/share/io.wadspaces.client/`: `CacheStorage`, `databases`,
-   `hsts-storage.sqlite`, `localstorage`, `mediakeys`, `storage` and
-   `WebKitCache`. The native client's `account/` folder is there too: keep
-   it.
-5. Take `apps/client/src-tauri` out of the workspace.
-
-Before updating a machine, save any unsaved board edits: the Tauri app kept
-them in WebKit's storage, which isn't carried over. `bootc rollback` goes
-back.
+- The renderer: GTK's default so far. `GSK_RENDERER=ngl`, `vulkan` and
+  `cairo` (in `client-session`) are still to be timed and watched for
+  glitches.

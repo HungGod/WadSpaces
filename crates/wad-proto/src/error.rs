@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 /// What kind of failure an error is. The UI picks its wording and whether to
 /// offer a retry from this; `message` is for people.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// The request was wrong (a bad id, a missing field).
@@ -29,7 +28,7 @@ pub enum ErrorCode {
 
 /// The one error shape: wadd's API returns it as the body of a failed
 /// request, and Tauri commands reject with it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[error("{message}")]
 pub struct ApiError {
     pub code: ErrorCode,

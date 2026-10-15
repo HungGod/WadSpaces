@@ -37,7 +37,7 @@ pub fn serve(req: &webkit2gtk::URISchemeRequest) {
     req.finish(&gio::MemoryInputStream::from_bytes(&bytes), len, Some("text/html"));
 }
 
-/// WadBrowser's logo, each theme's (apps/client/public/brand), on the
+/// WadBrowser's logo, each theme's (assets/public/brand), on the
 /// machine's own WadBrowser only (the `host` feature); the page shows the
 /// one for the theme (`prefers-color-scheme`, theme.rs).
 #[cfg(feature = "host")]
@@ -47,8 +47,8 @@ fn logo() -> String {
     }
     format!(
         r#"<div class="dark">{}</div><div class="light">{}</div>"#,
-        svg(include_str!("../../client/public/brand/wadbrowser-logo-dark.svg")),
-        svg(include_str!("../../client/public/brand/wadbrowser-logo-light.svg"))
+        svg(include_str!("../../../assets/public/brand/wadbrowser-logo-dark.svg")),
+        svg(include_str!("../../../assets/public/brand/wadbrowser-logo-light.svg"))
     )
 }
 

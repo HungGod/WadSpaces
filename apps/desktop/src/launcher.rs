@@ -28,7 +28,7 @@ const PRESETS: [u32; 4] = [25, 50, 90, 120];
 
 /// Draws a view's part again.
 type Redraw = Rc<dyn Fn()>;
-const BROWSER_SVG: &[u8] = include_bytes!("../../../apps/client/public/brand/wadbrowser-icon-dark.svg");
+const BROWSER_SVG: &[u8] = include_bytes!("../../../assets/public/brand/wadbrowser-icon-dark.svg");
 
 fn fmt_minutes(m: u32) -> String {
     match (m / 60, m % 60) {

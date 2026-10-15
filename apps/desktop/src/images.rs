@@ -64,7 +64,7 @@ where
 }
 
 /// Where WadSpaces' own pictures are: the image's, else (a laptop's build)
-/// the web app's public folder.
+/// the repo's assets/public.
 fn asset(rel: &str) -> Option<Vec<u8>> {
     let rel = rel.strip_prefix('/')?;
     if rel.split('/').any(|c| c == ".." || c.is_empty()) {
@@ -72,7 +72,7 @@ fn asset(rel: &str) -> Option<Vec<u8>> {
     }
     let dirs = [
         std::path::PathBuf::from("/usr/share/wadspaces/assets"),
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../client/public"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/public"),
     ];
     dirs.iter().find_map(|d| std::fs::read(d.join(rel)).ok())
 }
