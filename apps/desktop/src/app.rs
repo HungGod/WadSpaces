@@ -165,6 +165,20 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
             settle(1000).await;
             shot(&w, &dir.join(format!("builder-{}.png", t.name())));
         }
+        // A drag: over another stack, over Delete, then into a new stack.
+        wad_gtk::theme::set(&display, wad_gtk::Theme::Dark);
+        settle(300).await;
+        if crate::pages::builder::sim::pick_up("cosmic-bodybuilding") {
+            crate::pages::builder::sim::over_stack("vanua-academy");
+            settle(400).await;
+            shot(&w, &dir.join("builder-drag-stack-dark.png"));
+            crate::pages::builder::sim::over_delete();
+            settle(400).await;
+            shot(&w, &dir.join("builder-drag-delete-dark.png"));
+            crate::pages::builder::sim::drop_after_last();
+            settle(900).await;
+            shot(&w, &dir.join("builder-dropped-dark.png"));
+        }
         crate::shell::go(crate::shell::Page::Secrets);
         for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
             wad_gtk::theme::set(&display, t);

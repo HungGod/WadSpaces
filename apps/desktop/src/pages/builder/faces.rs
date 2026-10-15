@@ -586,3 +586,11 @@ pub fn pile(stack: &Stack, modules: &[Module]) -> gtk::Box {
     }
     b
 }
+
+/// A drag's ghost, in the board's look (its styles are the board's).
+pub fn ghost(w: &impl IsA<gtk::Widget>) -> gtk::Widget {
+    let b = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    b.add_css_class("wb");
+    b.append(w);
+    b.upcast()
+}

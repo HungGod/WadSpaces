@@ -226,6 +226,7 @@ pub fn shell() -> gtk::Widget {
     centred.push(profile.clone().upcast());
     frame.add_overlay(&crate::modal::layer());
     frame.add_overlay(&crate::toast::host());
+    frame.add_overlay(&crate::drag::layer());
     launch.connect_clicked(|_| crate::launcher::open());
     let sh = Rc::new(Shell {
         side: side.clone(),

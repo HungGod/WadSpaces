@@ -6,6 +6,7 @@
 //! documents (state.rs): changes are saved as they're made, and Undo takes
 //! them back.
 
+pub mod drops;
 pub mod faces;
 pub mod state;
 
@@ -19,11 +20,17 @@ use wad_gtk::Icon;
 
 use self::faces::Face;
 use self::state::Standing;
+use crate::drag;
 use crate::modal::Modal;
 use crate::store::{AppState, Topic, store};
 use crate::ui::{self, Size, Variant};
 
 const STACK_W: i32 = faces::MOD_W + 18;
+
+thread_local! {
+    /// The row of stacks and the Delete bucket (for the snapshots' drags).
+    static WIDGETS: std::cell::RefCell<(glib::WeakRef<gtk::Box>, glib::WeakRef<gtk::Button>)> = Default::default();
+}
 
 /// The page.
 pub fn page() -> gtk::Widget {
@@ -70,7 +77,20 @@ pub fn page() -> gtk::Widget {
         b.connect_clicked(move |_| step(&row, &adj, &spring, dir));
     }
     root.append(&board);
-    root.append(&buckets());
+    let panel = drops::deleted_panel();
+    root.append(&buckets(&panel));
+    drag::target(&row, drops::GapsTarget::new(&row));
+    WIDGETS.with(|w| w.borrow_mut().0 = row.downgrade());
+    drag::autoscroll(&scroll);
+    let page = gtk::Overlay::new();
+    page.set_child(Some(&root));
+    page.add_overlay(&panel);
+    let p = panel.downgrade();
+    state::on_change(move || {
+        if let Some(p) = p.upgrade().filter(|p| p.is_visible()) {
+            drops::fill_deleted(&p);
+        }
+    });
 
     // Drawn again when the board changes; the library read into it.
     let r = row.downgrade();
@@ -105,7 +125,7 @@ pub fn page() -> gtk::Widget {
     root.connect_map(|_| state::refresh_images());
     keys(&root);
     render(&row);
-    root.upcast()
+    page.upcast()
 }
 
 fn nav_button(icon: &'static str, tip: &str) -> gtk::Button {
@@ -412,7 +432,9 @@ fn column(s: &AppState, stack: &Stack) -> gtk::Widget {
     scroll.set_vscrollbar_policy(gtk::PolicyType::External);
     scroll.set_propagate_natural_height(true);
     scroll.set_child(Some(&mods));
+    drag::autoscroll(&scroll);
     col.append(&scroll);
+    drag::target(&col, drops::StackTarget(stack.id.clone()));
 
     let foot = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     foot.add_css_class("stack-foot");
@@ -483,6 +505,43 @@ fn tile(s: &AppState, stack: &Stack, m: &Module, compact: bool) -> gtk::Widget {
     // The name renames in place.
     ui::clear(&face.name_slot);
     face.name_slot.append(&name_field(stack, m));
+    // A drag takes it and what's on top (Shift: just it).
+    let (st, id) = (stack.clone(), m.id().to_string());
+    drag::draggable(&t, move |shift| {
+        let modules = wad_board::board::grab(&st, &id, shift);
+        if modules.is_empty() {
+            return None;
+        }
+        let ghost = faces::ghost(&faces::pile(&st, &modules));
+        Some((
+            drag::Payload::Modules { modules, from: wad_board::board::From::Stack { stack_id: st.id.clone() } },
+            ghost,
+        ))
+    });
+    drag::target(&t, drops::ModuleTarget { stack_id: stack.id.clone(), module: m.clone() });
+    // Its submodules drag out of it.
+    let subs: Vec<AnySub> = match m {
+        Module::Extensions(e) => e.subs.iter().cloned().map(AnySub::App).collect(),
+        Module::Customization(c) => c.subs.iter().cloned().map(AnySub::Custom).collect(),
+        Module::Template(_) => vec![],
+    };
+    for (sub_id, w) in &face.subs {
+        let Some(sub) = subs.iter().find(|x| x.id() == sub_id).cloned() else { continue };
+        let (stack_id, layer, st) = (stack.id.clone(), m.layer(), stack.clone());
+        drag::draggable(w, move |_| {
+            let ghost: gtk::Widget = match &sub {
+                AnySub::App(a) => faces::ghost(&faces::app_window(a, None)),
+                AnySub::Custom(c) => faces::ghost(&faces::chip(&AnySub::Custom(c.clone()), Some(&st))),
+            };
+            Some((
+                drag::Payload::Sub {
+                    sub: sub.clone(),
+                    from: wad_board::board::SubFrom::Module { stack_id: stack_id.clone(), layer },
+                },
+                ghost,
+            ))
+        });
+    }
     // Ctrl+click picks it out (for Build and Delete).
     let click = gtk::GestureClick::new();
     let id = m.id().to_string();
@@ -656,7 +715,7 @@ fn fill_fixes(list: &gtk::Box, m: &Modal, stack_id: &str) {
 }
 
 /// "Are you sure?" before a whole stack is deleted.
-fn confirm_if_asked() {
+pub(super) fn confirm_if_asked() {
     let Some(ids) = state::read(|s| s.board.confirming.clone()) else { return };
     let stacks = state::read(|s| s.board.stacks.clone());
     let whole: Vec<&Stack> = stacks
@@ -732,7 +791,7 @@ fn bucket(class: &str, icon: &'static str) -> (gtk::Button, gtk::Label, gtk::Lab
 }
 
 /// Build and Delete, side by side along the bottom.
-fn buckets() -> gtk::Widget {
+fn buckets(panel: &gtk::Box) -> gtk::Widget {
     let outer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     outer.add_css_class("bottom-buckets");
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -747,24 +806,24 @@ fn buckets() -> gtk::Widget {
         }
         state::build_all(sel);
     });
+    drag::target(&build, drops::BuildTarget);
     bar.append(&build);
     let (del, d_name, d_count, d_small) = bucket("bucket-delete", "trash");
-    let pop = gtk::Popover::new();
-    pop.add_css_class("deleted-pop");
-    pop.set_has_arrow(false);
-    pop.set_position(gtk::PositionType::Top);
-    pop.set_parent(&del);
-    let p = pop.clone();
+    let p = panel.clone();
     del.connect_clicked(move |_| {
         if state::read(|s| !s.board.selected.is_empty()) {
             let n = state::edit(|b| b.delete_selected());
             state::tell(n);
             confirm_if_asked();
+        } else if p.is_visible() {
+            p.set_visible(false);
         } else {
-            fill_deleted(&p);
-            p.popup();
+            drops::fill_deleted(&p);
+            p.set_visible(true);
         }
     });
+    drag::target(&del, drops::DeleteTarget);
+    WIDGETS.with(|w| w.borrow_mut().1 = del.downgrade());
     bar.append(&del);
     let clear = ui::button("Clear selection", None, Variant::Ghost, Size::Sm);
     clear.add_css_class("wb-ghost");
@@ -853,68 +912,64 @@ fn buckets() -> gtk::Widget {
     outer.upcast()
 }
 
-/// Recently deleted: what's waiting to be dragged back.
-fn fill_deleted(pop: &gtk::Popover) {
-    let col = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    col.set_size_request(340, -1);
-    let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let t = gtk::Label::new(Some("Recently deleted"));
-    t.add_css_class("strong");
-    t.set_hexpand(true);
-    t.set_xalign(0.0);
-    head.append(&t);
-    let x = ui::icon_button("x", "Close", 14);
-    let p = pop.downgrade();
-    x.connect_clicked(move |_| {
-        if let Some(p) = p.upgrade() {
-            p.popdown();
+/// Drags made by hand, for the snapshots: a stack's customization picked
+/// up, held over another stack, then over Delete, then dropped after the
+/// last stack.
+pub mod sim {
+    use super::*;
+
+    fn descendants(w: &gtk::Widget, out: &mut Vec<gtk::Widget>) {
+        let mut c = w.first_child();
+        while let Some(x) = c {
+            out.push(x.clone());
+            descendants(&x, out);
+            c = x.next_sibling();
         }
-    });
-    head.append(&x);
-    col.append(&head);
-    let note = ui::wrapping("Drag one back onto a stack, or between two stacks, to restore it.");
-    note.add_css_class("rail-note");
-    col.append(&note);
-    let deleted = state::read(|s| s.board.deleted.clone());
-    if deleted.is_empty() {
-        let e = gtk::Label::new(Some("Nothing here."));
-        e.add_css_class("empty-note");
-        e.set_xalign(0.0);
-        col.append(&e);
     }
-    let list = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    for d in deleted.iter().take(30) {
-        let item = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        item.add_css_class("deleted-item");
-        match d {
-            Deleted::Module { module, from, .. } => {
-                let st = Stack {
-                    id: "ghost".into(),
-                    templates: if let Module::Template(t) = module { vec![t.clone()] } else { vec![] },
-                    extensions: if let Module::Extensions(e) = module { Some(e.clone()) } else { None },
-                    customization: if let Module::Customization(c) = module { Some(c.clone()) } else { None },
-                };
-                item.append(&faces::pile(&st, std::slice::from_ref(module)));
-                let l = gtk::Label::new(Some(&format!("from {from}")));
-                l.add_css_class("tiny-muted");
-                l.set_xalign(0.0);
-                item.append(&l);
-            }
-            Deleted::Sub { sub, from, .. } => {
-                item.append(&faces::chip(sub, None));
-                let l = gtk::Label::new(Some(&format!("from {from}")));
-                l.add_css_class("tiny-muted");
-                l.set_xalign(0.0);
-                item.append(&l);
-            }
+
+    fn column(id: &str) -> Option<gtk::Widget> {
+        let row = WIDGETS.with(|w| w.borrow().0.upgrade())?;
+        children(&row).find(|c| c.widget_name() == id)
+    }
+
+    pub fn pick_up(stack_id: &str) -> bool {
+        let Some(col) = column(stack_id) else { return false };
+        let mut all = vec![];
+        descendants(&col, &mut all);
+        let Some(tile) = all.into_iter().find(|w| w.has_css_class("mod-tile") && !w.has_css_class("blank")) else {
+            return false;
+        };
+        let Some(stack) = state::read(|s| s.board.stack(stack_id).cloned()) else { return false };
+        let Some(c) = stack.customization.clone() else { return false };
+        let modules = vec![Module::Customization(c)];
+        let ghost = faces::ghost(&faces::pile(&stack, &modules));
+        drag::sim::begin(
+            &tile,
+            drag::Payload::Modules { modules, from: wad_board::board::From::Stack { stack_id: stack_id.into() } },
+            ghost,
+        );
+        true
+    }
+
+    pub fn over_stack(stack_id: &str) {
+        if let Some(col) = column(stack_id) {
+            drag::sim::over(&col, 0.0, 320.0);
         }
-        list.append(&item);
     }
-    let scroll = gtk::ScrolledWindow::new();
-    scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
-    scroll.set_max_content_height(420);
-    scroll.set_propagate_natural_height(true);
-    scroll.set_child(Some(&list));
-    col.append(&scroll);
-    pop.set_child(Some(&col));
+
+    pub fn over_delete() {
+        if let Some(d) = WIDGETS.with(|w| w.borrow().1.upgrade()) {
+            drag::sim::over(&d, 0.0, 20.0);
+        }
+    }
+
+    pub fn drop_after_last() {
+        if let Some(row) = WIDGETS.with(|w| w.borrow().0.upgrade())
+            && let Some(open) =
+                std::iter::successors(row.last_child(), |w| w.prev_sibling()).find(|w| w.has_css_class("open-space"))
+        {
+            drag::sim::over(&open, 0.0, 300.0);
+        }
+        drag::sim::end(true);
+    }
 }
