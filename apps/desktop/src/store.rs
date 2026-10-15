@@ -23,6 +23,8 @@ impl Topic {
     pub const NETWORK: Topic = Topic(1 << 5);
     pub const CLOUD: Topic = Topic(1 << 6);
     pub const WADD: Topic = Topic(1 << 7);
+    /// Who's signed in, their profile, this machine's GitHub token.
+    pub const ACCOUNT: Topic = Topic(1 << 8);
     pub const NONE: Topic = Topic(0);
 
     pub fn any(self, other: Topic) -> bool {
@@ -48,6 +50,38 @@ pub struct AppState {
     pub session: Option<Session>,
     pub network: Option<NetworkStatus>,
     pub cloud: Option<CloudLink>,
+    pub account: AccountState,
+}
+
+/// The person signed in, as far as the app knows.
+#[derive(Debug, Default, Clone)]
+pub struct AccountState {
+    /// The last sign-in was looked for (the app restarted: maybe still in).
+    pub checked: bool,
+    pub user: Option<wad_account::User>,
+    pub profile: ProfileState,
+    /// This machine's GitHub token works (None: not known yet).
+    pub github: Option<bool>,
+    /// "Later" on the GitHub step.
+    pub github_later: bool,
+    /// The account's settings aren't there (no firebase.toml).
+    pub unconfigured: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub enum ProfileState {
+    #[default]
+    Unknown,
+    /// Signed in without a username yet.
+    Missing,
+    Have(wad_account::Profile),
+}
+
+impl AppState {
+    /// NetworkManager says the machine's online.
+    pub fn online(&self) -> bool {
+        self.network.as_ref().is_some_and(|n| n.connectivity == "full")
+    }
 }
 
 type Watcher = (Topic, glib::WeakRef<gtk::Widget>, Box<dyn Fn(&AppState)>);
@@ -95,6 +129,11 @@ impl Store {
                 f(&st);
             }
         }
+    }
+
+    /// What's known now.
+    pub fn read_now<T>(&self, f: impl FnOnce(&AppState) -> T) -> T {
+        f(&self.state.borrow())
     }
 
     /// Runs `f` now and whenever `topics` change, while `widget` lives.

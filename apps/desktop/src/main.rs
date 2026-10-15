@@ -7,10 +7,13 @@
 //! --kiosk     full screen, no window frame (the machine's session)
 //! --snapshot  draws each page, dark and light, to DIR/*.png and exits
 
+mod account;
 mod app;
 mod rt;
+mod setup;
 mod shell;
 mod store;
+mod ui;
 
 #[derive(Debug, Default, Clone)]
 pub struct Args {

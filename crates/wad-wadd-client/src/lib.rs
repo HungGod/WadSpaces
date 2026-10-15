@@ -12,6 +12,7 @@ use serde_json::Value;
 use wad_proto::v1::Event;
 
 mod sse;
+pub use reqwest::Method;
 pub use sse::SseParser;
 
 /// How long to wait before following the stream again after it drops.
@@ -42,7 +43,8 @@ pub struct Failure {
 
 impl Failure {
     fn unreachable(e: impl std::fmt::Display) -> Self {
-        Self { status: 0, code: "unreachable".into(), message: format!("wadd isn't answering ({e})") }
+        tracing::debug!("wadd: {e}");
+        Self { status: 0, code: "unreachable".into(), message: "wadd isn't answering.".into() }
     }
 
     fn from_body(status: u16, body: &[u8]) -> Self {

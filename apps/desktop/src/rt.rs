@@ -1,6 +1,7 @@
-//! The network side runs on tokio (two threads); GTK's loop gets its
-//! answers through channels.
+//! The network side runs on tokio (two threads); GTK awaits it from its
+//! own loop: `rt::run(fut).await` in a `glib::spawn_future_local`.
 
+use std::future::Future;
 use std::sync::OnceLock;
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -13,6 +14,16 @@ fn runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("a tokio runtime")
     })
+}
+
+/// Runs `fut` on tokio; await its answer on the GTK loop.
+pub fn run<F>(fut: F) -> impl Future<Output = F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let h = runtime().spawn(fut);
+    async move { h.await.expect("a network task panicked") }
 }
 
 /// Inside tokio, for code that spawns there itself (wadd's event stream).

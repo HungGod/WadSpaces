@@ -216,3 +216,192 @@ scrollbar slider {
 scrollbar {
   background: transparent;
 }
+
+/* ------------------------------------------------------------- buttons */
+button.btn {
+  all: unset;
+  border-radius: 12px;
+  font-weight: 500;
+  transition: background-color 150ms, color 150ms, box-shadow 150ms, filter 150ms;
+}
+button.btn.sm { min-height: 32px; padding: 0 12px; font-size: 13px; }
+button.btn.md { min-height: 40px; padding: 0 16px; font-size: 14px; }
+button.btn.lg { min-height: 48px; padding: 0 24px; font-size: 15px; }
+button.btn:active { transform: scale(0.98); }
+button.btn:disabled { opacity: 0.4; }
+button.btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: 0 8px 24px -10px var(--accent);
+}
+button.btn.primary:hover { filter: brightness(1.1); }
+button.btn.secondary {
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+button.btn.secondary:hover {
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+button.btn.ghost { color: var(--muted); }
+button.btn.ghost:hover { background: var(--surface-2); color: var(--fg); }
+
+button.github {
+  all: unset;
+  min-height: 44px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: box-shadow 150ms;
+}
+button.github:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+button.github:disabled { opacity: 0.5; }
+
+button.link {
+  all: unset;
+  color: var(--muted);
+  font-weight: 500;
+}
+button.link:hover { color: var(--fg); }
+
+/* -------------------------------------------------------------- fields */
+entry.input {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: none;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 14px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  outline: none;
+}
+entry.input:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+entry.input > text > placeholder { color: var(--faint); }
+
+.field-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+.field-hint {
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.notice, .notice-error {
+  margin-top: 16px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+.notice {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.notice-error {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.error-slot > .notice-error:first-child { margin-top: 16px; }
+
+.busy {
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.busy spinner { color: var(--muted); }
+
+.warning {
+  padding: 12px 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.warning wad-icon { color: var(--danger); margin-top: 2px; }
+
+wad-icon.accent { color: var(--accent); }
+wad-icon.faint { color: var(--faint); }
+.strong { font-weight: 600; font-size: 14px; }
+.small-muted { font-size: 12px; color: var(--muted); }
+.small-faint { font-size: 12px; color: var(--faint); }
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: var(--faint);
+}
+
+/* -------------------------------------------------- sign-in and setup */
+.auth-backdrop {
+  background:
+    radial-gradient(circle 360px at 8% 40%, rgb(255 61 129 / 0.16), transparent 70%),
+    radial-gradient(circle 320px at 96% 96%, rgb(198 255 31 / 0.08), transparent 70%),
+    radial-gradient(ellipse 960px 640px at 110% -10%, rgb(255 61 129 / 0.12), transparent 60%),
+    radial-gradient(ellipse 1120px 800px at 50% 50%, rgb(70 36 110 / 0.12), transparent 70%),
+    var(--bg);
+}
+window.theme-light .auth-backdrop { background: var(--bg); }
+
+.auth-column { padding: 24px; }
+.auth-logo { margin-bottom: 24px; }
+.auth-foot {
+  margin-top: 24px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.auth-theme { margin: 20px; }
+
+.glass-card {
+  padding: 28px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  box-shadow: 0 20px 60px -20px var(--shadow);
+}
+.card-title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+}
+.card-subtitle {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.card-body { margin-top: 24px; }
+.card-foot {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.wifi-status {
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+button.network {
+  all: unset;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+button.network:hover { background: var(--surface-2); }
+button.network.active {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+button.network.unsupported { opacity: 0.5; }
+.password-form { padding: 8px 12px; }
+.bars .bar-on { background: var(--fg); border-radius: 1px; }
+.bars .bar-off { background: var(--line-strong); border-radius: 1px; }

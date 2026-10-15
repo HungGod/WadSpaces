@@ -95,7 +95,21 @@ impl Identity {
         provider: &str,
         access_token: &str,
     ) -> Result<IdpSignIn, Error> {
-        let post_body = format!("access_token={}&providerId={}", encode(access_token), encode(provider));
+        self.idp(api_key, &format!("access_token={}&providerId={}", encode(access_token), encode(provider))).await
+    }
+
+    /// The Auth emulator's stand-in for a provider's sign-in (it can't do
+    /// GitHub's): an unsigned ID token naming the person.
+    pub async fn sign_in_with_fake_idp(
+        &self,
+        api_key: &str,
+        provider: &str,
+        claims: &Value,
+    ) -> Result<IdpSignIn, Error> {
+        self.idp(api_key, &format!("id_token={}&providerId={}", encode(&claims.to_string()), encode(provider))).await
+    }
+
+    async fn idp(&self, api_key: &str, post_body: &str) -> Result<IdpSignIn, Error> {
         let res = self
             .http
             .post(format!("{}/accounts:signInWithIdp", self.identity))

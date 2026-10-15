@@ -48,12 +48,42 @@ pub fn texture(name: &'static str, px: u32, color: &gdk::RGBA, filled: bool) -> 
 /// GTK would start a loader process (glycin) for each one.
 pub fn svg_texture(svg: &[u8], px: u32) -> Option<gdk::Texture> {
     let pm = render(std::str::from_utf8(svg).ok()?, px)?;
-    Some(premultiplied(pm, px))
+    Some(premultiplied(pm, px, px))
+}
+
+/// An SVG `height` pixels tall, as wide as its shape makes it.
+pub fn svg_texture_tall(svg: &[u8], height: u32) -> Option<gdk::Texture> {
+    use resvg::{tiny_skia, usvg};
+    let text = std::str::from_utf8(svg).ok()?;
+    let tree = usvg::Tree::from_str(text, &options(text)).ok()?;
+    let k = height as f32 / tree.size().height();
+    let width = (tree.size().width() * k).ceil() as u32;
+    let mut pm = tiny_skia::Pixmap::new(width, height)?;
+    resvg::render(&tree, tiny_skia::Transform::from_scale(k, k), &mut pm.as_mut());
+    Some(premultiplied(pm, width, height))
+}
+
+/// How SVGs are read: with the system's fonts when one has text in it (the
+/// logos' lockups), looked up once; icons never need them.
+fn options(svg: &str) -> resvg::usvg::Options<'static> {
+    use std::sync::{Arc, OnceLock};
+    static FONTS: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
+    let mut o = resvg::usvg::Options::default();
+    if svg.contains("<text") {
+        o.fontdb = FONTS
+            .get_or_init(|| {
+                let mut db = resvg::usvg::fontdb::Database::new();
+                db.load_system_fonts();
+                Arc::new(db)
+            })
+            .clone();
+    }
+    o
 }
 
 fn render(svg: &str, px: u32) -> Option<resvg::tiny_skia::Pixmap> {
     use resvg::{tiny_skia, usvg};
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let tree = usvg::Tree::from_str(svg, &options(svg)).ok()?;
     let mut pm = tiny_skia::Pixmap::new(px, px)?;
     let (w, h) = (tree.size().width(), tree.size().height());
     let k = px as f32 / w.max(h);
@@ -63,9 +93,9 @@ fn render(svg: &str, px: u32) -> Option<resvg::tiny_skia::Pixmap> {
     Some(pm)
 }
 
-fn premultiplied(pm: resvg::tiny_skia::Pixmap, px: u32) -> gdk::Texture {
+fn premultiplied(pm: resvg::tiny_skia::Pixmap, w: u32, h: u32) -> gdk::Texture {
     let bytes = glib::Bytes::from_owned(pm.take());
-    gdk::MemoryTexture::new(px as i32, px as i32, gdk::MemoryFormat::R8g8b8a8Premultiplied, &bytes, px as usize * 4)
+    gdk::MemoryTexture::new(w as i32, h as i32, gdk::MemoryFormat::R8g8b8a8Premultiplied, &bytes, w as usize * 4)
         .upcast()
 }
 
@@ -86,7 +116,7 @@ fn draw(svg: &str, px: u32, [r, g, b, a]: [u8; 4]) -> Option<gdk::Texture> {
             .unwrap_or(*p);
         }
     }
-    Some(premultiplied(pm, px))
+    Some(premultiplied(pm, px, px))
 }
 
 mod imp {
@@ -170,6 +200,90 @@ impl Icon {
     pub fn set_size(&self, size: i32) {
         if self.imp().size.replace(size) != size {
             self.queue_resize();
+        }
+    }
+}
+
+mod svg_imp {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct Svg {
+        pub data: Cell<&'static [u8]>,
+        pub size: Cell<(i32, i32)>,
+        /// The last drawing, and the pixel size it was made at.
+        pub drawn: RefCell<Option<((u32, u32), gdk::Texture)>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Svg {
+        const NAME: &'static str = "WadSvg";
+        type Type = super::Svg;
+        type ParentType = gtk::Widget;
+
+        fn class_init(klass: &mut Self::Class) {
+            klass.set_css_name("wad-svg");
+            klass.set_accessible_role(gtk::AccessibleRole::Img);
+        }
+    }
+
+    impl ObjectImpl for Svg {}
+
+    impl WidgetImpl for Svg {
+        fn measure(&self, o: gtk::Orientation, _: i32) -> (i32, i32, i32, i32) {
+            let (w, h) = self.size.get();
+            let s = if o == gtk::Orientation::Horizontal { w } else { h };
+            (s, s, -1, -1)
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let w = self.obj();
+            let (lw, lh) = self.size.get();
+            let k = w.scale_factor();
+            let px = ((lw * k) as u32, (lh * k) as u32);
+            let mut drawn = self.drawn.borrow_mut();
+            if drawn.as_ref().is_none_or(|(at, _)| *at != px) {
+                *drawn = render_fit(self.data.get(), px).map(|t| (px, t));
+            }
+            if let Some((_, t)) = drawn.as_ref() {
+                snapshot.append_texture(t, &graphene::Rect::new(0.0, 0.0, lw as f32, lh as f32));
+            }
+        }
+    }
+
+    /// The SVG fitted into `w`×`h` pixels, centred.
+    fn render_fit(svg: &[u8], (w, h): (u32, u32)) -> Option<gdk::Texture> {
+        use resvg::{tiny_skia, usvg};
+        let text = std::str::from_utf8(svg).ok()?;
+        let tree = usvg::Tree::from_str(text, &options(text)).ok()?;
+        let (sw, sh) = (tree.size().width(), tree.size().height());
+        let k = (w as f32 / sw).min(h as f32 / sh);
+        let mut pm = tiny_skia::Pixmap::new(w.max(1), h.max(1))?;
+        let t = tiny_skia::Transform::from_row(k, 0.0, 0.0, k, (w as f32 - sw * k) / 2.0, (h as f32 - sh * k) / 2.0);
+        resvg::render(&tree, t, &mut pm.as_mut());
+        Some(premultiplied(pm, w.max(1), h.max(1)))
+    }
+}
+
+glib::wrapper! {
+    /// A picture drawn from an SVG at `width`×`height` (sharp at any scale):
+    /// the brand's marks and logos.
+    pub struct Svg(ObjectSubclass<svg_imp::Svg>) @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl Svg {
+    pub fn new(data: &'static [u8], width: i32, height: i32) -> Self {
+        let me: Self = glib::Object::new();
+        me.imp().data.set(data);
+        me.imp().size.set((width, height));
+        me
+    }
+
+    /// Another drawing in its place (the theme's other logo).
+    pub fn set(&self, data: &'static [u8]) {
+        if !std::ptr::eq(self.imp().data.replace(data), data) {
+            self.imp().drawn.borrow_mut().take();
+            self.queue_draw();
         }
     }
 }

@@ -183,6 +183,33 @@ impl Account {
         Ok(user)
     }
 
+    /// Against the emulators only: signs in as a made-up GitHub user (the
+    /// Auth emulator can't take GitHub's tokens).
+    pub async fn sign_in_emulated(&self, login: &str, github_id: &str) -> Result<User, Error> {
+        if self.cfg.emulator.is_none() {
+            return Err(Error::Firebase(wad_firebase::Error::BadProject("not the emulators".into())));
+        }
+        let claims = json!({ "sub": github_id, "screen_name": login, "name": login });
+        let got = self
+            .identity
+            .sign_in_with_fake_idp(&self.cfg.api_key, "github.com", &claims)
+            .await
+            .map_err(Error::from_auth)?;
+        let user = User {
+            uid: got.uid,
+            github_id: got.provider_uid,
+            login: got.screen_name,
+            display_name: got.display_name,
+            photo_url: got.photo_url,
+        };
+        self.keep(
+            Kept { user: user.clone(), refresh_token: got.tokens.refresh_token },
+            got.tokens.id_token,
+            got.tokens.expires_in,
+        );
+        Ok(user)
+    }
+
     /// Signed in earlier this boot (the app restarted): back in, if the
     /// session still holds.
     pub async fn restore(&self) -> Option<User> {

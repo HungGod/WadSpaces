@@ -8,6 +8,6 @@ pub mod keyed;
 pub mod spring;
 pub mod theme;
 
-pub use icon::Icon;
+pub use icon::{Icon, Svg};
 pub use spring::{Params, Spring};
 pub use theme::Theme;

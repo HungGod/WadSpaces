@@ -302,31 +302,21 @@ impl Shell {
 
 /// The WadSpaces mark, in the theme's colours.
 fn brand_mark() -> gtk::Widget {
-    let img = gtk::Image::new();
-    img.set_pixel_size(44);
-    img.add_css_class("mark");
-    let show = {
-        let img = img.clone();
-        move |t: Theme| {
-            let svg: &'static [u8] = match t {
-                Theme::Dark => include_bytes!("../../../apps/client/public/brand/wadspaces-icon-dark-transparent.svg"),
-                Theme::Light => {
-                    include_bytes!("../../../apps/client/public/brand/wadspaces-icon-light-transparent.svg")
-                }
-            };
-            // Drawn twice as big: sharp on a 2× screen.
-            if let Some(t) = wad_gtk::icon::svg_texture(svg, 88) {
-                img.set_paintable(Some(&t));
-            }
+    let svg = |t: Theme| -> &'static [u8] {
+        match t {
+            Theme::Dark => include_bytes!("../../../apps/client/public/brand/wadspaces-icon-dark-transparent.svg"),
+            Theme::Light => include_bytes!("../../../apps/client/public/brand/wadspaces-icon-light-transparent.svg"),
         }
     };
-    show(wad_gtk::theme::shown());
-    wad_gtk::theme::on_change(show);
-    img.upcast()
+    let mark = wad_gtk::Svg::new(svg(wad_gtk::theme::shown()), 44, 44);
+    mark.add_css_class("mark");
+    let m = mark.clone();
+    wad_gtk::theme::on_change(move |t| m.set(svg(t)));
+    mark.upcast()
 }
 
 /// Dark | Light (wide), or a sun/moon button (narrow).
-fn theme_toggle() -> (gtk::Box, gtk::Button) {
+pub fn theme_toggle() -> (gtk::Box, gtk::Button) {
     let wide = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     wide.add_css_class("theme-toggle");
     wide.set_homogeneous(true);

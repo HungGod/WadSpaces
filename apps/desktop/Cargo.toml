@@ -11,6 +11,7 @@ gtk = { package = "gtk4", version = "0.11", features = ["v4_20"] }
 gdk-wayland = { package = "gdk4-wayland", version = "0.11" }
 wad-gtk = { path = "../../crates/wad-gtk" }
 wad-wadd-client = { path = "../../crates/wad-wadd-client" }
+wad-account = { path = "../../crates/wad-account" }
 wad-proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -23,6 +23,7 @@ pub fn run(args: Args) -> std::process::ExitCode {
         let display = gdk::Display::default().expect("a display");
         wad_gtk::theme::install(&display, CSS);
         follow_wadd();
+        crate::account::start();
     });
     let args = Rc::new(args);
     app.connect_activate(move |app| {
@@ -50,7 +51,7 @@ fn window(app: &gtk::Application, args: &Args) -> gtk::ApplicationWindow {
         .width_request(800)
         .height_request(560)
         .build();
-    w.set_child(Some(&crate::shell::shell()));
+    w.set_child(Some(&crate::setup::gate(crate::shell::shell())));
     wad_gtk::theme::mark(&w, wad_gtk::theme::shown());
     if args.kiosk {
         w.set_decorated(false);
@@ -83,17 +84,25 @@ fn follow_wadd() {
     });
 }
 
-/// Draws the window, dark then light (and narrow), to DIR, and quits.
+/// Draws what's on screen (setup, without a sign-in), then the app, dark
+/// and light, to DIR, and quits.
 fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
     let _ = std::fs::create_dir_all(&dir);
     let w = w.clone();
     glib::spawn_future_local(async move {
         let display = WidgetExt::display(&w);
-        let settle = || glib::timeout_future(std::time::Duration::from_millis(700));
-        settle().await;
+        let settle = |ms| glib::timeout_future(std::time::Duration::from_millis(ms));
+        // The gate waits a moment for wadd.
+        settle(3600).await;
         for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
             wad_gtk::theme::set(&display, t);
-            settle().await;
+            settle(700).await;
+            shot(&w, &dir.join(format!("setup-{}.png", t.name())));
+        }
+        crate::setup::show_app();
+        for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+            wad_gtk::theme::set(&display, t);
+            settle(700).await;
             shot(&w, &dir.join(format!("shell-{}.png", t.name())));
         }
         if let Some(app) = w.application() {
