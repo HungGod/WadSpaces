@@ -5,8 +5,9 @@
 #
 # Until the switch there are two: the Tauri app (/usr/bin/client) and the
 # native one (/usr/bin/client-native, apps/desktop). A line "native" in
-# ~/.config/wadspaces/client runs the native one (read at each start: sign
-# out, or reboot, to change).
+# ~/.config/wadspaces/client (the kiosk user wad's) runs the native one.
+# It's read each time the client starts: reboot, or end the running one
+# (pkill -x client, or pkill -x client-native) and it starts again.
 #
 # The native one runs with two malloc arenas: its few threads (decoding
 # pictures) otherwise keep memory they've freed.

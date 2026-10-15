@@ -7,13 +7,24 @@ one does. Until then the image carries both.
 ## Trying it on a machine
 
 The image has `/usr/bin/client-native` beside `/usr/bin/client`.
-`client-session` runs the native one when `~/.config/wadspaces/client`
-holds the line `native`:
+`client-session` runs the native one when the kiosk user's
+`~/.config/wadspaces/client` holds the line `native`. On the machine,
+open the terminal (it runs as that user, `wad`):
 
 ```sh
-echo native > ~/.config/wadspaces/client   # then sign out, or reboot
-rm ~/.config/wadspaces/client              # back to the Tauri app
+echo native > ~/.config/wadspaces/client
+pkill -x client           # or reboot: client-session starts it again, native
 ```
+
+Back to the Tauri app:
+
+```sh
+rm ~/.config/wadspaces/client
+pkill -x client-native    # or reboot
+```
+
+The file is read each time the client starts. Signing out of the account
+doesn't restart it.
 
 Its log is in the journal: `journalctl -b -t client`.
 
