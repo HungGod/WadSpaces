@@ -558,6 +558,9 @@ button.card-half:hover { background: rgb(10 6 20 / 0.8); }
 button.card-half.card-go { border-radius: 16px 0 0 16px; box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.14); }
 button.card-half.card-go:hover { color: #c6ff1f; }
 button.card-half.card-edit { border-radius: 0 16px 16px 0; }
+/* WadSpaces' secondary magenta (the dark theme's accent-2; the overlay's
+   dark in either theme). */
+button.card-half.card-edit:hover { color: #ff3d81; }
 button.card-half:disabled { color: rgb(245 242 250 / 0.6); }
 
 button.first-wadspace {
