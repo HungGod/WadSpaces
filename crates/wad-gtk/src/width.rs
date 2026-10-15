@@ -42,7 +42,10 @@ mod imp {
             match (o, self.obj().first_child()) {
                 (gtk::Orientation::Horizontal, _) => (w, w, -1, -1),
                 (_, Some(c)) => {
-                    let (min, nat, _, _) = c.measure(o, if for_size < 0 { w } else { for_size.min(w) });
+                    // Measured at the width it'll get (never less than it needs).
+                    let (need, _, _, _) = c.measure(gtk::Orientation::Horizontal, -1);
+                    let at = if for_size < 0 { w } else { for_size.min(w) }.max(need);
+                    let (min, nat, _, _) = c.measure(o, at);
                     (min, nat, -1, -1)
                 }
                 (_, None) => (0, 0, -1, -1),
@@ -51,7 +54,10 @@ mod imp {
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             if let Some(c) = self.obj().first_child() {
-                c.allocate(width.min(self.width.get()), height, baseline, None);
+                // Never less than the child needs (mid-spring, say): what's
+                // over is clipped.
+                let (min, _, _, _) = c.measure(gtk::Orientation::Horizontal, -1);
+                c.allocate(width.min(self.width.get()).max(min), height, baseline, None);
             }
         }
     }
@@ -64,6 +70,7 @@ glib::wrapper! {
 impl Width {
     pub fn new(child: &impl IsA<gtk::Widget>, width: i32) -> Self {
         let me: Self = glib::Object::new();
+        me.set_overflow(gtk::Overflow::Hidden);
         me.imp().width.set(width);
         child.set_parent(&me);
         me

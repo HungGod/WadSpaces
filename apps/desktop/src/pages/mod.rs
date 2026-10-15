@@ -1,5 +1,6 @@
 //! The app's pages (the web app's src/pages).
 
+pub mod builder;
 pub mod home;
 pub mod machines;
 pub mod secrets;

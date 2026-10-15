@@ -1328,3 +1328,439 @@ button.text-accent { all: unset; font-size: 12px; font-weight: 500; color: var(-
 button.text-accent:hover { text-decoration: underline; }
 button.text-accent:disabled { color: var(--faint); text-decoration: none; }
 .shared { font-size: 12px; color: var(--accent); }
+
+/* ------------------------------------------------------------- builder */
+/* The board (the web app's builder.css): its layers' colours (template
+   ice, Extensions acid, Customization pink) on --kc per module. */
+.wb {
+  --ok: #c6ff1f;
+  --no: #ff5d7a;
+  --unbuilt: #ffb36b;
+  font-size: 13px;
+}
+window.theme-light .wb { --ok: #4d7a00; --unbuilt: #b8640f; }
+/* A desktop is drawn as it looks, on its dark wallpaper, in either theme. */
+window.theme-light .wb .screen, window.theme-light .wb .win, window.theme-light .wb .chip {
+  --bg: #0a0614;
+  --bg-2: #0e0919;
+  --surface: #140d22;
+  --surface-2: #1b132d;
+  --surface-3: #241a39;
+  --line: rgb(240 234 250 / 0.09);
+  --line-strong: rgb(240 234 250 / 0.18);
+  --fg: #f5f2fa;
+  --muted: rgb(245 242 250 / 0.62);
+  --faint: rgb(245 242 250 / 0.4);
+  --accent: #c6ff1f;
+  --layer-template: #7fd3ff;
+  --layer-extensions: #c6ff1f;
+  --layer-customization: #ff3d81;
+  color: var(--fg);
+}
+.wb .mod-template, .wb .add-template { --kc: var(--layer-template); }
+.wb .mod-extensions, .wb .add-extensions, .wb .chip-vscode, .wb .chip-wadbrowser, .wb .chip-tools { --kc: var(--layer-extensions); }
+.wb .mod-customization, .wb .add-customization, .wb .chip-look, .wb .chip-folders, .wb .chip-secrets { --kc: var(--layer-customization); }
+
+.wb .topbar {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.wb-title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+}
+flowbox.hints > flowboxchild { padding: 0; }
+.wb .hint { font-size: 12px; color: var(--muted); }
+.wb .kbd {
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg);
+}
+button.btn.wb-ghost { box-shadow: inset 0 0 0 1px var(--line-strong); }
+button.btn.not-saved { color: var(--unbuilt); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--unbuilt) 50%, transparent); }
+
+.wb .board {
+  background:
+    radial-gradient(ellipse 1200px 600px at 30% 0%, rgb(59 29 94 / 0.4), transparent 70%),
+    radial-gradient(ellipse 800px 500px at 100% 100%, rgb(255 61 129 / 0.07), transparent 70%),
+    var(--bg);
+}
+window.theme-light .wb .board {
+  background:
+    radial-gradient(ellipse 1200px 600px at 30% 0%, rgb(120 90 160 / 0.25), transparent 70%),
+    radial-gradient(ellipse 800px 500px at 100% 100%, rgb(255 61 129 / 0.07), transparent 70%),
+    var(--bg);
+}
+.wb .stacks { padding: 22px 50px 18px 28px; }
+button.stacks-nav {
+  all: unset;
+  min-width: 38px;
+  min-height: 64px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgb(20 13 34 / 0.85);
+  color: #f5f2fa;
+  box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.9);
+}
+button.stacks-nav > wad-icon { margin: 0 9px; }
+button.stacks-nav:hover { border-color: var(--fg); }
+
+.wb .stack {
+  padding: 8px;
+  border-radius: 20px;
+  border: 1.5px dashed transparent;
+  transition: border-color 150ms, background-color 150ms;
+}
+.wb .stack.fresh { border-color: var(--accent); background: var(--accent-soft); }
+.wb .stack.drop-could { border-color: rgb(198 255 31 / 0.25); }
+.wb .stack.drop-ok { border-color: var(--ok); background: var(--accent-soft); }
+.wb .stack.drop-no { border-color: var(--no); background: rgb(255 93 122 / 0.08); }
+button.broken-banner {
+  all: unset;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+}
+button.broken-banner:hover { background: color-mix(in srgb, var(--danger) 18%, transparent); }
+.broken-fix {
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.wb .mod-tile { border-radius: 12px; transition: transform 120ms, opacity 120ms; }
+.wb .mod-tile:hover { transform: translateY(-2px); }
+.wb .mod-tile:hover .mod {
+  border-color: color-mix(in srgb, var(--kc) 70%, transparent);
+  box-shadow: 0 14px 34px -16px color-mix(in srgb, var(--kc) 55%, transparent);
+}
+.wb .mod-tile.blank .mod { border-style: dashed; opacity: 0.8; }
+.wb .mod-tile.blank:hover .mod { opacity: 1; }
+.wb .mod-tile.selected .mod {
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 999px rgb(255 93 122 / 0.08);
+}
+.wb .mod-tile.drop-ok .mod { outline: 2px solid var(--ok); outline-offset: 2px; }
+.wb .mod-tile.drop-no .mod { outline: 2px solid var(--no); outline-offset: 2px; }
+.wb .mod-tile.drop-could .mod { outline: 1.5px dashed rgb(198 255 31 / 0.5); outline-offset: 2px; }
+
+.wb .mod {
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--kc) 32%, var(--line));
+  box-shadow: 0 12px 28px -18px rgb(0 0 0 / 0.9);
+  transition: border-color 150ms, box-shadow 150ms;
+}
+.wb .mod-bar {
+  min-height: 30px;
+  padding: 0 4px 0 10px;
+  border-radius: 11px 11px 0 0;
+  background: color-mix(in srgb, var(--kc) 13%, var(--surface-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--kc) 22%, transparent);
+}
+.wb .mod.compact { border-radius: 10px; }
+.wb .mod.compact .mod-bar { min-height: 32px; border-bottom: none; border-radius: 9px; }
+.wb .mod-layer {
+  color: var(--kc);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+}
+.wb .mod-name {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+}
+.wb .mod-name.faint { color: var(--faint); }
+.wb .mod-name.renamable { padding: 1px 4px; margin-left: -4px; border-radius: 5px; }
+.wb .mod-name.renamable:hover { background: rgb(255 255 255 / 0.08); box-shadow: inset 0 -1px 0 var(--kc); }
+entry.mod-name-input {
+  min-height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--kc);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+  outline: none;
+}
+entry.mod-name-input.clash { border-color: var(--no); }
+.wb .mod-on { font-size: 10.5px; color: var(--faint); margin-right: 6px; }
+.wb .build-tag {
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: rgb(255 179 107 / 0.18);
+  color: var(--unbuilt);
+  font-size: 10px;
+  font-weight: 700;
+}
+.wb .build-tag.building { background: rgb(198 255 31 / 0.16); color: var(--accent); }
+.wb .build-tag.update {
+  background: color-mix(in srgb, var(--layer-template) 16%, transparent);
+  color: var(--layer-template);
+}
+.wb .mod.unbuilt, .wb .mod.building { border: 1.5px dashed var(--unbuilt); }
+.wb .mod.unbuilt .mod-bar, .wb .mod.building .mod-bar {
+  background:
+    repeating-linear-gradient(135deg, rgb(255 179 107 / 0.16) 0px, rgb(255 179 107 / 0.16) 8px, transparent 8px, transparent 16px),
+    color-mix(in srgb, var(--kc) 10%, var(--surface-2));
+}
+.wb .mod.dim-screen .screen { filter: saturate(0.6) brightness(0.85); }
+
+.wb .screen { border-radius: 0 0 11px 11px; }
+.wb .screen-template {
+  background:
+    radial-gradient(circle 220px at 15% 0%, rgb(127 211 255 / 0.22), transparent 60%),
+    linear-gradient(160deg, #0d1a2b, #090d18);
+}
+.wb .screen-extensions {
+  background:
+    radial-gradient(circle 220px at 85% 0%, rgb(198 255 31 / 0.14), transparent 60%),
+    linear-gradient(160deg, #101a0c, #0a0d0f);
+}
+.wb .screen-customization { background-color: #0a0614; }
+.wb .desk { margin: 12px 10px 34px 10px; }
+.wb .desk-app { font-size: 10px; color: #f5f2fa; text-shadow: 0 1px 3px rgb(0 0 0 / 0.9); }
+.wb .desk-app.inherited { opacity: 0.4; }
+.wb .screen-empty { color: rgb(245 242 250 / 0.4); font-size: 11.5px; font-style: italic; }
+.wb .taskbar {
+  min-height: 26px;
+  padding: 0 8px;
+  background: rgb(10 6 20 / 0.8);
+}
+.wb .tray-bar { min-height: 30px; padding: 0 5px; }
+.wb .desk-small { margin: 9px 9px 36px 9px; }
+
+.wb .wins { margin: 8px; }
+.wb .win {
+  border-radius: 7px;
+  background: rgb(20 13 34 / 0.94);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 6px 14px -8px rgb(0 0 0 / 0.9);
+  color: var(--fg);
+}
+.wb .win.warn { border: 1px dashed var(--no); }
+.wb .win-bar {
+  min-height: 18px;
+  padding: 0 6px;
+  border-radius: 6px 6px 0 0;
+  background: var(--surface-3);
+  font-size: 10px;
+  font-weight: 600;
+}
+.wb .win-count { color: var(--faint); font-weight: 400; }
+.wb .win-body { padding: 5px 6px 6px 6px; min-height: 24px; }
+.wb .win-empty { font-size: 10px; color: var(--faint); font-style: italic; }
+.wb .ext { font-size: 10px; }
+.wb .ext-dot {
+  min-width: 11px;
+  min-height: 11px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  font-size: 7.5px;
+  font-weight: 700;
+}
+.wb .ext-more { font-size: 10px; color: var(--faint); }
+.wb .term { font-family: monospace; font-size: 10px; color: #b9f56d; }
+.wb .win.blank {
+  background: rgb(20 13 34 / 0.45);
+  border: 1px dashed color-mix(in srgb, var(--layer-extensions) 40%, transparent);
+  box-shadow: none;
+}
+.wb .win.blank .win-bar { background: transparent; color: var(--faint); }
+.wb .win.blank .win-empty { color: color-mix(in srgb, var(--layer-extensions) 70%, var(--faint)); font-style: normal; }
+.wb .mod.blank-mod { border-style: dashed; background: transparent; }
+.wb .mod.blank-mod .mod-bar { background: color-mix(in srgb, var(--layer-extensions) 6%, transparent); }
+.wb .mod.blank-mod.mod-customization .mod-bar { background: color-mix(in srgb, var(--layer-customization) 6%, transparent); }
+.wb .mod.blank-mod .screen-extensions { background: linear-gradient(160deg, rgb(16 26 12 / 0.45), rgb(10 13 15 / 0.45)); }
+window.theme-light .wb .mod.blank-mod .screen-extensions,
+window.theme-light .wb .mod.blank-mod .screen-customization { background: rgb(10 6 20 / 0.04); }
+window.theme-light .wb .mod.blank-mod .taskbar { background: rgb(10 6 20 / 0.06); }
+
+.wb .tray {
+  padding: 2px 7px 2px 5px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.08);
+  border: 1px solid transparent;
+  font-size: 10.5px;
+  color: #f5f2fa;
+}
+.wb .tray-icon { color: var(--layer-customization); }
+.wb .tray-title { font-weight: 600; }
+.wb .tray-detail { color: rgb(245 242 250 / 0.62); }
+.wb .tray.prompt {
+  border: 1px dashed color-mix(in srgb, var(--layer-customization) 55%, transparent);
+  background: rgb(10 6 20 / 0.55);
+  color: color-mix(in srgb, var(--layer-customization) 80%, #f5f2fa);
+  font-weight: 600;
+}
+.wb .tray.prompt.bg-prompt { padding: 5px 12px; font-size: 11.5px; }
+.wb .swatch { min-width: 12px; min-height: 12px; border-radius: 3px; border: 1px solid rgb(255 255 255 / 0.3); }
+
+.wb .chip {
+  padding: 3px 8px 3px 4px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--kc);
+  font-size: 11.5px;
+  color: var(--fg);
+}
+.wb .chip-icon { color: var(--kc); }
+.wb .chip-title { font-weight: 600; }
+.wb .chip-detail { color: var(--muted); }
+
+.wb .strip-plus, .wb .strip-more { font-size: 11px; font-weight: 600; color: var(--layer-template); }
+.wb .stack-modules > .mod-tile + .mod-tile { margin-top: 0; }
+
+.wb .stack-foot { margin-top: 10px; min-height: 28px; padding: 0 2px; }
+.wb .stack-name {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+.wb .stack-name.faint { color: var(--faint); }
+.wb .status {
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 11px;
+}
+.wb .status-ready, .wb .status-building { color: var(--accent); border-color: rgb(198 255 31 / 0.4); }
+window.theme-light .wb .status-ready { border-color: rgb(10 6 20 / 0.12); background: rgb(198 255 31 / 0.18); }
+.wb .status-unbuilt { color: var(--unbuilt); border-color: rgb(255 179 107 / 0.45); }
+.wb .status-no-template, .wb .status-broken { color: var(--danger); border-color: rgb(255 93 122 / 0.4); }
+button.status.status-update {
+  all: unset;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  color: var(--layer-template);
+  border: 1px solid color-mix(in srgb, var(--layer-template) 50%, transparent);
+  background: color-mix(in srgb, var(--layer-template) 8%, transparent);
+}
+button.status.status-update:hover { background: color-mix(in srgb, var(--layer-template) 18%, transparent); }
+button.icon-button.btn-preview {
+  min-width: 28px;
+  min-height: 26px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+button.icon-button.btn-preview > wad-icon { margin: 6px 7px; }
+button.icon-button.btn-preview:hover { box-shadow: inset 0 0 0 1px var(--fg); }
+
+button.btn.add-btn {
+  min-height: 38px;
+  border-radius: 12px;
+  border: 1.5px dashed color-mix(in srgb, var(--kc) 50%, transparent);
+  background: color-mix(in srgb, var(--kc) 5%, transparent);
+  color: color-mix(in srgb, var(--kc) 85%, var(--fg));
+  font-size: 12px;
+}
+button.btn.add-btn:hover { border-color: var(--kc); background: color-mix(in srgb, var(--kc) 12%, transparent); }
+.panel-title-sm {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+}
+.rail-note { font-size: 12px; color: var(--muted); }
+
+.wb .bottom-buckets {
+  padding: 9px 12px;
+  border-top: 1px solid var(--line);
+}
+.wb > .bottom-buckets { background: var(--bg-2); }
+button.bucket {
+  all: unset;
+  min-width: 380px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--line-strong);
+  color: var(--muted);
+  transition: background-color 150ms, border-color 150ms;
+}
+button.bucket:hover { border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+button.bucket .bucket-icon { color: var(--accent); }
+button.bucket-delete .bucket-icon { color: var(--accent-2); }
+.bucket-name { font-family: "Space Grotesk", sans-serif; font-size: 14px; font-weight: 700; color: var(--fg); }
+.bucket-small { font-size: 11.5px; color: var(--faint); }
+.bucket-count {
+  padding: 0 7px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.bucket-count.deleted-count { background: var(--accent-2); }
+button.bucket.armed {
+  border-style: solid;
+  border-color: var(--danger);
+  background: rgb(255 93 122 / 0.14);
+}
+button.bucket.armed .bucket-icon { color: var(--danger); }
+button.bucket-build.armed { border-color: var(--accent); background: rgb(198 255 31 / 0.1); }
+button.bucket-build.armed .bucket-icon { color: var(--accent); }
+popover.deleted-pop > contents {
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 20px 60px -20px var(--shadow);
+}
+.deleted-item {
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.empty-note { font-size: 11.5px; color: var(--faint); font-style: italic; }
+.fix-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+button.btn.danger-text { color: var(--danger); }
+
+/* In the light theme a blank module is a light placeholder (not a desktop
+   yet): its screen back on the page's colours. */
+window.theme-light .wb .mod.blank-mod .screen,
+window.theme-light .wb .mod.blank-mod .win {
+  --fg: #0a0614;
+  --muted: #5f5f5f;
+  --faint: #9a9a9a;
+  --line: rgb(10 6 20 / 0.09);
+  --line-strong: rgb(10 6 20 / 0.18);
+  --layer-template: #1679b8;
+  --layer-extensions: #4d7a00;
+  --layer-customization: #d81b60;
+  color: var(--fg);
+}
+window.theme-light .wb .mod.blank-mod .screen-extensions { background: color-mix(in srgb, #4d7a00 6%, #ffffff); }
+window.theme-light .wb .mod.blank-mod .screen-customization { background: color-mix(in srgb, #d81b60 5%, #ffffff); }
+window.theme-light .wb .mod.blank-mod wad-wallpaper.screen-wall { opacity: 0; }
+window.theme-light .wb .mod.blank-mod .taskbar { background: transparent; border-top: 1px dashed var(--line-strong); }
+window.theme-light .wb .mod.blank-mod .win.blank,
+window.theme-light .wb .mod.blank-mod .tray.prompt { background: rgb(255 255 255 / 0.7); }
+window.theme-light .wb .mod.blank-mod .tray.prompt { color: #d81b60; }

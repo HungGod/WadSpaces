@@ -159,6 +159,12 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
         crate::pages::machines::pick("m-desk");
         settle(800).await;
         shot(&w, &dir.join("machines-other-dark.png"));
+        crate::shell::go(crate::shell::Page::Builder);
+        for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
+            wad_gtk::theme::set(&display, t);
+            settle(1000).await;
+            shot(&w, &dir.join(format!("builder-{}.png", t.name())));
+        }
         crate::shell::go(crate::shell::Page::Secrets);
         for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
             wad_gtk::theme::set(&display, t);

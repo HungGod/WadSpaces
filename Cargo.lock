@@ -6175,6 +6175,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wad-account",
+ "wad-board",
  "wad-core",
  "wad-gtk",
  "wad-icons",

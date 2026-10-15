@@ -29,6 +29,19 @@ pub fn host() -> gtk::Box {
 }
 
 pub fn show(title: &str, body: Option<&str>, tone: Tone) {
+    make(title, body, tone, None);
+}
+
+/// A toast with a button (the Builder's Undo): pressing it does `f` and
+/// closes the toast.
+pub fn with_action(title: &str, tone: Tone, label: &str, f: impl Fn() + 'static) {
+    make(title, None, tone, Some((label, Box::new(f))));
+}
+
+/// A toast's button: its label, what it does.
+type Action<'a> = (&'a str, Box<dyn Fn()>);
+
+fn make(title: &str, body: Option<&str>, tone: Tone, action: Option<Action>) {
     let Some(host) = HOST.with(|h| h.borrow().clone()) else {
         tracing::info!("{title}: {}", body.unwrap_or(""));
         return;
@@ -63,6 +76,18 @@ pub fn show(title: &str, body: Option<&str>, tone: Tone) {
         text.append(&bl);
     }
     t.append(&text);
+    if let Some((label, f)) = action {
+        let b = crate::ui::button(label, Some("undo-2"), crate::ui::Variant::Ghost, crate::ui::Size::Sm);
+        b.set_valign(gtk::Align::Center);
+        let (tw, h) = (t.downgrade(), host.downgrade());
+        b.connect_clicked(move |_| {
+            f();
+            if let (Some(t), Some(h)) = (tw.upgrade(), h.upgrade()) {
+                h.remove(&t);
+            }
+        });
+        t.append(&b);
+    }
     let close = gtk::Button::new();
     close.add_css_class("toast-close");
     close.set_child(Some(&Icon::new("x", 14)));

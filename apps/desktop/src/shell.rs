@@ -204,7 +204,7 @@ pub fn shell() -> gtk::Widget {
             Page::Home => crate::pages::home::page(),
             Page::Machines => crate::pages::machines::page(),
             Page::Secrets => crate::pages::secrets::page(),
-            other => placeholder(other),
+            Page::Builder => crate::pages::builder::page(),
         };
         stack.add_named(&page, Some(p.id()));
     }
@@ -417,23 +417,6 @@ pub fn theme_toggle() -> (gtk::Box, gtk::Button) {
     show(wad_gtk::theme::shown());
     wad_gtk::theme::on_change(show);
     (wide, narrow)
-}
-
-fn placeholder(p: Page) -> gtk::Widget {
-    let page = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    page.add_css_class("page");
-    let title = gtk::Label::new(Some(p.label()));
-    title.add_css_class("page-title");
-    title.set_xalign(0.0);
-    let sub = gtk::Label::new(Some("Coming over from the web app."));
-    sub.add_css_class("page-subtitle");
-    sub.set_xalign(0.0);
-    page.append(&title);
-    page.append(&sub);
-    let scroll = gtk::ScrolledWindow::new();
-    scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
-    scroll.set_child(Some(&page));
-    scroll.upcast()
 }
 
 /// The sidebar's state, kept (the web app's `ws-sidebar`).

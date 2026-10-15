@@ -12,6 +12,7 @@ gdk-wayland = { package = "gdk4-wayland", version = "0.11" }
 wad-gtk = { path = "../../crates/wad-gtk" }
 wad-wadd-client = { path = "../../crates/wad-wadd-client" }
 wad-account = { path = "../../crates/wad-account" }
+wad-board.workspace = true
 wad-proto.workspace = true
 wad-core.workspace = true
 wad-icons.workspace = true

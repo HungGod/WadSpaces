@@ -158,6 +158,22 @@ pub async fn save_browser(b: serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
+/// A document written as it is (the board's plan has the library as it'll
+/// be already): `collection` is "templates", "extensions" or "wadspaces".
+pub async fn write_doc(collection: &'static str, doc: serde_json::Value) -> Result<(), String> {
+    let a = account().filter(|a| a.user().is_some()).ok_or("Sign in first.")?;
+    rt::run(async move {
+        if collection == "wadspaces" { a.save_wadspace(&doc).await } else { a.save_doc(collection, &doc).await }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Who's signed in (their uid), for stamping documents.
+pub fn uid() -> Option<String> {
+    account().and_then(|a| a.user()).map(|u| u.uid)
+}
+
 /// `d` in place of the document with its id, else at the end.
 fn put(list: &mut Vec<serde_json::Value>, d: serde_json::Value) {
     match list.iter_mut().find(|x| x["id"] == d["id"]) {
