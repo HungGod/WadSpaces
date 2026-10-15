@@ -80,6 +80,7 @@ pub fn page() -> gtk::Widget {
         let (row, adj, spring) = (row.clone(), adj.clone(), spring.clone());
         b.connect_clicked(move |_| step(&row, &adj, &spring, dir));
     }
+    crate::tour::target("board", &board);
     root.append(&board);
     let panel = drops::deleted_panel();
     PANEL.with(|p| p.set(Some(&panel)));
@@ -258,7 +259,9 @@ fn topbar() -> gtk::Widget {
     create.connect_clicked(|_| {
         let id = state::edit(|b| b.create_stack());
         state::set_created(id);
+        crate::tour::signal(crate::tour::Event::StackCreated);
     });
+    crate::tour::target("create", &create);
     bar.append(&create);
     let (u, ns) = (undo.clone(), not_saved.clone());
     let show = move || {
@@ -868,6 +871,7 @@ fn buckets(panel: &gtk::Box) -> gtk::Widget {
         state::build_all(sel);
     });
     drag::target(&build, drops::BuildTarget);
+    crate::tour::target("build", &build);
     bar.append(&build);
     let (del, d_name, d_count, d_small) = bucket("bucket-delete", "trash");
     let p = panel.clone();

@@ -197,6 +197,20 @@ pub async fn delete_doc(collection: &'static str, id: String) -> Result<(), Stri
     Ok(())
 }
 
+/// They've had the tour: so the profile says (here too).
+pub async fn set_onboarded() -> Result<(), String> {
+    let a = account().filter(|a| a.user().is_some()).ok_or("Sign in first.")?;
+    rt::run(async move { a.set_onboarded().await }).await.map_err(|e| e.to_string())?;
+    store().update(|s| match &mut s.account.profile {
+        ProfileState::Have(p) => {
+            p.onboarded = true;
+            Topic::ACCOUNT
+        }
+        _ => Topic::NONE,
+    });
+    Ok(())
+}
+
 /// A file of the signed-in person's on this machine (None: no one's in).
 pub fn data_file(name: &str) -> Option<std::path::PathBuf> {
     account().and_then(|a| a.data_file(name))

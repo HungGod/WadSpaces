@@ -337,6 +337,15 @@ impl Account {
         })
     }
 
+    /// They've had the tour (or skipped it): it doesn't start again.
+    pub async fn set_onboarded(&self) -> Result<(), Error> {
+        let user = self.user().ok_or(Error::SignedOut)?;
+        let tok = self.id_token().await?;
+        let mut data = serde_json::Map::new();
+        data.insert("onboarded".into(), true.into());
+        Ok(self.fs.patch(&tok, &format!("profiles/{}", user.uid), &data, &[]).await?)
+    }
+
     /// Claims a username: usernames/{name} and profiles/{uid} together, or
     /// neither (someone took it first).
     pub async fn claim_username(&self, username: &str, display_name: &str) -> Result<Profile, Error> {

@@ -17,6 +17,7 @@ mod images;
 mod launch;
 mod launcher;
 mod modal;
+mod notices;
 mod pages;
 mod rt;
 mod secret_slots;
@@ -27,6 +28,7 @@ mod slots;
 mod store;
 mod thumb;
 mod toast;
+mod tour;
 mod ui;
 mod wallpaper_picker;
 

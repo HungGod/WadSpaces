@@ -107,6 +107,27 @@ pub fn page() -> gtk::Widget {
     name.set_xalign(0.0);
     hello.append(&greet);
     hello.append(&name);
+    let tour = gtk::Button::new();
+    tour.add_css_class("link");
+    tour.add_css_class("tour-link");
+    tour.set_halign(gtk::Align::Start);
+    let tr = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    tr.append(&wad_gtk::Icon::new("graduation-cap", 16));
+    tr.append(&gtk::Label::new(Some("New here? Take the tour")));
+    tour.set_child(Some(&tr));
+    tour.connect_clicked(|b| {
+        if !crate::tour::running() {
+            b.set_sensitive(false);
+            crate::tour::start(false);
+            let b = b.downgrade();
+            glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
+                if let Some(b) = b.upgrade() {
+                    b.set_sensitive(true);
+                }
+            });
+        }
+    });
+    hello.append(&tour);
     head.append(&hello);
     let stats = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     stats.set_valign(gtk::Align::End);

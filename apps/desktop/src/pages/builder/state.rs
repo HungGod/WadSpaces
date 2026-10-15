@@ -424,6 +424,7 @@ pub fn build_stack(id: &str) {
             let (todo, updates) = counts;
             let plural = |n: usize| format!("{n} image{}", if n == 1 { "" } else { "s" });
             let id = id.to_string();
+            crate::tour::signal(crate::tour::Event::BuildStarted);
             glib::spawn_future_local(async move {
                 match launch::build_here(id).await {
                     Ok(()) => crate::toast::show(

@@ -129,6 +129,9 @@ pub fn shell() -> gtk::Widget {
         b.set_child(Some(&row));
         nav_box.append(&b);
         labels.push(l.clone().upcast());
+        if p == Page::Builder {
+            crate::tour::target("nav-builder", &b);
+        }
         nav.push((p, b, l));
     }
     side.append(&nav_box);
@@ -161,7 +164,7 @@ pub fn shell() -> gtk::Widget {
     let avatar = gtk::Label::new(Some("?"));
     avatar.add_css_class("avatar");
     avatar.set_valign(gtk::Align::Center);
-    profile.append(&avatar);
+    profile.append(&crate::notices::avatar_button(&avatar));
     let profile_text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     profile_text.set_hexpand(true);
     profile_text.set_valign(gtk::Align::Center);
@@ -228,7 +231,12 @@ pub fn shell() -> gtk::Widget {
     frame.add_overlay(&crate::modal::layer());
     frame.add_overlay(&crate::toast::host());
     frame.add_overlay(&crate::drag::layer());
-    launch.connect_clicked(|_| crate::launcher::open());
+    launch.connect_clicked(|_| {
+        crate::tour::signal(crate::tour::Event::LauncherOpened);
+        crate::launcher::open();
+    });
+    crate::tour::target("launcher", &launch);
+    crate::tour::attach(&frame);
     let sh = Rc::new(Shell {
         side: side.clone(),
         side_width: side_width.clone(),
@@ -281,6 +289,10 @@ pub fn shell() -> gtk::Widget {
             avatar.set_text(&p.display_name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default());
             colors.load_from_string(&format!("label.avatar {{ background: {}; }}", p.color));
             out2.set_visible(!side2.has_css_class("narrow"));
+            // New: the tour (resuming where it got to).
+            if !p.onboarded {
+                gtk::glib::idle_add_local_once(crate::tour::start_once);
+            }
         }
         None => {
             who.set_text("This machine");
@@ -297,6 +309,11 @@ pub fn shell() -> gtk::Widget {
 
 thread_local! {
     static SHELL: std::cell::RefCell<std::rc::Weak<Shell>> = const { std::cell::RefCell::new(std::rc::Weak::new()) };
+}
+
+/// The page shown.
+pub fn page() -> Option<Page> {
+    SHELL.with(|s| s.borrow().upgrade()).map(|s| s.page.get())
 }
 
 /// Shows a page (the web app's navigate).
@@ -331,6 +348,8 @@ impl Shell {
         if was_narrow != self.narrow() {
             self.relayout();
         }
+        let p2 = p;
+        gtk::glib::idle_add_local_once(move || crate::tour::page_changed(p2));
     }
 
     /// Wide or narrow: the spring moves the width; what only fits wide

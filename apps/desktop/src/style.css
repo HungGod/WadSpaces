@@ -2135,3 +2135,90 @@ popover.key-menu button.menu-item { font-size: 12.5px; }
 /* Recently deleted: bins, Empty, wadspaces deleted before. */
 button.btn.sure { box-shadow: inset 0 0 0 1px var(--danger); }
 .deleted-name { font-weight: 600; font-size: 13px; }
+
+/* ---------------------------------------------------- the HUD's room */
+/* The HUD's bar is out along the bottom right: what's there sits above it. */
+window.hud-room .toaster { margin-bottom: 68px; }
+window.hud-room .wb > .bottom-buckets { padding-bottom: 61px; }
+
+/* ------------------------------------------------------------ notices */
+button.avatar-button { all: unset; border-radius: 999px; }
+button.avatar-button:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.notice-dot {
+  min-width: 10px;
+  min-height: 10px;
+  margin: -1px -1px 0 0;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-2), 0 0 8px var(--accent);
+}
+popover.notice-bubble > contents {
+  padding: 8px 8px 8px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 20px 60px -20px var(--shadow);
+}
+popover.notice-bubble > arrow { background: var(--surface); border: 1px solid var(--line-strong); }
+.notice-title { font-size: 13px; font-weight: 600; }
+.notice-body { font-size: 11.5px; color: var(--muted); }
+popover.notices > contents { padding: 0; }
+.notices-head { padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; font-weight: 600; }
+.notice-row { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.notice-row button.notice-clear { opacity: 0; }
+.notice-row:hover button.notice-clear { opacity: 1; }
+wad-icon.accent { color: var(--accent); }
+window.theme-light wad-icon.accent { color: var(--fg); }
+
+/* ---------------------------------------------------------------- tour */
+.tour-dim { background: rgb(10 6 20 / 0.7); }
+.tour-ring {
+  border-radius: 16px;
+  border: 2px solid var(--accent);
+  animation: tour-pulse 1.4s infinite;
+}
+@keyframes tour-pulse {
+  from { box-shadow: 0 0 0 0 var(--accent-soft); }
+  to { box-shadow: 0 0 0 10px transparent; }
+}
+.tour-card {
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 30px 80px -20px var(--shadow);
+  opacity: 0;
+  transition: opacity 200ms;
+}
+.tour-card.shown { opacity: 1; }
+.tour-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+window.theme-light .tour-badge { color: var(--fg); }
+.tour-title { font-family: "Space Grotesk", sans-serif; font-size: 18px; font-weight: 700; }
+.tour-body { font-size: 14px; color: var(--muted); }
+.tour-tip {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+.tour-dot { min-width: 6px; min-height: 6px; border-radius: 999px; background: var(--line-strong); transition: min-width 200ms; }
+.tour-dot.on { min-width: 20px; background: var(--accent); }
+.tour-dot.done { background: color-mix(in srgb, var(--accent) 60%, transparent); }
+window.theme-light .tour-dot.on { background: var(--fg); }
+button.link.tour-skip { font-size: 12px; color: var(--faint); }
+button.link.tour-skip:hover { color: var(--fg); }
+button.link.tour-link { margin-top: 8px; font-size: 14px; color: var(--muted); }
+button.link.tour-link:hover { color: var(--fg); }

@@ -680,6 +680,9 @@ impl Editor {
             let (id, fresh, d) = (self.stack_id.clone(), self.fresh, self.draft());
             let n = state::edit(|b| b.save_module(&id, fresh, id == NEW, d));
             state::tell(n);
+            if id == NEW {
+                crate::tour::signal(crate::tour::Event::StackCreated);
+            }
         }
         if let Some(p) = MENU.with(|m| m.borrow().upgrade()) {
             p.popdown();

@@ -62,6 +62,7 @@ fn window(app: &gtk::Application, args: &Args) -> gtk::ApplicationWindow {
     if args.kiosk {
         w.set_decorated(false);
         w.fullscreen();
+        follow_hud(&w);
     }
     // Esc closes the top dialog (or the Builder's editor).
     let keys = gtk::EventControllerKey::new();
@@ -83,6 +84,48 @@ fn window(app: &gtk::Application, args: &Args) -> gtk::ApplicationWindow {
         }
     });
     w
+}
+
+thread_local! {
+    static HUD_MONITOR: std::cell::RefCell<Option<gtk::gio::FileMonitor>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The HUD floats its bar over the bottom right of the machine's screen.
+/// While it's out (not tucked behind its arrow; it remembers which in
+/// ~/.config/wadspaces/hud.json, no file: out), what sits along the bottom
+/// keeps clear of it (the window's `hud-room`).
+fn follow_hud(w: &gtk::ApplicationWindow) {
+    let path = wad_gtk::theme::file().with_file_name("hud.json");
+    let apply = {
+        let (w, path) = (w.downgrade(), path.clone());
+        move || {
+            #[derive(serde::Deserialize)]
+            struct Hud {
+                #[serde(default)]
+                collapsed: bool,
+            }
+            let open = std::fs::read(&path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Hud>(&b).ok())
+                .is_none_or(|h| !h.collapsed);
+            if let Some(w) = w.upgrade() {
+                if open {
+                    w.add_css_class("hud-room");
+                } else {
+                    w.remove_css_class("hud-room");
+                }
+            }
+        }
+    };
+    apply();
+    let file = gtk::gio::File::for_path(&path);
+    match file.monitor_file(gtk::gio::FileMonitorFlags::WATCH_MOVES, gtk::gio::Cancellable::NONE) {
+        Ok(m) => {
+            m.connect_changed(move |_, _, _, _| apply());
+            HUD_MONITOR.with(|h| h.replace(Some(m)));
+        }
+        Err(e) => tracing::warn!("{}: {e}", path.display()),
+    }
 }
 
 /// wadd's events, from tokio to the store on GTK's loop.
@@ -121,6 +164,24 @@ fn snapshot(w: &gtk::ApplicationWindow, dir: std::path::PathBuf) {
             settle(700).await;
             shot(&w, &dir.join(format!("shell-{}.png", t.name())));
         }
+        // The tour: its first step on Home, its second on the Builder; a
+        // notice on the avatar.
+        wad_gtk::theme::set(&display, wad_gtk::Theme::Dark);
+        crate::tour::start(false);
+        settle(900).await;
+        shot(&w, &dir.join("tour-nav-dark.png"));
+        crate::shell::go(crate::shell::Page::Builder);
+        settle(1200).await;
+        shot(&w, &dir.join("tour-board-dark.png"));
+        crate::tour::finish();
+        crate::shell::go(crate::shell::Page::Home);
+        crate::notices::notify(
+            "Cosmic Bodybuilding is built",
+            "Its image is ready on the machine",
+            Some("cosmic-bodybuilding".into()),
+        );
+        settle(700).await;
+        shot(&w, &dir.join("notice-dark.png"));
         crate::launcher::open();
         for t in [wad_gtk::Theme::Dark, wad_gtk::Theme::Light] {
             wad_gtk::theme::set(&display, t);
